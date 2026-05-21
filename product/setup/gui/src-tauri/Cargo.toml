@@ -29,3 +29,5 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 # 同一ワークスペースの shared クレートを参照
 shared = { path = "../../shared" }
+# フォルダ選択ダイアログを提供する Tauri プラグイン
+tauri-plugin-dialog = "2"

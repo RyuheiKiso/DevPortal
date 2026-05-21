@@ -2,6 +2,8 @@
 import React from "react";
 // React 18 系の DOM レンダリング API をインポート
 import ReactDOM from "react-dom/client";
+// グローバル CSS をインポートする
+import "./index.css";
 // アプリのルートコンポーネントをインポート
 import App from "./App";
 

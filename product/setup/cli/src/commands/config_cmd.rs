@@ -1,0 +1,97 @@
+// このファイルは config サブコマンドの実装を提供する
+// セットアップ設定の表示（show）と変更（set）を行う
+
+// ConfigArgs と ConfigAction 型を参照するために使用する
+use crate::args::{ConfigAction, ConfigArgs};
+
+// SetupConfig 型を参照するために使用する
+use shared::config::SetupConfig;
+
+// config コマンドのエントリポイント関数
+// args: config サブコマンドの引数（show または set 操作を含む）
+// config: セットアップ設定への可変参照（set 操作で変更するため可変参照を受け取る）
+pub fn run(args: &ConfigArgs, config: &mut SetupConfig) -> anyhow::Result<()> {
+    // 操作種別に応じた処理を実行する
+    match &args.action {
+        // show: 現在の設定を JSON 形式で表示する
+        ConfigAction::Show => {
+            // SetupConfig を JSON 文字列にシリアライズする
+            let json = serde_json::to_string_pretty(config)
+                .map_err(|e| anyhow::anyhow!("設定の JSON 変換に失敗しました: {}", e))?;
+            // JSON 形式で設定を表示する
+            println!("{}", json);
+        }
+        // set: 指定されたキーと値で設定を変更してファイルに保存する
+        ConfigAction::Set { key, value } => {
+            // キーを "." で分割してドット記法のキーパスを解析する
+            // 対応キー: verdaccio.port / backstage.frontend_port / backstage.backend_port / install_root
+            match key.as_str() {
+                // Verdaccio のポート番号を変更する
+                "verdaccio.port" => {
+                    // 値を u16 にパースする
+                    let port = value
+                        .parse::<u16>()
+                        .map_err(|_| anyhow::anyhow!("ポート番号は 0〜65535 の整数で指定してください: {}", value))?;
+                    // 設定のポート番号を更新する
+                    config.verdaccio.port = port;
+                    // 変更内容を表示する
+                    println!("verdaccio.port を {} に設定しました", port);
+                }
+                // Backstage フロントエンドのポート番号を変更する
+                "backstage.frontend_port" => {
+                    // 値を u16 にパースする
+                    let port = value
+                        .parse::<u16>()
+                        .map_err(|_| anyhow::anyhow!("ポート番号は 0〜65535 の整数で指定してください: {}", value))?;
+                    // 設定のフロントエンドポート番号を更新する
+                    config.backstage.frontend_port = port;
+                    // 変更内容を表示する
+                    println!("backstage.frontend_port を {} に設定しました", port);
+                }
+                // Backstage バックエンドのポート番号を変更する
+                "backstage.backend_port" => {
+                    // 値を u16 にパースする
+                    let port = value
+                        .parse::<u16>()
+                        .map_err(|_| anyhow::anyhow!("ポート番号は 0〜65535 の整数で指定してください: {}", value))?;
+                    // 設定のバックエンドポート番号を更新する
+                    config.backstage.backend_port = port;
+                    // 変更内容を表示する
+                    println!("backstage.backend_port を {} に設定しました", port);
+                }
+                // インストール先のルートディレクトリを変更する
+                "install_root" => {
+                    // 値を PathBuf に変換する
+                    let path = std::path::PathBuf::from(value);
+                    // 設定のインストールルートを更新する
+                    config.install_root = Some(path.clone());
+                    // 変更内容を表示する
+                    println!("install_root を {} に設定しました", path.display());
+                }
+                // 未知のキーが指定された場合はエラーを返す
+                unknown_key => {
+                    // 不明なキー名を含むエラーメッセージを返す
+                    return Err(anyhow::anyhow!(
+                        "不明なキー: '{}'. 対応キー: verdaccio.port / backstage.frontend_port / backstage.backend_port / install_root",
+                        unknown_key
+                    ));
+                }
+            }
+
+            // 変更した設定をファイルに保存する
+            // 設定ファイルのデフォルトパスを取得する
+            let config_path = shared::paths::config_file();
+
+            // 設定をファイルに書き込む
+            config
+                .save_to(&config_path)
+                .map_err(|e| anyhow::anyhow!("設定ファイルの保存に失敗しました: {}", e))?;
+
+            // 保存完了メッセージを表示する
+            println!("設定を {} に保存しました", config_path.display());
+        }
+    }
+
+    // 正常終了を示す Ok(()) を返す
+    Ok(())
+}

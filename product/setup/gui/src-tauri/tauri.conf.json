@@ -13,10 +13,12 @@
     "windows": [
       {
         "label": "main",
-        "title": "DevPortal",
-        "width": 800,
-        "height": 600,
-        "resizable": true
+        "title": "DevPortal セットアップ",
+        "width": 1024,
+        "height": 720,
+        "resizable": true,
+        "minWidth": 800,
+        "minHeight": 600
       }
     ],
     "security": {
@@ -24,8 +26,13 @@
     }
   },
   "bundle": {
-    "active": true,
+    "active": false,
     "targets": "all",
-    "icon": []
+    "icon": [],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    }
   }
 }
