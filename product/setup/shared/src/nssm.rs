@@ -115,104 +115,11 @@ impl Nssm {
         Ok(())
     }
 
-    // サービスを sc.exe + winreg を使って登録する
-    // NSSM 2.24 の nssm install は Parameters レジストリキーを作成しない場合があるため
-    // sc.exe でサービスエントリを作成し、winreg で Parameters\Application を直接書き込む
+    // nssm install <name> <exe> でサービスを SCM に登録し Parameters を初期化する
+    // requireAdministrator により管理者権限で実行されるため NSSM の SCM 操作が成功する
     pub fn install(&self, name: &str, exe: &str) -> Result<(), SetupError> {
-        // ImagePath: NSSM はサービス名を引数に受け取ることで管理対象を特定する
-        let nssm_path_str = self.nssm_path.to_string_lossy().to_string();
-        // 引用符付きの ImagePath 文字列を構築する（パスにスペースが含まれる場合に対応）
-        let bin_path = format!("\"{}\" \"{}\"", nssm_path_str, name);
-
-        // sc.exe create でサービスエントリを SCM に登録する
-        // start= demand（手動起動）で作成し、後で nssm set Start で自動起動に変更する
-        self.run_system_cmd("sc.exe", &["create", name, "binPath=", &bin_path, "start=", "demand"])?;
-
-        // winreg で NSSM の Parameters\Application キーを Rust 内から直接書き込む
-        // 外部コマンド（reg.exe）は UAC やプロセス生成の都合で失敗する場合があるため
-        // Rust の winreg クレートを使って確実にレジストリ書き込みを行う
-        self.write_nssm_app_key(name, exe)?;
-
-        Ok(())
-    }
-
-    // NSSM が「有効な管理対象サービス」と認識するための Parameters\Application を書き込む
-    // winreg クレートを使って HKLM\...\Services\<name>\Parameters に直接書き込む
-    #[cfg(windows)]
-    fn write_nssm_app_key(&self, service_name: &str, exe: &str) -> Result<(), SetupError> {
-        use winreg::RegKey;
-        use winreg::enums::{HKEY_LOCAL_MACHINE, REG_EXPAND_SZ};
-        use winreg::RegValue;
-
-        // HKLM を事前定義ハンドルとして取得する
-        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-        // Parameters サブキーのパスを構築する
-        let key_path = format!(
-            "SYSTEM\\CurrentControlSet\\Services\\{}\\Parameters",
-            service_name
-        );
-        // create_subkey はキーが存在しない場合は作成、存在する場合は開く
-        let (params_key, _) = hklm
-            .create_subkey(&key_path)
-            .map_err(|e| SetupError::Other(format!("NSSM Parameters キー作成失敗: {}", e)))?;
-
-        // Application 値を REG_EXPAND_SZ として書き込む（UTF-16LE + null terminator）
-        let exe_wide: Vec<u8> = exe
-            .encode_utf16()
-            // 文字列末尾に null terminator を追加する
-            .chain(std::iter::once(0u16))
-            // 各 u16 値を little-endian バイト列に変換する
-            .flat_map(|c| c.to_le_bytes())
-            .collect();
-        // RegValue を構築して書き込む
-        params_key
-            .set_raw_value("Application", &RegValue { bytes: exe_wide, vtype: REG_EXPAND_SZ })
-            .map_err(|e| SetupError::Other(format!("Application 値書き込み失敗: {}", e)))?;
-
-        Ok(())
-    }
-
-    // Windows 以外のプラットフォーム向けのスタブ（コンパイルエラー回避）
-    #[cfg(not(windows))]
-    fn write_nssm_app_key(&self, _service_name: &str, _exe: &str) -> Result<(), SetupError> {
-        Ok(())
-    }
-
-    // システムコマンド（sc.exe, reg.exe など）を実行するプライベートヘルパー
-    // 終了コードが 0 以外の場合は NssmFailed エラーを返す
-    fn run_system_cmd(&self, program: &str, args: &[&str]) -> Result<(), SetupError> {
-        // 指定したプログラムで Command を構築する
-        let mut cmd = Command::new(program);
-        // 引数を順番に追加する
-        for arg in args {
-            cmd.arg(arg);
-        }
-        // 標準出力をキャプチャする
-        cmd.stdout(Stdio::piped());
-        // 標準エラーをキャプチャする
-        cmd.stderr(Stdio::piped());
-        // コンソールウィンドウを非表示にする
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000);
-        }
-        // コマンドのデバッグ文字列を保持する（エラーメッセージ用）
-        let cmd_str = format!("{:?}", cmd);
-        // コマンドを実行して出力を待つ
-        let output = cmd.output().map_err(SetupError::Io)?;
-        // 終了コードが 0 以外の場合はエラーを返す
-        if !output.status.success() {
-            let combined = format!(
-                "{}\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            )
-            .trim()
-            .to_string();
-            return Err(SetupError::NssmFailed { cmd: cmd_str, output: combined });
-        }
-        Ok(())
+        // install サブコマンドでサービス登録と Parameters レジストリ初期化を一括実行する
+        self.run_nssm(&["install", name, exe])
     }
 
     // サービスのプロパティを設定する汎用メソッド
@@ -293,8 +200,9 @@ impl Nssm {
         // サービスの起動方法を自動起動（SERVICE_AUTO_START）に設定する
         self.set(name, "Start", "SERVICE_AUTO_START")?;
 
-        // サービス終了時の動作を再起動に設定する（Default は Restart）
-        self.set(name, "AppExit", "Default Restart")?;
+        // サービス終了時のデフォルト動作を再起動に設定する
+        // AppExit は <exitcode> と <action> が別引数になるため run_nssm を直接呼ぶ
+        self.run_nssm(&["set", name, "AppExit", "Default", "Restart"])?;
 
         // サービス再起動前の待機時間をミリ秒で設定する（5 秒）
         self.set(name, "AppRestartDelay", "5000")?;
