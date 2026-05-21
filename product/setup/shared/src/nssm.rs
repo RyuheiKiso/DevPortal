@@ -115,11 +115,132 @@ impl Nssm {
         Ok(())
     }
 
-    // nssm install <name> <exe> でサービスを SCM に登録し Parameters を初期化する
-    // requireAdministrator により管理者権限で実行されるため NSSM の SCM 操作が成功する
+    // サービスを SCM に登録する（クリーンアップ + 検証付き冪等インストール）
+    // 既存のサービスやレジストリ残骸をすべて除去してから nssm install を実行し
+    // Parameters\Application が正しく書き込まれたことをレジストリで事後検証する
     pub fn install(&self, name: &str, exe: &str) -> Result<(), SetupError> {
-        // install サブコマンドでサービス登録と Parameters レジストリ初期化を一括実行する
-        self.run_nssm(&["install", name, exe])
+        // ベストエフォートで既存サービスを停止する（失敗は無視）
+        let _ = self.stop(name);
+
+        // ベストエフォートで NSSM 経由のサービス削除を試みる（失敗は無視）
+        let _ = self.run_nssm(&["remove", name, "confirm"]);
+
+        // ベストエフォートで sc.exe 経由の削除を試みる（NSSM remove が失敗した場合の保険）
+        self.run_system_cmd_ignore("sc.exe", &["delete", name]);
+
+        // レジストリ残骸を再帰削除する（NSSM の Parameters 初期化を阻害しないよう先に消す）
+        self.delete_service_registry(name);
+
+        // SCM がサービス削除を内部的に完了するまで短時間待機する
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        // nssm install でサービスを SCM に登録し Parameters\Application を初期化する
+        self.run_nssm(&["install", name, exe])?;
+
+        // Parameters\Application が実際に書き込まれたことを winreg で検証する
+        // nssm install は exit 0 を返しても稀に Parameters を書かないことがあるため
+        self.verify_parameters_application(name)?;
+
+        Ok(())
+    }
+
+    // 終了コードを無視してシステムコマンドを実行するヘルパー（クリーンアップ用）
+    // sc.exe delete など、失敗してもインストールを続行すべき場面で使用する
+    fn run_system_cmd_ignore(&self, program: &str, args: &[&str]) {
+        // 指定したプログラムで Command を構築する
+        let mut cmd = Command::new(program);
+        // 引数を順番に追加する
+        for arg in args {
+            cmd.arg(arg);
+        }
+        // 出力を破棄する（エラー情報は不要）
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::null());
+        // コンソールウィンドウを非表示にする
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+        }
+        // 失敗しても Result を返さない（呼び出し元でエラーは無視する）
+        let _ = cmd.output();
+    }
+
+    // HKLM\SYSTEM\CurrentControlSet\Services\<name> をレジストリから再帰削除する
+    // nssm install の Parameters 初期化を阻害する残骸を事前に除去するために使用する
+    // 削除失敗はログ出力もせずに無視する（ベストエフォート処理）
+    #[cfg(windows)]
+    fn delete_service_registry(&self, name: &str) {
+        use winreg::RegKey;
+        use winreg::enums::HKEY_LOCAL_MACHINE;
+        // 削除対象のキーパスを構築する
+        let key_path = format!("SYSTEM\\CurrentControlSet\\Services\\{}", name);
+        // HKLM を事前定義ハンドルとして取得する
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        // delete_subkey_all はサブキーを含めて再帰的に削除する
+        let _ = hklm.delete_subkey_all(&key_path);
+    }
+
+    // Windows 以外のプラットフォーム向けのスタブ（コンパイルエラー回避）
+    #[cfg(not(windows))]
+    fn delete_service_registry(&self, _name: &str) {}
+
+    // nssm install 後に HKLM\...\Parameters\Application が存在するか winreg で検証する
+    // 値が存在しない場合は NssmFailed エラーを返して上位に伝播させる
+    #[cfg(windows)]
+    fn verify_parameters_application(&self, name: &str) -> Result<(), SetupError> {
+        use winreg::RegKey;
+        use winreg::enums::HKEY_LOCAL_MACHINE;
+        // Parameters サブキーのパスを構築する
+        let key_path = format!(
+            "SYSTEM\\CurrentControlSet\\Services\\{}\\Parameters",
+            name
+        );
+        // HKLM を事前定義ハンドルとして取得する
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        // Parameters キーを読み取り専用で開く（存在しない場合はエラー）
+        let params_key = hklm
+            .open_subkey(&key_path)
+            .map_err(|_| SetupError::NssmFailed {
+                cmd: format!(
+                    "winreg verify HKLM\\SYSTEM\\CurrentControlSet\\Services\\{}\\Parameters",
+                    name
+                ),
+                output: format!(
+                    "NSSM install は exit 0 を返したが Parameters キーが作成されていません。\
+                    \nサービス名: {}\
+                    \n古いレジストリ残骸の影響か NSSM のサイレント失敗の可能性があります。\
+                    \n管理者 PowerShell で次を実行してから再試行してください:\
+                    \n  sc.exe delete {} \
+                    \n  Remove-Item \"HKLM:\\SYSTEM\\CurrentControlSet\\Services\\{}\" -Recurse -Force",
+                    name, name, name
+                ),
+            })?;
+        // Application 値を読み出す（存在しない場合はエラー）
+        let _: String = params_key
+            .get_value("Application")
+            .map_err(|_| SetupError::NssmFailed {
+                cmd: format!(
+                    "winreg verify HKLM\\SYSTEM\\CurrentControlSet\\Services\\{}\\Parameters\\Application",
+                    name
+                ),
+                output: format!(
+                    "NSSM install は exit 0 を返したが Parameters\\Application が書き込まれていません。\
+                    \nサービス名: {}\
+                    \n古いレジストリ残骸の影響か NSSM のサイレント失敗の可能性があります。\
+                    \n管理者 PowerShell で次を実行してから再試行してください:\
+                    \n  sc.exe delete {} \
+                    \n  Remove-Item \"HKLM:\\SYSTEM\\CurrentControlSet\\Services\\{}\" -Recurse -Force",
+                    name, name, name
+                ),
+            })?;
+        Ok(())
+    }
+
+    // Windows 以外のプラットフォーム向けのスタブ（コンパイルエラー回避）
+    #[cfg(not(windows))]
+    fn verify_parameters_application(&self, _name: &str) -> Result<(), SetupError> {
+        Ok(())
     }
 
     // サービスのプロパティを設定する汎用メソッド

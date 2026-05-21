@@ -25,9 +25,6 @@ use crate::engine::{ComponentStatus, SetupEngine};
 // NSSM ラッパ構造体を参照するために使用する
 use crate::nssm::Nssm;
 
-// サービス状態を表す列挙型を参照するために使用する
-use crate::winsvc::ServiceStatus;
-
 // パス解決関数を参照するために使用する
 use crate::paths;
 
@@ -135,14 +132,6 @@ impl SetupEngine for VerdaccioEngine {
     fn install(&self, config: &SetupConfig, reporter: &Reporter) -> Result<(), SetupError> {
         // サービス名を取得する
         let service_name = self.service_name(config);
-
-        // サービスがすでにインストールされているか確認する
-        let current_status = crate::winsvc::query_service_status(&service_name);
-        // NotInstalled 以外の場合はすでにインストール済みとしてエラーを返す
-        if current_status != ServiceStatus::NotInstalled {
-            // サービスがすでに存在する場合は ServiceAlreadyInstalled エラーを返す
-            return Err(SetupError::ServiceAlreadyInstalled(service_name));
-        }
 
         // 前提条件チェックを実行する（node/npm が必要）
         let prereq = crate::prereq::check_prereqs();

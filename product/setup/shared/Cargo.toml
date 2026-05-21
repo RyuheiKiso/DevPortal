@@ -41,6 +41,8 @@ digest = "0.10"
 
 # Windows 専用の依存クレート
 [target.'cfg(windows)'.dependencies]
+# Windows レジストリ操作（NSSM Parameters\Application 検証・残骸削除に使用）
+winreg = "0.55"
 # Windows API バインディング（管理者権限確認・ShellExecuteW による runas 昇格）
 windows = { version = "0.58", features = [
     # プロセストークン取得（is_elevated 実装用）
