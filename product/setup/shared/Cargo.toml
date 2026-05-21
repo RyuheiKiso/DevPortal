@@ -1,0 +1,11 @@
+# クレートのメタデータを定義するセクション
+[package]
+# クレート名（cli/gui からは `shared` という名前で参照される）
+name = "shared"
+# バージョンはワークスペース側の定義を継承
+version.workspace = true
+# Rust edition もワークスペース側の定義を継承
+edition.workspace = true
+
+# ライブラリクレートとしてビルドする宣言（明示しなくても src/lib.rs があれば有効だが意図を明確にする）
+[lib]

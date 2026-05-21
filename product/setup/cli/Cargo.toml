@@ -1,0 +1,13 @@
+# クレートのメタデータを定義するセクション
+[package]
+# クレート名（`cargo run -p cli` で起動する際に使用）
+name = "cli"
+# バージョンはワークスペース側の定義を継承
+version.workspace = true
+# Rust edition もワークスペース側の定義を継承
+edition.workspace = true
+
+# 依存クレートを列挙するセクション
+[dependencies]
+# 同一ワークスペース内の shared クレートをパス参照で取り込む
+shared = { path = "../shared" }
