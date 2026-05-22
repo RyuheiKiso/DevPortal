@@ -600,10 +600,13 @@ impl Nssm {
     }
 
     // サービスを開始する
-    // nssm start <name> を実行する（start は NSSM の検証を受けない）
+    // sc.exe start で発火するだけで SERVICE_RUNNING への到達を待たない
+    // Backstage のように起動に時間がかかるサービスは NSSM start がタイムアウトしてエラーになるため
+    // 起動完了の確認は呼び出し元のヘルスチェック（TCP 接続確認）に委ねる
     pub fn start(&self, name: &str) -> Result<(), SetupError> {
-        // start サブコマンドの引数リストを構築して NSSM を実行する
-        self.run_nssm(&["start", name])
+        // sc.exe start を発火のみで実行し、START_PENDING 等の非エラー状態を無視する
+        self.run_system_cmd_ignore("sc.exe", &["start", name]);
+        Ok(())
     }
 
     // サービスを停止する（タイムアウト: 30 秒）
