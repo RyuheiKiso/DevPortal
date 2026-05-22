@@ -65,6 +65,8 @@ const DISPLAY_NAMES: Record<ComponentKind, string> = {
   verdaccio: 'Verdaccio',
   // Backstage の表示名
   backstage: 'Backstage',
+  // BaGet の表示名
+  baget: 'BaGet',
 };
 
 // コンポーネント種別ごとの説明文マップ
@@ -73,6 +75,8 @@ const DESCRIPTIONS: Record<ComponentKind, string> = {
   verdaccio: 'プライベート npm レジストリ',
   // Backstage の説明文
   backstage: '開発者ポータル',
+  // BaGet の説明文
+  baget: 'プライベート NuGet レジストリ',
 };
 
 // ServiceStatus を Badge の variant とラベルテキストにマッピングするオブジェクト
