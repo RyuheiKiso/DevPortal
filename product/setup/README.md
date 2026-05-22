@@ -110,7 +110,7 @@ cargo run -p cli -- config set baget.version 0.4.0-preview2
 cargo run -p cli -- config set backstage.mode build
 ```
 
-Backstage の起動モードは `dev` / `build` を選択できます。`dev` は `yarn dev` でフロントエンド開発サーバーとバックエンドを起動し、`build` はフロントエンド・バックエンドをビルドして production backend から Web UI を配信します。
+Backstage の起動モードは `dev` / `build` を選択できます。`dev` は `yarn start` でフロントエンド開発サーバーとバックエンドを起動し、`build` はフロントエンド・バックエンドをビルドして production backend から Web UI を配信します。
 
 ### JSON 出力（CI・スクリプト連携）
 

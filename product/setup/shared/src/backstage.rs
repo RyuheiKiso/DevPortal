@@ -243,7 +243,7 @@ impl SetupEngine for BackstageEngine {
         let service_name = self.service_name(config);
         // Backstage の起動モードごとの総ステップ数を決定する
         let total_steps = match config.backstage.mode {
-            // dev はビルドを行わず yarn dev をサービス化する
+            // dev はビルドを行わず yarn start をサービス化する
             BackstageMode::Dev => 8,
             // build は frontend/backend をビルドして production backend をサービス化する
             BackstageMode::Build => 10,
@@ -479,7 +479,7 @@ impl SetupEngine for BackstageEngine {
         // AppParameters を起動モードに応じて設定する
         let app_parameters = match config.backstage.mode {
             // dev は frontend/backend の開発サーバーをまとめて起動する
-            BackstageMode::Dev => "/c yarn dev",
+            BackstageMode::Dev => "/c yarn start",
             // build はビルド済み frontend を production backend から配信する
             BackstageMode::Build => "/c yarn workspace backend start --config app-config.yaml",
         };

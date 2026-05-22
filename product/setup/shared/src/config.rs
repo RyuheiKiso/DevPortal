@@ -15,7 +15,7 @@ use crate::error::SetupError;
 // JSON/TOML シリアライズ時に snake_case のキーを使用する
 #[serde(rename_all = "snake_case")]
 pub enum BackstageMode {
-    // `yarn dev` で起動するホットリロード開発モード
+    // `yarn start` で起動するホットリロード開発モード
     Dev,
     // `yarn build && yarn start` で起動するプロダクションビルドモード
     Build,
