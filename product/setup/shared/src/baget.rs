@@ -47,11 +47,13 @@ const BAGET_DOWNLOAD_URL_TEMPLATE: &str =
 
 // BaGet の appsettings.json テンプレート文字列
 // {packages_dir}, {db_dir}, {port} をそれぞれの実際の値で置換して使用する
+// Mirror セクションは BaGet 0.4.0-preview2 で必須（Enabled: false でアップストリームミラーを無効化）
 const BAGET_APPSETTINGS_TEMPLATE: &str = r#"{
   "ApiKey": "",
   "Storage": { "Type": "FileSystem", "Path": "{packages_dir}" },
   "Database": { "Type": "Sqlite", "ConnectionString": "Data Source={db_dir}/baget.db" },
   "Search": { "Type": "Database" },
+  "Mirror": { "Enabled": false },
   "Urls": "http://0.0.0.0:{port}"
 }
 "#;
@@ -65,6 +67,93 @@ pub struct BaGetEngine;
 
 // BaGetEngine のプライベートヘルパーメソッド実装ブロック
 impl BaGetEngine {
+    // dotnet.exe のフルパスを解決するヘルパーメソッド
+    // where.exe を使って PATH 上の dotnet.exe を検索し、見つからない場合は既定パスを確認する
+    fn find_dotnet_exe() -> Result<PathBuf, SetupError> {
+        // Windows 専用実装に委譲する
+        Self::find_dotnet_exe_impl()
+    }
+
+    // Windows 向けの dotnet.exe 解決実装
+    #[cfg(windows)]
+    fn find_dotnet_exe_impl() -> Result<PathBuf, SetupError> {
+        // where.exe で dotnet.exe のフルパスを検索する
+        if let Ok(output) = std::process::Command::new("where.exe")
+            .arg("dotnet.exe")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .output()
+        {
+            // where.exe が成功した場合は最初の候補パスを使用する
+            if output.status.success() {
+                let path_str = String::from_utf8_lossy(&output.stdout).to_string();
+                // 最初の行（最初に見つかったパス）を取得する
+                if let Some(first) = path_str.lines().next() {
+                    let trimmed = first.trim();
+                    // 空でなければそのパスを返す
+                    if !trimmed.is_empty() {
+                        return Ok(PathBuf::from(trimmed));
+                    }
+                }
+            }
+        }
+        // where.exe が失敗した場合は .NET のデフォルトインストールパスを確認する
+        let default_path = PathBuf::from(r"C:\Program Files\dotnet\dotnet.exe");
+        if default_path.exists() {
+            return Ok(default_path);
+        }
+        // どちらも失敗した場合はエラーを返す
+        Err(SetupError::Other(
+            ".NET ランタイムが見つかりません。.NET 8 以降をインストールしてください。\n\
+             ダウンロード: https://dotnet.microsoft.com/download/dotnet/8.0"
+                .to_string(),
+        ))
+    }
+
+    // Windows 以外のプラットフォーム向けのスタブ（テスト・CI 用）
+    #[cfg(not(windows))]
+    fn find_dotnet_exe_impl() -> Result<PathBuf, SetupError> {
+        // Unix 系環境では dotnet コマンドをそのまま返す
+        Ok(PathBuf::from("dotnet"))
+    }
+
+    // BaGet.runtimeconfig.json に rollForward: Major を追記するヘルパーメソッド
+    // BaGet 0.4.0-preview2 は .NET Core 3.1 ターゲットだが、
+    // 実環境では .NET 8 以降のみが利用可能な場合があるため Major ロールフォワードを有効にする
+    fn patch_runtimeconfig(baget_app_dir: &PathBuf) -> Result<(), SetupError> {
+        // runtimeconfig.json のパスを構築する
+        let config_path = baget_app_dir.join("BaGet.runtimeconfig.json");
+        // ファイルが存在しない場合はスキップする（旧バージョンとの互換性）
+        if !config_path.exists() {
+            return Ok(());
+        }
+        // ファイル内容を文字列として読み込む
+        let content = fs::read_to_string(&config_path).map_err(SetupError::Io)?;
+        // JSON としてパースする
+        let mut json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+            SetupError::Other(format!("BaGet.runtimeconfig.json のパースに失敗しました: {e}"))
+        })?;
+        // runtimeOptions.rollForward = "Major" を追加する（既存値は上書きする）
+        if let Some(opts) = json
+            .get_mut("runtimeOptions")
+            .and_then(|v| v.as_object_mut())
+        {
+            // Major ロールフォワードを有効にして .NET 8+ で動作できるようにする
+            opts.insert(
+                "rollForward".to_string(),
+                serde_json::Value::String("Major".to_string()),
+            );
+        }
+        // 更新した JSON を整形して書き戻す
+        let updated = serde_json::to_string_pretty(&json).map_err(|e| {
+            SetupError::Other(format!(
+                "BaGet.runtimeconfig.json のシリアライズに失敗しました: {e}"
+            ))
+        })?;
+        fs::write(&config_path, updated).map_err(SetupError::Io)?;
+        Ok(())
+    }
+
     // ヘルスチェックを TCP 接続で実施するヘルパーメソッド
     // 最大 max_retries 回リトライし、成功したら true を返す
     fn wait_for_tcp(host: &str, port: u16, max_retries: u32, interval_secs: u64) -> bool {
@@ -365,7 +454,7 @@ impl SetupEngine for BaGetEngine {
         // ステップ完了を通知する
         reporter.step_done("baget_fetch", step_t.elapsed().as_millis() as u64);
 
-        // ステップ 2: appsettings.json を生成する
+        // ステップ 2: appsettings.json と runtimeconfig.json を生成・パッチする
         let step_t = Instant::now();
         reporter.step_start("baget_config", "BaGet 設定ファイルを生成しています", 6, 2);
 
@@ -390,10 +479,20 @@ impl SetupEngine for BaGetEngine {
             // port プレースホルダを実際のポート番号に置換する
             .replace("{port}", &config.baget.port.to_string());
 
-        // appsettings.json のパスを構築する（BaGet.exe と同じディレクトリ）
+        // appsettings.json のパスを構築する（BaGet.dll と同じディレクトリ）
         let appsettings_path = baget_app_dir.join("appsettings.json");
         // appsettings.json を書き込む
         fs::write(&appsettings_path, &appsettings_content)?;
+
+        // BaGet.runtimeconfig.json に rollForward: Major を追加して .NET 8+ で動作させる
+        // BaGet 0.4.0-preview2 は .NET Core 3.1 ターゲットだが、インストール済みの .NET 8+ で起動できる
+        Self::patch_runtimeconfig(&baget_app_dir)?;
+
+        // dotnet.exe のフルパスを解決する（サービス登録で使用するため事前に取得する）
+        let dotnet_exe = Self::find_dotnet_exe()?;
+        // dotnet.exe のパス文字列を取得する
+        let dotnet_exe_str = dotnet_exe.to_string_lossy().to_string();
+
         // ステップ完了を通知する
         reporter.step_done("baget_config", step_t.elapsed().as_millis() as u64);
 
@@ -405,13 +504,14 @@ impl SetupEngine for BaGetEngine {
         let step_t = Instant::now();
         reporter.step_start("nssm_install", "NSSM サービス登録", 6, 3);
 
-        // BaGet.exe のフルパスを構築する
-        let baget_exe = baget_app_dir.join("BaGet.exe");
-        // BaGet.exe のパス文字列を取得する
-        let baget_exe_str = baget_exe.to_string_lossy().to_string();
+        // BaGet.dll のフルパスを構築する（dotnet コマンドの引数として渡す）
+        // BaGet 0.4.0-preview2 はフレームワーク依存デプロイメントのため BaGet.exe は存在しない
+        let baget_dll = baget_app_dir.join("BaGet.dll");
+        // BaGet.dll のパス文字列を取得する
+        let baget_dll_str = baget_dll.to_string_lossy().to_string();
 
-        // nssm install でサービスを登録する
-        nssm.install(&service_name, &baget_exe_str, reporter)?;
+        // nssm install でサービスを dotnet.exe として登録する
+        nssm.install(&service_name, &dotnet_exe_str, reporter)?;
 
         // 作業ディレクトリのパス文字列を取得する
         let baget_app_dir_str = baget_app_dir.to_string_lossy().to_string();
@@ -441,6 +541,11 @@ impl SetupEngine for BaGetEngine {
             // 追加環境変数（ASPNETCORE_ENVIRONMENT を Production に設定する）
             &[("ASPNETCORE_ENVIRONMENT", "Production")],
         )?;
+
+        // AppParameters に BaGet.dll のパスを設定する（dotnet の引数として渡す）
+        // nssm は Application=dotnet.exe、AppParameters=BaGet.dll として起動する
+        nssm.set(&service_name, "AppParameters", &baget_dll_str)?;
+
         // ステップ完了を通知する
         reporter.step_done("nssm_install", step_t.elapsed().as_millis() as u64);
 
