@@ -16,8 +16,8 @@ use std::net::{SocketAddr, ToSocketAddrs};
 // DNS 解決タイムアウトのためにスレッドとチャネルをインポートする
 use std::sync::mpsc;
 
-// 標準時間型をインポートする（タイムアウト・待機処理に使用）
-use std::time::Duration;
+// 標準時間型をインポートする（タイムアウト・待機処理・経過時間計測に使用）
+use std::time::{Duration, Instant};
 
 // ファイルシステムパスを扱うために PathBuf を使用する
 use std::path::PathBuf;
@@ -296,10 +296,11 @@ impl SetupEngine for BaGetEngine {
         let service_name = self.service_name(config);
 
         // ステップ 0: 必要なディレクトリを作成する
+        let step_t = Instant::now();
         reporter.step_start(
             "baget_dirs",
             "BaGet ディレクトリを作成しています",
-            5,
+            6,
             0,
         );
 
@@ -320,12 +321,15 @@ impl SetupEngine for BaGetEngine {
         fs::create_dir_all(&baget_data_dir)?;
         // ログ出力ディレクトリを再帰的に作成する
         fs::create_dir_all(&baget_logs_dir)?;
+        // ステップ完了を通知する
+        reporter.step_done("baget_dirs", step_t.elapsed().as_millis() as u64);
 
         // ステップ 1: BaGet をダウンロードして展開する
+        let step_t = Instant::now();
         reporter.step_start(
             "baget_fetch",
             "BaGet をダウンロードしています",
-            5,
+            6,
             1,
         );
 
@@ -366,12 +370,15 @@ impl SetupEngine for BaGetEngine {
             // 一時 ZIP ファイルを削除する（失敗してもエラーにしない）
             let _ = fs::remove_file(&tmp_zip);
         }
+        // ステップ完了を通知する
+        reporter.step_done("baget_fetch", step_t.elapsed().as_millis() as u64);
 
         // ステップ 2: appsettings.json を生成する
+        let step_t = Instant::now();
         reporter.step_start(
             "baget_config",
             "BaGet 設定ファイルを生成しています",
-            5,
+            6,
             2,
         );
 
@@ -400,13 +407,16 @@ impl SetupEngine for BaGetEngine {
         let appsettings_path = baget_app_dir.join("appsettings.json");
         // appsettings.json を書き込む
         fs::write(&appsettings_path, &appsettings_content)?;
+        // ステップ完了を通知する
+        reporter.step_done("baget_config", step_t.elapsed().as_millis() as u64);
 
         // ステップ 3: NSSM を確保してサービスを登録する
-        reporter.step_start("nssm_fetch", "NSSM を確保しています", 5, 3);
-        // Nssm::ensure はキャッシュ確認 → 必要なら自動ダウンロードを行う
+        // Nssm::ensure はキャッシュ確認 → 必要なら自動ダウンロードを行い step_start/step_done を送出する
         let nssm = Nssm::ensure(reporter)?;
-        // NSSM 確保完了後にサービス登録ステップを開始する
-        reporter.step_start("nssm_install", "NSSM サービス登録", 5, 3);
+
+        // ステップ 4: NSSM サービス登録
+        let step_t = Instant::now();
+        reporter.step_start("nssm_install", "NSSM サービス登録", 6, 3);
 
         // BaGet.exe のフルパスを構築する
         let baget_exe = baget_app_dir.join("BaGet.exe");
@@ -444,14 +454,20 @@ impl SetupEngine for BaGetEngine {
             // 追加環境変数（ASPNETCORE_ENVIRONMENT を Production に設定する）
             &[("ASPNETCORE_ENVIRONMENT", "Production")],
         )?;
+        // ステップ完了を通知する
+        reporter.step_done("nssm_install", step_t.elapsed().as_millis() as u64);
 
-        // ステップ 4: サービスを起動してヘルスチェックを実施する
-        reporter.step_start("service_start", "サービスを起動しています", 5, 4);
+        // ステップ 5: サービスを起動する
+        let step_t = Instant::now();
+        reporter.step_start("service_start", "サービスを起動しています", 6, 4);
         // nssm start でサービスを起動する
         nssm.start(&service_name)?;
+        // ステップ完了を通知する
+        reporter.step_done("service_start", step_t.elapsed().as_millis() as u64);
 
-        // ヘルスチェックを開始する
-        reporter.step_start("health_check", "ヘルスチェック待機中", 5, 4);
+        // ステップ 6: ヘルスチェック
+        let step_t = Instant::now();
+        reporter.step_start("health_check", "ヘルスチェック待機中", 6, 5);
         // TCP 接続で BaGet が応答するまで待機する（最大 30 秒・1 秒ごとにリトライ）
         let reachable = Self::wait_for_tcp("127.0.0.1", config.baget.port, 30, 1);
         // ヘルスチェック結果をログに記録する
@@ -471,6 +487,8 @@ impl SetupEngine for BaGetEngine {
                 ),
             );
         }
+        // ステップ完了を通知する
+        reporter.step_done("health_check", step_t.elapsed().as_millis() as u64);
 
         // インストール完了イベントを送信する
         reporter.finished(

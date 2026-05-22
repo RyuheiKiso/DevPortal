@@ -80,10 +80,12 @@ function computeState(events: SetupEvent[]): StepperState {
           progressMessage: null,
           recentLines: [],
         };
-        // マップにステップを登録する
+        // マップにステップを登録する（同 ID のステップは上書き）
         stepMap.set(ev.id, step);
-        // 順序リストに追加する
-        stepOrder.push(ev.id);
+        // 同一 ID が既に順序リストにない場合のみ追加する（重複表示を防ぐ）
+        if (!stepOrder.includes(ev.id)) {
+          stepOrder.push(ev.id);
+        }
         break;
       }
 
