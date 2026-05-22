@@ -91,14 +91,6 @@ export function Overview({ onGoInstall, onGoUninstall, onGoDetail }: OverviewPro
     }
   }, [setStatuses]);
 
-  // 初回マウント時にステータスを取得する副作用
-  useEffect(() => {
-    // runLoadStatuses 経由で呼ぶことで isRefreshing 共有状態も更新される
-    appActions?.runLoadStatuses();
-    // appActions は Provider で useMemo 化されているが、依存配列に含める
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // 前提条件チェックを実行する内部コールバック
   const handlePrereqCheck = useCallback(async () => {
     // チェック開始時は必ず展開して結果を見えるようにする
@@ -117,7 +109,8 @@ export function Overview({ onGoInstall, onGoUninstall, onGoDetail }: OverviewPro
   }, [showDanger]);
 
   // Overview がマウントされたとき、TopBar から呼び出せるよう実関数を ref に登録する
-  // アンマウント時は no-op に戻して他のページ表示中に誤呼び出しされないようにする
+  // ※ 必ず runLoadStatuses 呼び出し effect より前に配置すること（React は useEffect をソース順に実行する）
+  //   ref 登録が後になると runLoadStatuses 実行時に ref が no-op のままで statusAll() が呼ばれない
   useEffect(() => {
     // appActions が利用可能な場合（AppActionsContext のスコープ内）のみ登録する
     if (!appActions) return;
@@ -132,6 +125,15 @@ export function Overview({ onGoInstall, onGoUninstall, onGoDetail }: OverviewPro
       appActions.prereqCheckRef.current = async () => {};
     };
   }, [appActions, loadStatuses, handlePrereqCheck]);
+
+  // 初回マウント時にステータスを取得する副作用
+  // ※ ref 登録 effect より後に配置すること（登録完了後に runLoadStatuses を呼ぶ必要がある）
+  useEffect(() => {
+    // runLoadStatuses 経由で呼ぶことで isRefreshing 共有状態も更新される
+    appActions?.runLoadStatuses();
+    // appActions は Provider で useMemo 化されているが、依存配列に含める
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // サービスを開始するコールバック（busyComponent で連打防止）
   const handleStart = useCallback(async (component: ComponentKind) => {
