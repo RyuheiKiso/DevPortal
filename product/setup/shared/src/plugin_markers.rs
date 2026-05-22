@@ -203,15 +203,32 @@ fn ensure_markers_backend(source: &str) -> Result<String, MarkerError> {
 }
 
 // マーカー間にプラグイン登録コードを挿入する（冪等性チェック付き）
-// 同名パッケージが既にファイル内に存在する場合は AlreadyRegistered を返す
+// 同名パッケージが既にマーカー間に存在する場合は AlreadyRegistered を返す
+// （ファイル全体ではなくマーカー領域のみを検索することで誤検知を防ぐ）
 pub fn insert_plugin(
     source: &str,
     registration: &PluginRegistration,
     kind: &PluginKind,
 ) -> Result<String, MarkerError> {
-    // 既に同名パッケージが登録済みか確認する（ファイル全体を検索）
-    if source.contains(&registration.package_name) {
-        // 重複登録エラーを返す
+    // 冪等性チェック：プラグイン種別に応じたマーカー領域のみを検索する
+    let already_registered = match kind {
+        // フロントエンドはインポートマーカー間を検索する（ルートマーカーは不要、import 行の有無で判定する）
+        PluginKind::Frontend => contains_in_marker_region(
+            source,
+            FRONTEND_IMPORT_START,
+            FRONTEND_IMPORT_END,
+            &registration.package_name,
+        ),
+        // バックエンドはバックエンドマーカー間を検索する
+        PluginKind::Backend => contains_in_marker_region(
+            source,
+            BACKEND_START,
+            BACKEND_END,
+            &registration.package_name,
+        ),
+    };
+    // マーカー間に同名パッケージが存在する場合は重複登録エラーを返す
+    if already_registered {
         return Err(MarkerError::AlreadyRegistered(registration.package_name.clone()));
     }
 
@@ -222,6 +239,48 @@ pub fn insert_plugin(
         // バックエンド向けのプラグイン挿入処理を呼ぶ
         PluginKind::Backend => insert_backend_plugin(source, registration),
     }
+}
+
+// 指定したマーカー間の行に needle が含まれているかを確認するヘルパー関数
+// マーカー行自体は検索対象に含めない（境界を除くマーカー内部のみを対象とする）
+fn contains_in_marker_region(
+    source: &str,
+    start_marker: &str,
+    end_marker: &str,
+    needle: &str,
+) -> bool {
+    // ソースを行に分解する
+    let lines: Vec<&str> = source.lines().collect();
+
+    // 開始マーカーの行インデックスを探す（見つからない場合は false を返す）
+    let start_idx = match lines
+        .iter()
+        .enumerate()
+        .find(|(_, l)| l.trim() == start_marker.trim())
+        .map(|(i, _)| i)
+    {
+        // 開始マーカーが見つかった場合はインデックスを使用する
+        Some(i) => i,
+        // 見つからない場合は false を返す（マーカーがない状態は未登録と見なす）
+        None => return false,
+    };
+
+    // 終了マーカーの行インデックスを探す（見つからない場合は false を返す）
+    let end_idx = match lines
+        .iter()
+        .enumerate()
+        .skip(start_idx + 1)
+        .find(|(_, l)| l.trim() == end_marker.trim())
+        .map(|(i, _)| i)
+    {
+        // 終了マーカーが見つかった場合はインデックスを使用する
+        Some(i) => i,
+        // 見つからない場合は false を返す
+        None => return false,
+    };
+
+    // マーカー間の行（境界を除く）に needle が含まれているか確認する
+    lines[start_idx + 1..end_idx].iter().any(|l| l.contains(needle))
 }
 
 // フロントエンド App.tsx にプラグインのインポート行とルート行を挿入する

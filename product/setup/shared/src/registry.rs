@@ -31,8 +31,10 @@ pub struct PluginCandidate {
 pub fn search(query: &str) -> Result<Vec<PluginCandidate>, SetupError> {
     // URL エンコードが必要な文字は ureq が自動処理するためそのまま組み立てる
     // keywords:backstage を付加することで Backstage 向けパッケージに絞り込む
+    // text パラメータ内に +keywords%3Abackstage を連結して npm registry のキーワードフィルターを有効にする
+    // （& で独立パラメータにすると npm registry が無視するため + で text に含める）
     let url = format!(
-        "https://registry.npmjs.org/-/v1/search?text={}&keywords%3Abackstage&size=50",
+        "https://registry.npmjs.org/-/v1/search?text={}+keywords%3Abackstage&size=50",
         urlencoding_simple(query)
     );
 

@@ -169,8 +169,16 @@ pub fn install(
         ));
     }
 
+    // ステップ数を種別に応じて決定する（Backend は yarn_build ステップがないため 1 少ない）
+    let total_steps: u32 = match request.kind {
+        // フロントエンドは prereq / yarn_add / marker_ensure / plugin_register / yarn_build / service_restart の 6 ステップ
+        PluginKind::Frontend => 6,
+        // バックエンドは yarn_build をスキップするため 5 ステップ
+        PluginKind::Backend => 5,
+    };
+
     // ステップ 1: 前提条件チェック
-    reporter.step_start("prereq", "前提条件を確認しています", 6, 0);
+    reporter.step_start("prereq", "前提条件を確認しています", total_steps, 0);
     // 前提条件チェックを実行する
     let prereq = crate::prereq::check_prereqs();
     // 前提条件チェックが失敗した場合はエラーを返す
@@ -203,7 +211,7 @@ pub fn install(
     reporter.step_start(
         "yarn_add",
         &format!("yarn workspace {} add {} を実行しています", workspace_target, request.package_name),
-        6,
+        total_steps,
         1,
     );
     // yarn add コマンドを構築する
@@ -219,7 +227,7 @@ pub fn install(
     reporter.step_done("yarn_add", 0);
 
     // ステップ 3: マーカーコメントが存在しない場合はファイルに挿入する
-    reporter.step_start("marker_ensure", "登録用マーカーをファイルに設定しています", 6, 2);
+    reporter.step_start("marker_ensure", "登録用マーカーをファイルに設定しています", total_steps, 2);
     // マーカー挿入対象のファイルパスを種別に応じて決定する
     let target_file = get_target_file(&app_dir, &request.kind);
     // 対象ファイルが存在する場合のみマーカー挿入を行う
@@ -233,26 +241,20 @@ pub fn install(
                 // 更新後の内容をファイルに書き込む
                 std::fs::write(&target_file, updated).map_err(SetupError::Io)?;
             }
-            // マーカー挿入に失敗した場合（位置特定不可）は警告を出して継続する
+            // マーカー挿入に失敗した場合（位置特定不可）はエラーを返す
+            // yarn add は完了済みのためパッケージは追加されているが登録コードは未挿入の不整合を防ぐ
             Err(MarkerError::CannotLocate(msg)) => {
-                // ユーザーに手動編集が必要な旨を警告する
-                reporter.warn(
-                    Some("marker_ensure".to_string()),
-                    format!(
-                        "マーカーを自動挿入できません（{}）。\
-                        {} を手動で編集してプラグインを登録してください。",
-                        msg,
-                        target_file.to_string_lossy()
-                    ),
-                );
+                return Err(SetupError::Other(format!(
+                    "マーカーを自動挿入できません（{}）。\
+                    {} を手動で編集してプラグインを登録してください。",
+                    msg,
+                    target_file.to_string_lossy()
+                )));
             }
-            // 既に登録済みの場合は警告を出して継続する
+            // 既に登録済みの場合は情報メッセージを出して継続する
             Err(MarkerError::AlreadyRegistered(name)) => {
-                // 重複登録の警告を送信する
-                reporter.warn(
-                    Some("marker_ensure".to_string()),
-                    format!("プラグイン '{}' は既に登録されています", name),
-                );
+                // 重複登録の情報を送信する（エラーではない）
+                reporter.info(format!("プラグイン '{}' のマーカーは既に設定済みです", name));
             }
         }
     }
@@ -260,7 +262,7 @@ pub fn install(
     reporter.step_done("marker_ensure", 0);
 
     // ステップ 4: マーカー間にプラグイン登録コードを挿入する
-    reporter.step_start("plugin_register", "プラグイン登録コードを挿入しています", 6, 3);
+    reporter.step_start("plugin_register", "プラグイン登録コードを挿入しています", total_steps, 3);
     // 対象ファイルが存在する場合のみ挿入を行う
     if target_file.exists() {
         // 現在のファイル内容を読み込む
@@ -279,18 +281,14 @@ pub fn install(
                 // 既に登録済みの旨をログに出力する
                 reporter.info(format!("プラグイン '{}' は既に登録されています", name));
             }
-            // 挿入位置が特定できない場合は警告を出して継続する
+            // 挿入位置が特定できない場合はエラーを返す
             Err(MarkerError::CannotLocate(msg)) => {
-                // ユーザーに手動編集の案内を表示する
-                reporter.warn(
-                    Some("plugin_register".to_string()),
-                    format!(
-                        "プラグイン登録コードを自動挿入できません（{}）。\
-                        {} を手動で編集してください。",
-                        msg,
-                        target_file.to_string_lossy()
-                    ),
-                );
+                return Err(SetupError::Other(format!(
+                    "プラグイン登録コードを自動挿入できません（{}）。\
+                    {} を手動で編集してください。",
+                    msg,
+                    target_file.to_string_lossy()
+                )));
             }
         }
     }
@@ -299,11 +297,11 @@ pub fn install(
 
     // ステップ 5: フロントエンドプラグインの場合のみ再ビルドを行う
     if request.kind == PluginKind::Frontend {
-        // ビルドステップの開始を通知する
+        // ビルドステップの開始を通知する（Frontend 時のみ発火するためインデックスは 4 固定）
         reporter.step_start(
             "yarn_build",
             "フロントエンドをビルドしています（数分かかる場合があります）",
-            6,
+            total_steps,
             4,
         );
         // yarn workspace app build コマンドを構築する
@@ -316,8 +314,15 @@ pub fn install(
         reporter.step_done("yarn_build", 0);
     }
 
-    // ステップ 6: Windows サービスを再起動する
-    reporter.step_start("service_restart", "Backstage サービスを再起動しています", 6, 5);
+    // ステップ 6 (Frontend) / ステップ 5 (Backend): Windows サービスを再起動する
+    // Frontend は index=5、Backend は yarn_build がないため index=4
+    let restart_index: u32 = match request.kind {
+        // フロントエンドは yarn_build の後なので index=5
+        PluginKind::Frontend => 5,
+        // バックエンドは yarn_build なしなので index=4
+        PluginKind::Backend => 4,
+    };
+    reporter.step_start("service_restart", "Backstage サービスを再起動しています", total_steps, restart_index);
     // サービス名を取得する
     let service_name = format!("{}.Backstage", config.service_prefix);
     // NSSM ラッパーを環境から取得する
@@ -384,8 +389,16 @@ pub fn remove(
         PluginKind::Backend => "backend",
     };
 
+    // ステップ数を種別に応じて決定する（Backend は yarn_build ステップがないため 1 少ない）
+    let total_steps: u32 = match request.kind {
+        // フロントエンドは plugin_unregister / yarn_remove / yarn_build / service_restart の 4 ステップ
+        PluginKind::Frontend => 4,
+        // バックエンドは yarn_build をスキップするため 3 ステップ
+        PluginKind::Backend => 3,
+    };
+
     // ステップ 1: マーカー間から登録コードを削除する
-    reporter.step_start("plugin_unregister", "プラグイン登録コードを削除しています", 4, 0);
+    reporter.step_start("plugin_unregister", "プラグイン登録コードを削除しています", total_steps, 0);
     // マーカー削除対象のファイルパスを決定する
     let target_file = get_target_file(&app_dir, &request.kind);
     // 対象ファイルが存在する場合のみ削除を行う
@@ -421,7 +434,7 @@ pub fn remove(
     reporter.step_start(
         "yarn_remove",
         &format!("yarn workspace {} remove {} を実行しています", workspace_target, request.package_name),
-        4,
+        total_steps,
         1,
     );
     // yarn remove コマンドを構築する
@@ -438,11 +451,11 @@ pub fn remove(
 
     // ステップ 3: フロントエンドプラグインの場合のみ再ビルドを行う
     if request.kind == PluginKind::Frontend {
-        // ビルドステップの開始を通知する
+        // ビルドステップの開始を通知する（Frontend 時のみ発火するためインデックスは 2 固定）
         reporter.step_start(
             "yarn_build",
             "フロントエンドをビルドしています",
-            4,
+            total_steps,
             2,
         );
         // yarn workspace app build コマンドを構築する
@@ -455,8 +468,15 @@ pub fn remove(
         reporter.step_done("yarn_build", 0);
     }
 
-    // ステップ 4: Windows サービスを再起動する
-    reporter.step_start("service_restart", "Backstage サービスを再起動しています", 4, 3);
+    // ステップ 4 (Frontend) / ステップ 3 (Backend): Windows サービスを再起動する
+    // Frontend は index=3、Backend は yarn_build がないため index=2
+    let restart_index: u32 = match request.kind {
+        // フロントエンドは yarn_build の後なので index=3
+        PluginKind::Frontend => 3,
+        // バックエンドは yarn_build なしなので index=2
+        PluginKind::Backend => 2,
+    };
+    reporter.step_start("service_restart", "Backstage サービスを再起動しています", total_steps, restart_index);
     // サービス名を取得する
     let service_name = format!("{}.Backstage", config.service_prefix);
     // NSSM ラッパーを環境から取得する
