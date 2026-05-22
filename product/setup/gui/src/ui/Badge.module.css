@@ -1,0 +1,89 @@
+/* Badge コンポーネントの CSS Modules スタイル定義 */
+/* ステータスや分類を示す小さなラベルに使用する */
+
+/* バッジのベーススタイル（全 variant 共通） */
+.badge {
+  /* インラインフレックスでドットとテキストを横並びにする */
+  display: inline-flex;
+  /* 縦方向の中央揃え */
+  align-items: center;
+  /* ドットとテキストの間隔 */
+  gap: var(--space-2);
+  /* バッジの内側余白 */
+  padding: 2px var(--space-3);
+  /* ラベルのフォントサイズ */
+  font-size: var(--fs-small);
+  /* ラベルを少し太くして視認性を高める */
+  font-weight: 500;
+  /* 行高を 1 にして縦方向の余白を最小化する */
+  line-height: 1;
+  /* テキストを折り返さない */
+  white-space: nowrap;
+  /* 丸みを帯びたピル型の角丸 */
+  border-radius: var(--radius-full);
+  /* 枠線は透明（各 variant で上書きする） */
+  border: 1px solid transparent;
+}
+
+/* ステータスドット（バッジ先頭の小さな丸印） */
+.dot {
+  /* 正円のドット */
+  width: 6px;
+  height: 6px;
+  /* 完全な円にする */
+  border-radius: var(--radius-full);
+  /* flex-shrink を 0 にして縮小されないようにする */
+  flex-shrink: 0;
+  /* 色は親の color を継承する（variant ごとに色が変わる） */
+  background-color: currentColor;
+}
+
+/* ---- variant: success（成功・稼働中）---- */
+
+/* 成功バッジのスタイル */
+.success {
+  /* 成功薄背景色を適用する */
+  background-color: var(--success-tint);
+  /* 成功色でテキストとドットを表示する */
+  color: var(--success);
+}
+
+/* ---- variant: warning（警告・準備中）---- */
+
+/* 警告バッジのスタイル */
+.warning {
+  /* 警告薄背景色を適用する */
+  background-color: var(--warning-tint);
+  /* 警告色でテキストとドットを表示する */
+  color: var(--warning);
+}
+
+/* ---- variant: danger（エラー・停止）---- */
+
+/* 危険バッジのスタイル */
+.danger {
+  /* 危険薄背景色を適用する */
+  background-color: var(--danger-tint);
+  /* 危険色でテキストとドットを表示する */
+  color: var(--danger);
+}
+
+/* ---- variant: info（情報・確認中）---- */
+
+/* 情報バッジのスタイル */
+.info {
+  /* 情報薄背景色を適用する */
+  background-color: var(--info-tint);
+  /* 情報色でテキストとドットを表示する */
+  color: var(--info);
+}
+
+/* ---- variant: neutral（ニュートラル・未インストール等）---- */
+
+/* ニュートラルバッジのスタイル */
+.neutral {
+  /* サブ面色を背景にする */
+  background-color: var(--surface-2);
+  /* 補助テキスト色を使用する */
+  color: var(--text-muted);
+}

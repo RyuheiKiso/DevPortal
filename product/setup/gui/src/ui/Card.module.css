@@ -1,0 +1,53 @@
+/* Card コンポーネントの CSS Modules スタイル定義 */
+/* 罫線 1px・角丸・白背景の標準カードコンテナ */
+
+/* カードのベーススタイル */
+.card {
+  /* 面の背景色（ライト: 白、ダーク: #111）を適用する */
+  background-color: var(--surface);
+  /* 罫線で輪郭を付ける（影でなく罫線中心のデザイン） */
+  border: 1px solid var(--border);
+  /* カード角丸（標準値 6px） */
+  border-radius: var(--radius-md);
+  /* hairline シャドウで僅かな立体感を出す */
+  box-shadow: var(--shadow-sm);
+  /* カード内側の余白（標準） */
+  padding: var(--space-7);
+}
+
+/* ---- パディングなしバリアント（カード内で独自レイアウトを持つ場合）---- */
+
+/* パディングをゼロにしたカード（ヘッダー+ボディのレイアウトを持つ場合等） */
+.noPadding {
+  /* 内側余白を除去する */
+  padding: 0;
+}
+
+/* ---- サイズ: sm（小さいカード）---- */
+
+/* 小さいカードの内側余白設定 */
+.sm {
+  /* 内側余白を 16px に縮小する */
+  padding: var(--space-5);
+}
+
+/* ---- インタラクティブ（クリック可能なカード）---- */
+
+/* クリック可能なカードのカーソルとトランジション設定 */
+.interactive {
+  /* クリック可能なポインターカーソルを設定する */
+  cursor: pointer;
+  /* ホバー・フォーカス時のトランジション */
+  transition:
+    border-color    var(--duration-fast) var(--easing-out),
+    box-shadow      var(--duration-fast) var(--easing-out),
+    background-color var(--duration-fast) var(--easing-out);
+}
+
+/* インタラクティブカードのホバー状態 */
+.interactive:hover {
+  /* ホバー時に強い罫線色に変える */
+  border-color: var(--border-strong);
+  /* ホバー時に少し大きめのシャドウを付ける */
+  box-shadow: var(--shadow-pop);
+}

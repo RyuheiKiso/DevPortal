@@ -1,0 +1,56 @@
+/* AppShell コンポーネントの CSS Modules スタイル定義 */
+/* CSS Grid でトップバー・サイドバー・メインコンテンツの 3 エリアレイアウトを実装する */
+
+/* シェル全体の Grid コンテナ */
+.shell {
+  /* CSS Grid レイアウトを使用する */
+  display: grid;
+  /* 行: トップバー 44px + メインエリア 残り全て */
+  grid-template-rows: 44px 1fr;
+  /* 列: サイドバー 240px + メインコンテンツ 残り全て */
+  grid-template-columns: 240px 1fr;
+  /* ウィンドウ全体の高さを占有する */
+  height: 100vh;
+  /* ウィンドウ全幅を占有する */
+  width: 100%;
+  /* グリッドセル間の隙間はゼロ（罫線で区切るため不要） */
+  gap: 0;
+  /* アプリ全体の背景色を適用する */
+  background-color: var(--bg);
+  /* テーマ切替時の背景色トランジション */
+  transition: background-color var(--duration-normal) var(--easing-out);
+}
+
+/* トップバー領域（グリッド 1 行目・全幅） */
+.topbar {
+  /* 1 列目から最後の列まで全幅に広がる */
+  grid-column: 1 / -1;
+  /* 1 行目に配置する */
+  grid-row: 1;
+  /* 下位レイヤーの要素より前に重なるよう z-index を設定する */
+  z-index: 10;
+}
+
+/* サイドバー領域（グリッド 2 行目・1 列目） */
+.sidebar {
+  /* 1 列目に配置する */
+  grid-column: 1;
+  /* 2 行目に配置する */
+  grid-row: 2;
+  /* サイドバーが高さいっぱいになるよう設定する */
+  height: 100%;
+  /* サイドバーが内容に応じてスクロール可能にする */
+  overflow-y: auto;
+}
+
+/* メインコンテンツ領域（グリッド 2 行目・2 列目） */
+.main {
+  /* 2 列目に配置する */
+  grid-column: 2;
+  /* 2 行目に配置する */
+  grid-row: 2;
+  /* コンテンツが溢れた場合にスクロール可能にする */
+  overflow-y: auto;
+  /* メインエリアの背景色を適用する */
+  background-color: var(--bg);
+}

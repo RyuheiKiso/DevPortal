@@ -1,0 +1,145 @@
+/* Button コンポーネントの CSS Modules スタイル定義 */
+/* variant（primary/secondary/ghost/danger）と size（sm/md）をクラス名で切り替える */
+
+/* ---- ベーススタイル（全 variant 共通）---- */
+
+/* ボタン要素の基礎スタイル */
+.button {
+  /* インラインフレックスでアイコンとテキストを横並びかつ縦中央に揃える */
+  display: inline-flex;
+  /* 縦方向の中央揃えを設定する */
+  align-items: center;
+  /* コンテンツを中央に配置する */
+  justify-content: center;
+  /* アイコンとテキストの間隔を 4px に設定する */
+  gap: var(--space-2);
+  /* フォントを親要素から継承する */
+  font-family: inherit;
+  /* 本文と同じベースフォントサイズを使用する */
+  font-size: var(--fs-body);
+  /* ラベルを適度に太くして視認性を高める */
+  font-weight: 500;
+  /* 行高を 1 にして縦方向の余白を最小化する */
+  line-height: 1;
+  /* テキストを折り返さない */
+  white-space: nowrap;
+  /* クリック可能であることを示すポインターカーソル */
+  cursor: pointer;
+  /* ブラウザデフォルトの border を除去する */
+  border: 1px solid transparent;
+  /* 角丸を標準値 (6px) に設定する */
+  border-radius: var(--radius-md);
+  /* テキスト装飾（下線等）を除去する */
+  text-decoration: none;
+  /* ドラッグによる文字選択を無効にする */
+  user-select: none;
+  /* ホバー・フォーカス等の状態変化を滑らかにトランジションする */
+  transition:
+    background-color var(--duration-fast) var(--easing-out),
+    border-color     var(--duration-fast) var(--easing-out),
+    color            var(--duration-fast) var(--easing-out),
+    filter           var(--duration-fast) var(--easing-out),
+    opacity          var(--duration-fast) var(--easing-out);
+}
+
+/* 無効状態（disabled）のスタイル（全 variant 共通） */
+.button:disabled {
+  /* 操作不可を示す透過度に下げる */
+  opacity: 0.4;
+  /* 操作不可を示すカーソルに変更する */
+  cursor: not-allowed;
+  /* ホバー等のポインターイベントを無効化する */
+  pointer-events: none;
+}
+
+/* ---- サイズ: sm（コンパクトなボタン）---- */
+
+/* 小さいボタンの余白設定 */
+.sm {
+  /* 縦余白を 2px、横余白を 8px に設定する */
+  padding: var(--space-1) var(--space-3);
+  /* 小さいボタンはフォントサイズも 12px に下げる */
+  font-size: var(--fs-small);
+}
+
+/* ---- サイズ: md（標準ボタン）---- */
+
+/* 標準ボタンの余白設定 */
+.md {
+  /* 縦余白を 6px（トークン外の微調整値）、横余白を 12px に設定する */
+  padding: 6px var(--space-4);
+}
+
+/* ---- variant: primary（アクセントカラーの主要 CTA ボタン）---- */
+
+/* プライマリボタンのデフォルト状態 */
+.primary {
+  /* アクセントカラー（インディゴ）を背景にする */
+  background-color: var(--accent);
+  /* 罫線も同色にして枠線を視覚的に消す */
+  border-color: var(--accent);
+  /* アクセント前景色（白）でテキストを表示する */
+  color: var(--accent-fg);
+}
+
+/* プライマリボタンのホバー状態 */
+.primary:hover:not(:disabled) {
+  /* 輝度を落としてインタラクション感を演出する */
+  filter: brightness(0.88);
+}
+
+/* ---- variant: secondary（罫線付きの二次ボタン）---- */
+
+/* セカンダリボタンのデフォルト状態 */
+.secondary {
+  /* 面の背景色（ライト: 白、ダーク: #111）を適用する */
+  background-color: var(--surface);
+  /* 強い罫線色で輪郭を付ける */
+  border-color: var(--border-strong);
+  /* 主要テキスト色を使用する */
+  color: var(--text);
+}
+
+/* セカンダリボタンのホバー状態 */
+.secondary:hover:not(:disabled) {
+  /* ホバー時にサブ面色に切り替えてフィードバックを与える */
+  background-color: var(--surface-2);
+}
+
+/* ---- variant: ghost（背景なしのゴーストボタン）---- */
+
+/* ゴーストボタンのデフォルト状態 */
+.ghost {
+  /* 背景を透明にして非常に控えめな見た目にする */
+  background-color: transparent;
+  /* 罫線も透明にする */
+  border-color: transparent;
+  /* 補助テキスト色で存在感を抑える */
+  color: var(--text-muted);
+}
+
+/* ゴーストボタンのホバー状態 */
+.ghost:hover:not(:disabled) {
+  /* ホバー時に薄いサブ面色を付けてインタラクションを示す */
+  background-color: var(--surface-2);
+  /* ホバー時にテキスト色を主要テキストに変えて視認性を高める */
+  color: var(--text);
+}
+
+/* ---- variant: danger（破壊的操作用の危険ボタン）---- */
+
+/* 危険ボタンのデフォルト状態 */
+.danger {
+  /* 危険色（赤）を背景にして破壊的操作を警告する */
+  background-color: var(--danger);
+  /* 罫線も同色にする */
+  border-color: var(--danger);
+  /* 危険色背景上は白テキストで可読性を確保する */
+  color: #ffffff;
+}
+
+/* 危険ボタンのホバー状態 */
+.danger:hover:not(:disabled) {
+  /* ホバー時に少し暗くしてインタラクション感を出す */
+  filter: brightness(0.88);
+}

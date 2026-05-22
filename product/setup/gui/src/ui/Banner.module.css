@@ -1,0 +1,88 @@
+/* Banner コンポーネントの CSS Modules スタイル定義 */
+/* 成功・警告・エラー・情報を伝えるインラインバナーに使用する */
+
+/* バナーのベーススタイル（全 variant 共通） */
+.banner {
+  /* フレックスでアイコンとテキストを横並びにする */
+  display: flex;
+  /* 縦方向の中央揃え（アイコンとテキストの先頭を揃える） */
+  align-items: flex-start;
+  /* アイコンとテキストの間隔 */
+  gap: var(--space-3);
+  /* バナーの内側余白 */
+  padding: var(--space-4) var(--space-5);
+  /* 角丸を標準値に設定する */
+  border-radius: var(--radius-md);
+  /* 本文フォントサイズ */
+  font-size: var(--fs-body);
+  /* 行高を標準に設定する */
+  line-height: 1.5;
+  /* 左端に太い罫線を付けて variant の色を強調する */
+  border-left: 3px solid currentColor;
+  /* 背景色は各 variant で設定する */
+  background-color: transparent;
+}
+
+/* バナーのアイコン領域 */
+.icon {
+  /* アイコンのサイズに合わせて縮小しないようにする */
+  flex-shrink: 0;
+  /* アイコンを上端に揃える（テキストが複数行でもアイコンは上に固定） */
+  margin-top: 1px;
+}
+
+/* バナーのテキストコンテンツ領域 */
+.content {
+  /* テキストが余白を最大限に使えるようにする */
+  flex: 1;
+  /* テキストの最小幅をゼロにして折り返しを許可する */
+  min-width: 0;
+}
+
+/* バナーの見出し（タイトル） */
+.title {
+  /* 見出しを太字にする */
+  font-weight: 600;
+  /* 見出しと本文の間に余白を設ける */
+  margin-bottom: var(--space-1);
+}
+
+/* ---- variant: success（成功・完了） ---- */
+
+/* 成功バナーのスタイル */
+.success {
+  /* 成功色でテキストとアイコン・左罫線を表示する */
+  color: var(--success);
+  /* 成功薄背景色を適用する */
+  background-color: var(--success-tint);
+}
+
+/* ---- variant: warning（警告・注意） ---- */
+
+/* 警告バナーのスタイル */
+.warning {
+  /* 警告色でテキストとアイコン・左罫線を表示する */
+  color: var(--warning);
+  /* 警告薄背景色を適用する */
+  background-color: var(--warning-tint);
+}
+
+/* ---- variant: danger（エラー・失敗） ---- */
+
+/* 危険バナーのスタイル */
+.danger {
+  /* 危険色でテキストとアイコン・左罫線を表示する */
+  color: var(--danger);
+  /* 危険薄背景色を適用する */
+  background-color: var(--danger-tint);
+}
+
+/* ---- variant: info（情報・ヒント） ---- */
+
+/* 情報バナーのスタイル */
+.info {
+  /* 情報色でテキストとアイコン・左罫線を表示する */
+  color: var(--info);
+  /* 情報薄背景色を適用する */
+  background-color: var(--info-tint);
+}

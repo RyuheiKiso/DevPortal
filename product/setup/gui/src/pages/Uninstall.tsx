@@ -1,20 +1,26 @@
-// このファイルはアンインストール画面を表示する React ページコンポーネントを定義する
-// Install.tsx と対称な構造で keep_data フラグの切り替えも提供する
+// アンインストール実行画面コンポーネント
+// テキスト確認入力・データ保持オプション・進捗をステッパー UI で表示する
 
-// React のフックをインポートする
-import React, { useState, useCallback, useEffect } from 'react';
-
-// API ラッパ関数をインポートする
+// React のフックをインポートする（react-jsx transform を使用しているため React 自体は不要）
+import { useState, useCallback, useEffect } from 'react';
+// API ラッパー関数をインポートする
 import { uninstallComponent, loadConfig } from '../api/tauri';
-
 // 型定義をインポートする
 import type { ComponentKind, SetupConfig, SetupEvent } from '../api/types';
+// ステップ状態フックをインポートする
+import { useStepState } from '../features/stepper/useStepState';
+// ステッパー UI をインポートする
+import { Stepper } from '../features/stepper/Stepper';
+// UI プリミティブをインポートする
+import { Button } from '../ui/Button';
+import { Banner } from '../ui/Banner';
+import { Icon } from '../ui/Icon';
+// ページのアイコンをインポートする
+import { Trash2, ArrowLeft } from 'lucide-react';
+// CSS Modules のスタイルをインポートする
+import styles from './Uninstall.module.css';
 
-// 共通コンポーネントをインポートする
-import { EventLog } from '../components/EventLog';
-import { ProgressBar } from '../components/ProgressBar';
-
-// Uninstall ページのプロパティ型定義
+// Uninstall ページが受け取る Props 型定義
 interface UninstallProps {
   // アンインストールするコンポーネントの種別
   component: ComponentKind;
@@ -22,38 +28,7 @@ interface UninstallProps {
   onBack: () => void;
 }
 
-// ページコンテンツ全体のラッパースタイル
-const pageStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  height: '100vh',
-  overflow: 'hidden',
-};
-
-// ヘッダーバーのスタイル
-const headerStyle: React.CSSProperties = {
-  background: '#1e293b',
-  color: '#fff',
-  padding: '0 24px',
-  height: '52px',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  flexShrink: 0,
-  boxShadow: '0 2px 6px rgba(0,0,0,0.25)',
-};
-
-// メインコンテンツ領域のスタイル
-const mainStyle: React.CSSProperties = {
-  flex: 1,
-  overflow: 'auto',
-  padding: '24px',
-  maxWidth: '720px',
-  margin: '0 auto',
-  width: '100%',
-};
-
-// アンインストール画面で使用するデフォルト設定（loadConfig 完了前のフォールバック）
+// フロントエンド側のデフォルト設定（loadConfig 完了前のフォールバック）
 const defaultConfig: SetupConfig = {
   // Windows サービス名のプレフィックス
   service_prefix: 'DevPortal',
@@ -71,214 +46,193 @@ const defaultConfig: SetupConfig = {
   },
 };
 
-// Uninstall: アンインストール画面を表示する関数コンポーネント
-export const Uninstall: React.FC<UninstallProps> = ({ component, onBack }) => {
-  // 収集したセットアップイベントを保持する state
+// コンポーネント種別ごとの表示名マップ
+const DISPLAY_NAMES: Record<ComponentKind, string> = {
+  // Verdaccio の表示名
+  verdaccio: 'Verdaccio',
+  // Backstage の表示名
+  backstage: 'Backstage',
+};
+
+// アンインストール画面コンポーネント
+export function Uninstall({ component, onBack }: UninstallProps) {
+  // 受信したセットアップイベントの配列（Stepper に渡す）
   const [events, setEvents] = useState<SetupEvent[]>([]);
-  // 現在の進捗率を保持する state
-  const [progress, setProgress] = useState<number>(0);
-  // アンインストール中かどうかを示すフラグ
+  // アンインストール実行中フラグ
   const [running, setRunning] = useState(false);
-  // アンインストール結果のメッセージを保持する state
-  const [resultMsg, setResultMsg] = useState<string | null>(null);
-  // アンインストール完了かどうかを示すフラグ
-  const [done, setDone] = useState(false);
   // データディレクトリを保持するかどうかのフラグ（デフォルト: 保持する）
   const [keepData, setKeepData] = useState(true);
-  // 現在の設定（install_root を含む）
+  // テキスト確認入力フィールドの値（コンポーネント名が入力されると実行可能になる）
+  const [confirmText, setConfirmText] = useState('');
+  // 現在の設定（アンインストール先のパスを表示するために読み込む）
   const [config, setConfig] = useState<SetupConfig>(defaultConfig);
 
-  // 画面表示時に setup.toml から設定を読み込む（install_root を表示するため）
+  // useStepState フックで SetupEvent 配列をステップ状態に変換する
+  const stepState = useStepState(events);
+
+  // コンポーネントの表示名を取得する
+  const displayName = DISPLAY_NAMES[component];
+
+  // 確認入力がコンポーネント名と一致するかどうかを判定する
+  const isConfirmed = confirmText === component;
+
+  // 画面マウント時に setup.toml から設定を読み込む
   useEffect(() => {
     // Rust 側の cmd_load_config を呼び出して設定を取得する
     loadConfig().then(setConfig).catch(() => {
-      // 読み込み失敗時はデフォルト設定のまま継続する
+      // 読み込み失敗時はデフォルト設定のまま継続する（致命的ではない）
     });
   }, []);
 
-  // コンポーネント名を表示用に変換する
-  const displayName = component === 'verdaccio' ? 'Verdaccio' : 'BackStage';
-
-  // アンインストールを開始するハンドラ関数
+  // アンインストールを実行するコールバック
   const handleUninstall = useCallback(async () => {
-    // アンインストール開始時に state をリセットする
+    // テキスト確認が完了していない場合は何もしない（二重チェック）
+    if (!isConfirmed) return;
+
+    // イベント配列をリセットする
     setEvents([]);
-    setProgress(0);
-    setResultMsg(null);
-    setDone(false);
-    // アンインストール中フラグをセットする
+    // 実行中フラグを立てる
     setRunning(true);
 
     // イベントを受け取るコールバック関数
     const onEvent = (ev: SetupEvent) => {
       // events 配列にイベントを追加する
       setEvents((prev) => [...prev, ev]);
-      // progress イベントの場合は進捗率を更新する
-      if (ev.kind === 'progress') {
-        setProgress(ev.percent);
-      }
-      // finished イベントの場合は完了メッセージをセットする
-      if (ev.kind === 'finished') {
-        setResultMsg(`アンインストール完了: ${ev.summary}`);
-        setDone(true);
-      }
-      // failed イベントの場合は失敗メッセージをセットする
-      if (ev.kind === 'failed') {
-        setResultMsg(`アンインストール失敗: ${ev.error}`);
-        setDone(true);
-      }
     };
 
     try {
-      // uninstallComponent を呼び出してアンインストールを実行する（読み込んだ config を渡す）
+      // uninstallComponent を呼び出してアンインストールを実行する
       await uninstallComponent(component, keepData, onEvent, config);
     } catch (e) {
-      // エラーが発生した場合は結果メッセージに表示する
-      setResultMsg(`エラー: ${String(e)}`);
-      setDone(true);
+      // 予期しないエラーは failed イベントとして追加する
+      setEvents((prev) => [
+        ...prev,
+        {
+          kind: 'failed',
+          component,
+          action: 'uninstall',
+          error: String(e),
+          recoverable: false,
+        },
+      ]);
     } finally {
-      // アンインストール中フラグを解除する
+      // 実行中フラグを解除する
       setRunning(false);
     }
-  }, [component, keepData, config]);
+  }, [component, keepData, config, isConfirmed]);
 
-  // 成功かどうかを判定する
-  const isSuccess = done && resultMsg?.startsWith('アンインストール完了');
-
+  // ページ全体を描画する
   return (
-    // ページ全体のコンテナ（ヘッダー + メイン）
-    <div style={pageStyle}>
+    <div className={styles.page}>
 
-      {/* ─── ヘッダーバー ─── */}
-      <header style={headerStyle}>
-        {/* 戻るボタン */}
-        <button
-          onClick={onBack}
-          style={{
-            background: 'rgba(255,255,255,0.08)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            color: '#e2e8f0',
-            padding: '5px 14px',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontFamily: 'inherit',
-          }}
-        >
-          ← ダッシュボードへ戻る
-        </button>
-        {/* ページタイトル */}
-        <span style={{ fontSize: '15px', fontWeight: '600' }}>
-          {displayName} のアンインストール
-        </span>
-        {/* 右側のスペーサー（タイトルを中央寄せに見せる） */}
-        <span style={{ width: '140px' }} />
-      </header>
+      {/* ─── ページヘッダー（タイトル + 戻るボタン）─── */}
+      <div className={styles.pageHeader}>
+        {/* 左側: 戻るボタン */}
+        <Button variant="ghost" size="sm" onClick={onBack} disabled={running}>
+          <Icon icon={ArrowLeft} size={14} />
+          Overview
+        </Button>
+        {/* 右側: ページタイトル */}
+        <h1 className={styles.pageTitle}>{displayName} の削除</h1>
+      </div>
 
-      {/* ─── メインコンテンツ ─── */}
-      <main style={mainStyle}>
+      {/* ─── 操作確認フォーム（実行前のみ表示する）─── */}
+      {!stepState.isDone && (
+        <>
+          {/* 破壊的操作の警告バナー */}
+          <Banner variant="warning" title="注意">
+            この操作は元に戻せません。サービスの停止・ファイルの削除が行われます。
+          </Banner>
 
-        {/* インストール先ディレクトリの表示（読み取り専用） */}
-        <div style={{
-          marginBottom: '16px',
-          padding: '12px 16px',
-          background: '#fff',
-          border: '1px solid #e2e8f0',
-          borderRadius: '10px',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-        }}>
-          {/* セクションラベル */}
-          <div style={{ fontSize: '12px', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
-            アンインストール対象ディレクトリ
-          </div>
-          {/* 現在の install_root を読み取り専用で表示する */}
-          <div style={{ fontSize: '13px', color: '#334155', fontFamily: 'inherit' }}>
-            {config.install_root ?? (
-              <span style={{ color: '#94a3b8' }}>
-                %ProgramData%\DevPortal（既定）
+          {/* アンインストール対象ディレクトリの表示（読み取り専用）*/}
+          <section className={styles.section}>
+            {/* セクションラベル */}
+            <span className={styles.sectionLabel}>削除対象ディレクトリ</span>
+            {/* install_root のパスを読み取り専用で表示する */}
+            <span className={styles.dirDisplay}>
+              {config.install_root ?? '%ProgramData%\\DevPortal（既定）'}
+            </span>
+          </section>
+
+          {/* データ保持オプションのチェックボックスセクション */}
+          <section className={styles.section}>
+            {/* セクションラベル */}
+            <span className={styles.sectionLabel}>データの扱い</span>
+            {/* データ保持チェックボックスの行 */}
+            <label className={styles.checkboxRow}>
+              {/* チェックボックス本体 */}
+              <input
+                type="checkbox"
+                // 現在の keepData 値でチェック状態を制御する
+                checked={keepData}
+                // 変更時に keepData を更新する
+                onChange={(e) => setKeepData(e.target.checked)}
+                // 実行中は変更できないようにする
+                disabled={running}
+                // チェックボックスのスタイルクラスを適用する
+                className={styles.checkbox}
+              />
+              {/* チェックボックスのラベルテキスト */}
+              <span className={styles.checkboxLabel}>
+                データを保持する（{displayName} の設定・データを残す）
               </span>
-            )}
-          </div>
-        </div>
+            </label>
+          </section>
 
-        {/* データ保持オプションのチェックボックス */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          marginBottom: '20px',
-          padding: '14px 16px',
-          background: '#fffbeb',
-          border: '1px solid #fde68a',
-          borderRadius: '8px',
-          fontSize: '13px',
-          color: '#92400e',
-        }}>
-          {/* データ保持チェックボックス */}
-          <input
-            type="checkbox"
-            id="keepData"
-            checked={keepData}
-            onChange={(e) => setKeepData(e.target.checked)}
-            disabled={running}
-            style={{ width: '16px', height: '16px', cursor: running ? 'not-allowed' : 'pointer', accentColor: '#d97706' }}
+          {/* テキスト確認入力セクション（コンポーネント名の入力で実行が有効になる）*/}
+          <section className={styles.section}>
+            {/* セクションラベル（入力するべき文字列を教示する）*/}
+            <span className={styles.sectionLabel}>
+              確認のため <code className={styles.code}>{component}</code> と入力してください
+            </span>
+            {/* テキスト確認入力フィールド */}
+            <input
+              type="text"
+              // 入力値を confirmText で管理する
+              value={confirmText}
+              // 変更時に confirmText を更新する
+              onChange={(e) => setConfirmText(e.target.value)}
+              // 実行中は変更できないようにする
+              disabled={running}
+              // プレースホルダーテキスト（入力例を示す）
+              placeholder={component}
+              // 入力フィールドのスタイルクラスを適用する
+              className={styles.confirmInput}
+            />
+          </section>
+
+          {/* アンインストール実行ボタン */}
+          <div className={styles.startRow}>
+            <Button
+              variant="danger"
+              size="md"
+              onClick={handleUninstall}
+              // テキスト確認が未完了か実行中の場合は無効にする
+              disabled={!isConfirmed || running}
+            >
+              <Icon icon={Trash2} size={14} />
+              {running ? 'アンインストール中…' : `${displayName} を削除する`}
+            </Button>
+          </div>
+        </>
+      )}
+
+      {/* ─── ステッパー（events がある場合のみ表示する）─── */}
+      {events.length > 0 && (
+        <section className={styles.section}>
+          {/* セクションラベル */}
+          <span className={styles.sectionLabel}>進捗</span>
+          {/* ステッパー UI（ステップごとの進捗を縦タイムラインで表示する）*/}
+          <Stepper
+            // useStepState が返す全体状態を渡す
+            state={stepState}
+            // アンインストールは再試行不可のためコールバックは渡さない
+            onRetry={undefined}
+            // 完了・失敗後に Overview へ戻れるようにコールバックを渡す
+            onBack={onBack}
           />
-          {/* チェックボックスのラベル */}
-          <label htmlFor="keepData" style={{ cursor: running ? 'not-allowed' : 'pointer', fontWeight: '500' }}>
-            データディレクトリを保持する（{displayName} のデータ・設定を残す）
-          </label>
-        </div>
-
-        {/* アンインストール開始ボタン */}
-        <div style={{ marginBottom: '20px' }}>
-          <button
-            onClick={handleUninstall}
-            disabled={running}
-            style={{
-              padding: '10px 24px',
-              borderRadius: '8px',
-              border: 'none',
-              background: running ? '#e2e8f0' : '#dc2626',
-              color: running ? '#94a3b8' : '#fff',
-              cursor: running ? 'not-allowed' : 'pointer',
-              fontSize: '14px',
-              fontWeight: '600',
-              fontFamily: 'inherit',
-              boxShadow: running ? 'none' : '0 2px 4px rgba(220,38,38,0.3)',
-            }}
-          >
-            {running ? 'アンインストール中…' : 'アンインストール開始'}
-          </button>
-        </div>
-
-        {/* アンインストール中のプログレスバー */}
-        {running && (
-          <div style={{ marginBottom: '16px' }}>
-            <ProgressBar percent={progress} label="アンインストール進捗" />
-          </div>
-        )}
-
-        {/* アンインストール結果メッセージ */}
-        {resultMsg && (
-          <div style={{
-            padding: '12px 16px',
-            borderRadius: '8px',
-            marginBottom: '16px',
-            fontSize: '13px',
-            background: isSuccess ? '#dcfce7' : '#fee2e2',
-            color: isSuccess ? '#15803d' : '#dc2626',
-            border: `1px solid ${isSuccess ? '#86efac' : '#fca5a5'}`,
-          }}>
-            {resultMsg}
-          </div>
-        )}
-
-        {/* セットアップイベントログ */}
-        <h3 style={{ fontSize: '13px', fontWeight: '600', color: '#475569', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-          実行ログ
-        </h3>
-        <EventLog events={events} />
-      </main>
+        </section>
+      )}
     </div>
   );
-};
+}
