@@ -79,7 +79,9 @@ impl BaGetEngine {
             // TcpStream::connect_timeout で TCP 接続を確認する
             if TcpStream::connect_timeout(
                 // アドレスを SocketAddr にパースして渡す
-                &addr.parse().unwrap_or_else(|_| "127.0.0.1:0".parse().unwrap()),
+                &addr
+                    .parse()
+                    .unwrap_or_else(|_| "127.0.0.1:0".parse().unwrap()),
                 // タイムアウト時間を設定する
                 timeout,
             )
@@ -107,7 +109,9 @@ impl BaGetEngine {
         // ブロッキング to_socket_addrs を別スレッドで実行する
         std::thread::spawn(move || {
             // DNS 解決を実行して結果をチャネルに送信する
-            let result = netloc.to_socket_addrs().map(|iter| iter.collect::<Vec<_>>());
+            let result = netloc
+                .to_socket_addrs()
+                .map(|iter| iter.collect::<Vec<_>>());
             // 受信側がタイムアウトでドロップ済みでもパニックしないよう let _ で握り潰す
             let _ = tx.send(result);
         });
@@ -133,9 +137,7 @@ impl BaGetEngine {
         // タイムアウト設定付き AgentBuilder を構築する
         let mut builder = ureq::AgentBuilder::new()
             // DNS 解決を別スレッドで 10 秒以内に打ち切るカスタムリゾルバを設定する
-            .resolver(
-                Self::resolve_with_timeout as fn(&str) -> std::io::Result<Vec<SocketAddr>>,
-            )
+            .resolver(Self::resolve_with_timeout as fn(&str) -> std::io::Result<Vec<SocketAddr>>)
             // TCP 接続確立が 15 秒以内に完了しない場合にエラーとする
             .timeout_connect(Duration::from_secs(15))
             // 各 read 呼び出しが 60 秒以内に応答しない場合にエラーとする
@@ -239,9 +241,9 @@ impl BaGetEngine {
         // アーカイブ内の全エントリを処理する
         for i in 0..archive.len() {
             // インデックスでエントリを取得する
-            let mut entry = archive
-                .by_index(i)
-                .map_err(|e| SetupError::Other(format!("ZIP エントリの読み込みに失敗しました: {e}")))?;
+            let mut entry = archive.by_index(i).map_err(|e| {
+                SetupError::Other(format!("ZIP エントリの読み込みに失敗しました: {e}"))
+            })?;
 
             // エントリのパス名を取得する
             let entry_name = entry.name().to_string();
@@ -297,12 +299,7 @@ impl SetupEngine for BaGetEngine {
 
         // ステップ 0: 必要なディレクトリを作成する
         let step_t = Instant::now();
-        reporter.step_start(
-            "baget_dirs",
-            "BaGet ディレクトリを作成しています",
-            6,
-            0,
-        );
+        reporter.step_start("baget_dirs", "BaGet ディレクトリを作成しています", 6, 0);
 
         // BaGet のバイナリ展開先ディレクトリを取得する
         let baget_app_dir = paths::baget_app_dir(config);
@@ -326,12 +323,7 @@ impl SetupEngine for BaGetEngine {
 
         // ステップ 1: BaGet をダウンロードして展開する
         let step_t = Instant::now();
-        reporter.step_start(
-            "baget_fetch",
-            "BaGet をダウンロードしています",
-            6,
-            1,
-        );
+        reporter.step_start("baget_fetch", "BaGet をダウンロードしています", 6, 1);
 
         // DEVPORTAL_BAGET_PATH 環境変数が設定されている場合はそれを使用する
         if let Ok(local_path) = std::env::var("DEVPORTAL_BAGET_PATH") {
@@ -375,12 +367,7 @@ impl SetupEngine for BaGetEngine {
 
         // ステップ 2: appsettings.json を生成する
         let step_t = Instant::now();
-        reporter.step_start(
-            "baget_config",
-            "BaGet 設定ファイルを生成しています",
-            6,
-            2,
-        );
+        reporter.step_start("baget_config", "BaGet 設定ファイルを生成しています", 6, 2);
 
         // packages_dir のパス文字列を取得する（Windows \ を / に変換する）
         let packages_dir_str = baget_packages_dir
@@ -604,6 +591,8 @@ impl SetupEngine for BaGetEngine {
 
         // エンドポイント URL を構築する（BaGet の NuGet v3 API エンドポイント）
         let endpoint_url = format!("http://127.0.0.1:{}/v3/index.json", port);
+        // ブラウザで開く Web UI ルート URL を構築する
+        let web_url = format!("http://127.0.0.1:{}/", port);
         // パッケージストレージディレクトリの存在確認を行う
         let data_dir_exists = paths::baget_packages_dir(config).exists();
 
@@ -619,6 +608,8 @@ impl SetupEngine for BaGetEngine {
             endpoint_reachable,
             // エンドポイント URL を格納する
             endpoint_url,
+            // Web UI ルート URL を格納する
+            web_url,
             // データディレクトリの存在確認結果を格納する
             data_dir_exists,
         })

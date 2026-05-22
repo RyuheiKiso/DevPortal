@@ -5,6 +5,8 @@
 import { invoke, Channel } from '@tauri-apps/api/core';
 // Tauri ダイアログプラグインのフォルダ選択関数をインポートする
 import { open } from '@tauri-apps/plugin-dialog';
+// Tauri opener プラグインの URL を開く関数をインポートする
+import { openUrl } from '@tauri-apps/plugin-opener';
 
 // 共通型定義をインポートする
 import type {
@@ -35,7 +37,7 @@ export async function statusAll(): Promise<ComponentStatus[]> {
 // installComponent: 指定コンポーネントのインストールを開始する関数
 // Channel を作成して進捗イベントを onEvent コールバックにブリッジする
 export async function installComponent(
-  // インストール対象のコンポーネント名（"verdaccio" または "backstage"）
+  // インストール対象のコンポーネント名（"verdaccio" / "backstage" / "baget"）
   component: string,
   // インストール設定オブジェクト
   config: SetupConfig,
@@ -60,7 +62,7 @@ export async function installComponent(
 // uninstallComponent: 指定コンポーネントのアンインストールを開始する関数
 // Channel を作成して進捗イベントを onEvent コールバックにブリッジする
 export async function uninstallComponent(
-  // アンインストール対象のコンポーネント名
+  // アンインストール対象のコンポーネント名（"verdaccio" / "backstage" / "baget"）
   component: string,
   // データディレクトリを保持するかどうかのフラグ
   keepData: boolean,
@@ -121,7 +123,7 @@ export async function pickDirectory(defaultPath?: string): Promise<string | null
 // serviceAction: サービスの start/stop/restart を実行する関数
 // Rust 側の cmd_service_action を invoke する
 export async function serviceAction(
-  // 操作対象のコンポーネント名
+  // 操作対象のコンポーネント名（"verdaccio" / "backstage" / "baget"）
   component: string,
   // 実行するアクション（"start" / "stop" / "restart"）
   action: string,
@@ -133,7 +135,7 @@ export async function serviceAction(
 // openLogs: エクスプローラでログフォルダを開く関数
 // Rust 側の cmd_open_logs を invoke する
 export async function openLogs(
-  // ログフォルダを開くコンポーネント名
+  // ログフォルダを開くコンポーネント名（"verdaccio" / "backstage" / "baget"）
   component: string,
 ): Promise<void> {
   // invoke で cmd_open_logs コマンドを呼び出す
@@ -168,6 +170,13 @@ export async function pluginInstall(
   channel.onmessage = onEvent;
   // invoke で cmd_plugin_install コマンドを呼び出す
   return invoke<void>('cmd_plugin_install', { request, onEvent: channel });
+}
+
+// openInBrowser: OS のデフォルトブラウザで指定 URL を開く関数
+// Tauri opener プラグインを使用して WebView 外のブラウザで確実に開く
+export async function openInBrowser(url: string): Promise<void> {
+  // opener プラグインの openUrl で OS 既定ブラウザを起動する
+  await openUrl(url);
 }
 
 // pluginRemove: プラグインを削除し進捗イベントを受け取る関数

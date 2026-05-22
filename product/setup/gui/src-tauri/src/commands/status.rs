@@ -1,5 +1,5 @@
 // このファイルは全コンポーネントの状態を返す Tauri コマンドを定義する
-// Verdaccio と Backstage のステータスをまとめて JSON として返す
+// Verdaccio / Backstage / BaGet のステータスをまとめて JSON として返す
 
 // shared クレートのコンポーネント種別を参照するためにインポートする
 use shared::event::Component;
@@ -11,7 +11,7 @@ use shared::config::SetupConfig;
 use shared::paths;
 
 // cmd_status_all: 全コンポーネントの状態を返す Tauri コマンド
-// Verdaccio と Backstage を並列で問い合わせ、ComponentStatus の JSON 配列として返す
+// Verdaccio / Backstage / BaGet を並列で問い合わせ、ComponentStatus の JSON 配列として返す
 #[tauri::command]
 pub fn cmd_status_all() -> serde_json::Value {
     // setup.toml が存在すればそこから設定を読み込み、無ければデフォルトを使用する
@@ -44,14 +44,20 @@ pub fn cmd_status_all() -> serde_json::Value {
     // 全スレッドの完了を待ち、結果を回収する
     // join() のパニック（thread panic）は Err として扱い、エラー JSON を返す
     let result_v = handle_v.join().unwrap_or_else(|_| {
-        Err(shared::error::SetupError::Other("Verdaccio スレッドがパニックしました".into()))
+        Err(shared::error::SetupError::Other(
+            "Verdaccio スレッドがパニックしました".into(),
+        ))
     });
     let result_b = handle_b.join().unwrap_or_else(|_| {
-        Err(shared::error::SetupError::Other("Backstage スレッドがパニックしました".into()))
+        Err(shared::error::SetupError::Other(
+            "Backstage スレッドがパニックしました".into(),
+        ))
     });
     // BaGet スレッドの結果を回収する
     let result_bg = handle_bg.join().unwrap_or_else(|_| {
-        Err(shared::error::SetupError::Other("BaGet スレッドがパニックしました".into()))
+        Err(shared::error::SetupError::Other(
+            "BaGet スレッドがパニックしました".into(),
+        ))
     });
 
     // ステータスを格納するベクタを初期化する
@@ -62,7 +68,9 @@ pub fn cmd_status_all() -> serde_json::Value {
         // 取得成功の場合はベクタに追加する
         Ok(s) => statuses.push(s),
         // 取得失敗の場合はエラー JSON を返す
-        Err(e) => return serde_json::json!({ "error": format!("Verdaccio ステータス取得失敗: {}", e) }),
+        Err(e) => {
+            return serde_json::json!({ "error": format!("Verdaccio ステータス取得失敗: {}", e) })
+        }
     }
 
     // Backstage の結果を処理する
@@ -70,7 +78,9 @@ pub fn cmd_status_all() -> serde_json::Value {
         // 取得成功の場合はベクタに追加する
         Ok(s) => statuses.push(s),
         // 取得失敗の場合はエラー JSON を返す
-        Err(e) => return serde_json::json!({ "error": format!("Backstage ステータス取得失敗: {}", e) }),
+        Err(e) => {
+            return serde_json::json!({ "error": format!("Backstage ステータス取得失敗: {}", e) })
+        }
     }
 
     // BaGet の結果を処理する

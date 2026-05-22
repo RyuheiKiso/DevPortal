@@ -121,7 +121,10 @@ pub async fn cmd_plugin_install(
         // Failed イベントが来た場合はエラーを返す
         if failed {
             // プラグインインストールが失敗したことをフロントエンドに通知する
-            Err(format!("プラグイン '{}' のインストールに失敗しました", package_name))
+            Err(format!(
+                "プラグイン '{}' のインストールに失敗しました",
+                package_name
+            ))
         } else {
             // インストールが正常に完了したことを示す Ok(()) を返す
             Ok(())
@@ -203,7 +206,10 @@ pub async fn cmd_plugin_remove(
 
         // 失敗フラグが立っている場合はエラーを返す
         if failed {
-            Err(format!("プラグイン '{}' の削除に失敗しました", package_name))
+            Err(format!(
+                "プラグイン '{}' の削除に失敗しました",
+                package_name
+            ))
         } else {
             // 正常完了を返す
             Ok(())

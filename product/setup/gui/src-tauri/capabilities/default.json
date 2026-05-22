@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "main ウィンドウのデフォルト権限（core プラグインのデフォルト一式）",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "permissions": ["core:default", "dialog:allow-open", "opener:allow-open-url"]
 }

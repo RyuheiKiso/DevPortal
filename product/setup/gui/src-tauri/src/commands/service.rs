@@ -13,7 +13,7 @@ use shared::engine::engine_for;
 use shared::event::Component;
 
 // cmd_service_action: サービスの start/stop/restart を制御する Tauri コマンド
-// component: "verdaccio" または "backstage" を指定する文字列
+// component: "verdaccio" / "backstage" / "baget" を指定する文字列
 // action: "start" / "stop" / "restart" のいずれかを指定する文字列
 // 注: 管理者権限は app.manifest の requireAdministrator で OS レベルで保証される
 #[tauri::command]

@@ -94,7 +94,9 @@ impl VerdaccioEngine {
             // TcpStream::connect_timeout で TCP 接続を確認する
             if TcpStream::connect_timeout(
                 // アドレスを SocketAddr にパースして渡す
-                &addr.parse().unwrap_or_else(|_| "127.0.0.1:0".parse().unwrap()),
+                &addr
+                    .parse()
+                    .unwrap_or_else(|_| "127.0.0.1:0".parse().unwrap()),
                 // タイムアウト時間を設定する
                 timeout,
             )
@@ -222,7 +224,10 @@ impl SetupEngine for VerdaccioEngine {
         reporter.info("node.exe のパスを取得しています...");
 
         // node -e でスクリプトモード実行時は式だけでは出力されないため console.log を使う
-        let node_exe_raw = run_output(build_command("node", &["-e", "console.log(process.execPath)"]))?;
+        let node_exe_raw = run_output(build_command(
+            "node",
+            &["-e", "console.log(process.execPath)"],
+        ))?;
         // 取得したパスの前後の空白と改行を除去する
         let node_exe = node_exe_raw.trim().to_string();
 
@@ -291,10 +296,7 @@ impl SetupEngine for VerdaccioEngine {
             // 標準エラーログファイルを指定する
             &stderr_log_str,
             // 追加環境変数（PORT と NODE_ENV を設定する）
-            &[
-                ("PORT", &port_str),
-                ("NODE_ENV", "production"),
-            ],
+            &[("PORT", &port_str), ("NODE_ENV", "production")],
         )?;
 
         // ステップ 9: サービスを起動する
@@ -438,6 +440,8 @@ impl SetupEngine for VerdaccioEngine {
 
         // エンドポイント URL を構築する
         let endpoint_url = format!("http://127.0.0.1:{}/-/ping", port);
+        // ブラウザで開く Web UI ルート URL を構築する
+        let web_url = format!("http://127.0.0.1:{}/", port);
         // ストレージディレクトリの存在確認を行う
         let data_dir_exists = paths::verdaccio_storage_dir(config).exists();
 
@@ -453,6 +457,8 @@ impl SetupEngine for VerdaccioEngine {
             endpoint_reachable,
             // エンドポイント URL を格納する
             endpoint_url,
+            // Web UI ルート URL を格納する
+            web_url,
             // データディレクトリの存在確認結果を格納する
             data_dir_exists,
         })

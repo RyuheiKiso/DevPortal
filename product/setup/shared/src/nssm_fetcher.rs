@@ -43,11 +43,16 @@ pub fn ensure_nssm(reporter: &Reporter) -> Result<PathBuf, SetupError> {
     let cache_dir = cache_path
         .parent()
         // 親ディレクトリが取得できない場合はエラーを返す
-        .ok_or_else(|| SetupError::Other("NSSM キャッシュディレクトリの解決に失敗しました".to_string()))?;
+        .ok_or_else(|| {
+            SetupError::Other("NSSM キャッシュディレクトリの解決に失敗しました".to_string())
+        })?;
 
     // キャッシュディレクトリを再帰的に作成する（権限不足の場合はエラーが発生する）
-    std::fs::create_dir_all(cache_dir)
-        .map_err(|e| SetupError::Other(format!("キャッシュディレクトリの作成に失敗しました: {e}\n管理者権限で実行してください。")))?;
+    std::fs::create_dir_all(cache_dir).map_err(|e| {
+        SetupError::Other(format!(
+            "キャッシュディレクトリの作成に失敗しました: {e}\n管理者権限で実行してください。"
+        ))
+    })?;
 
     // 進捗を報告する（ダウンロード中: 10%）
     reporter.progress("nssm_fetch", 10, Some("zip をダウンロード中…".to_string()));
@@ -83,7 +88,11 @@ pub fn ensure_nssm(reporter: &Reporter) -> Result<PathBuf, SetupError> {
     // 完了を報告する
     reporter.step_done("nssm_fetch", 0);
     // 進捗を報告する（完了: 100%）
-    reporter.progress("nssm_fetch", 100, Some(format!("NSSM を配置しました: {}", cache_path.display())));
+    reporter.progress(
+        "nssm_fetch",
+        100,
+        Some(format!("NSSM を配置しました: {}", cache_path.display())),
+    );
 
     // キャッシュパスを返す
     Ok(cache_path)
@@ -101,7 +110,9 @@ fn resolve_with_timeout(netloc: &str) -> std::io::Result<Vec<SocketAddr>> {
     // ブロッキング to_socket_addrs を別スレッドで実行する
     std::thread::spawn(move || {
         // DNS 解決を実行して結果をチャネルに送信する
-        let result = netloc.to_socket_addrs().map(|iter| iter.collect::<Vec<_>>());
+        let result = netloc
+            .to_socket_addrs()
+            .map(|iter| iter.collect::<Vec<_>>());
         // 受信側がタイムアウトでドロップ済みでもパニックしないよう let _ で握り潰す
         let _ = tx.send(result);
     });
@@ -157,14 +168,17 @@ fn download_with_progress(
     // AgentBuilder からエージェントを構築して HTTP GET を実行する
     let agent = builder.build();
     // HTTP GET リクエストを送信する
-    let response = agent.get(url)
+    let response = agent
+        .get(url)
         .call()
         // HTTP エラーを SetupError::Other に変換する
-        .map_err(|e| SetupError::Other(format!(
-            "NSSM のダウンロードに失敗しました: {e}\n\
+        .map_err(|e| {
+            SetupError::Other(format!(
+                "NSSM のダウンロードに失敗しました: {e}\n\
             ・社内プロキシ環境では HTTPS_PROXY 環境変数を設定してください\n\
             ・オフライン環境では DEVPORTAL_NSSM_PATH 環境変数で nssm.exe のパスを指定してください"
-        )))?;
+            ))
+        })?;
 
     // Content-Type ヘッダーを確認する（HTML が返ってきた場合はサーバーエラーページと判断する）
     if let Some(ct) = response.header("Content-Type") {
@@ -186,8 +200,7 @@ fn download_with_progress(
         .and_then(|v| v.parse().ok());
 
     // 保存先ファイルを作成する
-    let mut out_file = std::fs::File::create(dest)
-        .map_err(SetupError::Io)?;
+    let mut out_file = std::fs::File::create(dest).map_err(SetupError::Io)?;
 
     // レスポンスボディを Read として取得する
     let mut reader = response.into_reader();
@@ -201,8 +214,7 @@ fn download_with_progress(
     // ストリーミングでバッファごとに読み込む
     loop {
         // バッファにデータを読み込む
-        let n = reader.read(&mut buf)
-            .map_err(SetupError::Io)?;
+        let n = reader.read(&mut buf).map_err(SetupError::Io)?;
 
         // 読み込みサイズが 0 なら EOF（ダウンロード完了）
         if n == 0 {
@@ -211,8 +223,7 @@ fn download_with_progress(
         }
 
         // 読み込んだデータをファイルに書き込む
-        out_file.write_all(&buf[..n])
-            .map_err(SetupError::Io)?;
+        out_file.write_all(&buf[..n]).map_err(SetupError::Io)?;
 
         // 読み込み済みバイト数を更新する
         downloaded_bytes += n as u64;
@@ -243,8 +254,7 @@ fn verify_sha256(zip_path: &PathBuf) -> Result<(), SetupError> {
     use sha2::Digest;
 
     // ファイルを開く
-    let mut file = std::fs::File::open(zip_path)
-        .map_err(SetupError::Io)?;
+    let mut file = std::fs::File::open(zip_path).map_err(SetupError::Io)?;
 
     // SHA-256 ハッシャーを初期化する
     let mut hasher = sha2::Sha256::new();
@@ -257,7 +267,9 @@ fn verify_sha256(zip_path: &PathBuf) -> Result<(), SetupError> {
         // バッファにデータを読み込む
         let n = file.read(&mut buf).map_err(SetupError::Io)?;
         // EOF に達したらループを終了する
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         // 読み込んだデータをハッシャーに追加する
         hasher.update(&buf[..n]);
     }
@@ -286,28 +298,25 @@ fn verify_sha256(zip_path: &PathBuf) -> Result<(), SetupError> {
 // dest: 配置先のフルパス（nssm.exe のファイルパス）
 fn extract_nssm_from_zip(zip_path: &PathBuf, dest: &PathBuf) -> Result<(), SetupError> {
     // zip クレートで ZIP アーカイブを開く
-    let zip_file = std::fs::File::open(zip_path)
-        .map_err(SetupError::Io)?;
+    let zip_file = std::fs::File::open(zip_path).map_err(SetupError::Io)?;
 
     // ZIP アーカイブとして解析する
     let mut archive = zip::ZipArchive::new(zip_file)
         .map_err(|e| SetupError::Other(format!("ZIP ファイルのオープンに失敗しました: {e}")))?;
 
     // 目的のエントリ（win64/nssm.exe）を名前で取得する
-    let mut entry = archive
-        .by_name(NSSM_ZIP_ENTRY)
-        .map_err(|e| SetupError::Other(format!(
+    let mut entry = archive.by_name(NSSM_ZIP_ENTRY).map_err(|e| {
+        SetupError::Other(format!(
             "ZIP 内に '{}' が見つかりませんでした: {e}",
             NSSM_ZIP_ENTRY
-        )))?;
+        ))
+    })?;
 
     // 出力先のファイルを作成する
-    let mut out_file = std::fs::File::create(dest)
-        .map_err(SetupError::Io)?;
+    let mut out_file = std::fs::File::create(dest).map_err(SetupError::Io)?;
 
     // ZIP エントリの内容を出力先ファイルにコピーする
-    std::io::copy(&mut entry, &mut out_file)
-        .map_err(SetupError::Io)?;
+    std::io::copy(&mut entry, &mut out_file).map_err(SetupError::Io)?;
 
     // 正常終了を返す
     Ok(())

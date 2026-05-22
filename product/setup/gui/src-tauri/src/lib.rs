@@ -21,6 +21,8 @@ pub fn run() {
     tauri::Builder::default()
         // フォルダ選択ダイアログを有効化するプラグインを登録する
         .plugin(tauri_plugin_dialog::init())
+        // OS のデフォルトブラウザで URL を開くプラグインを登録する
+        .plugin(tauri_plugin_opener::init())
         // フロントから呼び出せるコマンドとして全コマンドを登録する
         .invoke_handler(tauri::generate_handler![
             // 既存の greet コマンドを登録する

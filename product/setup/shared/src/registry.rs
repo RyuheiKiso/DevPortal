@@ -52,7 +52,9 @@ pub fn search(query: &str) -> Result<Vec<PluginCandidate>, SetupError> {
         // レスポンスボディを UTF-8 文字列として読み込む
         .into_string()
         // 読み込みエラーを SetupError::Other に変換する
-        .map_err(|e| SetupError::Other(format!("npm レジストリ レスポンス読み込みエラー: {}", e)))?;
+        .map_err(|e| {
+            SetupError::Other(format!("npm レジストリ レスポンス読み込みエラー: {}", e))
+        })?;
 
     // 文字列を serde_json::Value として解析する
     let body: Value = serde_json::from_str(&body_str)

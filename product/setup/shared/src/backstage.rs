@@ -51,7 +51,9 @@ impl BackstageEngine {
             // TcpStream::connect_timeout で TCP 接続を確認する
             if TcpStream::connect_timeout(
                 // アドレスを SocketAddr にパースして渡す
-                &addr.parse().unwrap_or_else(|_| "127.0.0.1:0".parse().unwrap()),
+                &addr
+                    .parse()
+                    .unwrap_or_else(|_| "127.0.0.1:0".parse().unwrap()),
                 // タイムアウト時間を設定する
                 timeout,
             )
@@ -71,16 +73,16 @@ impl BackstageEngine {
 
     // app-config.yaml のポート番号を serde_yaml を使って更新するヘルパーメソッド
     // 失敗しても続行するため Result は返さずに Reporter へ警告を出す
-    fn update_app_config_ports(
-        config: &SetupConfig,
-        reporter: &Reporter,
-    ) {
+    fn update_app_config_ports(config: &SetupConfig, reporter: &Reporter) {
         // app-config.yaml のパスを構築する
         let app_config_path = paths::backstage_app_dir(config).join("app-config.yaml");
         // app-config.yaml が存在しない場合は何もしない
         if !app_config_path.exists() {
             // ファイルが存在しない場合は警告を出して終了する
-            reporter.warn(None, "app-config.yaml が見つかりません。ポート設定をスキップします。");
+            reporter.warn(
+                None,
+                "app-config.yaml が見つかりません。ポート設定をスキップします。",
+            );
             return;
         }
 
@@ -91,7 +93,10 @@ impl BackstageEngine {
             // 読み込み失敗の場合は警告を出して終了する
             Err(e) => {
                 // 読み込みエラーを警告として報告する
-                reporter.warn(None, format!("app-config.yaml の読み込みに失敗しました: {}", e));
+                reporter.warn(
+                    None,
+                    format!("app-config.yaml の読み込みに失敗しました: {}", e),
+                );
                 return;
             }
         };
@@ -103,7 +108,10 @@ impl BackstageEngine {
             // パース失敗の場合は警告を出して終了する
             Err(e) => {
                 // YAML パースエラーを警告として報告する
-                reporter.warn(None, format!("app-config.yaml のパースに失敗しました: {}", e));
+                reporter.warn(
+                    None,
+                    format!("app-config.yaml のパースに失敗しました: {}", e),
+                );
                 return;
             }
         };
@@ -169,7 +177,10 @@ impl BackstageEngine {
             // シリアライズ失敗の場合は警告を出して終了する
             Err(e) => {
                 // シリアライズエラーを警告として報告する
-                reporter.warn(None, format!("app-config.yaml のシリアライズに失敗しました: {}", e));
+                reporter.warn(
+                    None,
+                    format!("app-config.yaml のシリアライズに失敗しました: {}", e),
+                );
                 return;
             }
         };
@@ -177,7 +188,10 @@ impl BackstageEngine {
         // 更新した内容を app-config.yaml に書き込む
         if let Err(e) = fs::write(&app_config_path, updated_content) {
             // 書き込みエラーを警告として報告する
-            reporter.warn(None, format!("app-config.yaml の書き込みに失敗しました: {}", e));
+            reporter.warn(
+                None,
+                format!("app-config.yaml の書き込みに失敗しました: {}", e),
+            );
         }
     }
 }
@@ -235,7 +249,12 @@ impl SetupEngine for BackstageEngine {
         fs::create_dir_all(&logs_dir)?;
 
         // ステップ 2: create-app を実行して Backstage アプリを生成する
-        reporter.step_start("create_app", "Backstage アプリを生成しています（時間がかかります）", 7, 0);
+        reporter.step_start(
+            "create_app",
+            "Backstage アプリを生成しています（時間がかかります）",
+            7,
+            0,
+        );
 
         // npx @backstage/create-app コマンドを構築する
         // --path app でアプリディレクトリ名を指定する
@@ -243,12 +262,7 @@ impl SetupEngine for BackstageEngine {
         // npx コマンドを build_command で構築する
         let mut create_cmd = build_command(
             "npx",
-            &[
-                "--yes",
-                "@backstage/create-app@latest",
-                "--path",
-                "app",
-            ],
+            &["--yes", "@backstage/create-app@latest", "--path", "app"],
         );
         // 作業ディレクトリを backstage_root に設定する
         create_cmd.current_dir(&backstage_root_str);
@@ -347,14 +361,8 @@ impl SetupEngine for BackstageEngine {
         // app_dir の文字列を取得する
         let app_dir_str = app_dir.to_string_lossy().to_string();
         // yarn install コマンドを構築する（ネットワークタイムアウトを 600 秒に設定）
-        let mut yarn_install_cmd = build_command(
-            "yarn",
-            &[
-                "install",
-                "--network-timeout",
-                "600000",
-            ],
-        );
+        let mut yarn_install_cmd =
+            build_command("yarn", &["install", "--network-timeout", "600000"]);
         // 作業ディレクトリを app_dir に設定する
         yarn_install_cmd.current_dir(&app_dir_str);
         // yarn install をストリーミング実行する
@@ -363,7 +371,12 @@ impl SetupEngine for BackstageEngine {
         // ステップ 4: フロントエンドをビルドする
         // production モードでは backend が packages/app/dist/ の静的ファイルを serve する
         // yarn build を実行しないと GET / が 404 になりブラウザから UI にアクセスできない
-        reporter.step_start("yarn_build", "フロントエンドをビルドしています（数分かかります）", 7, 2);
+        reporter.step_start(
+            "yarn_build",
+            "フロントエンドをビルドしています（数分かかります）",
+            7,
+            2,
+        );
         // yarn workspace app build でフロントエンドパッケージのみビルドする
         // ルート package.json に "build" スクリプトはなく workspace 指定が必要
         let mut yarn_build_cmd = build_command("yarn", &["workspace", "app", "build"]);
@@ -396,7 +409,11 @@ impl SetupEngine for BackstageEngine {
         nssm.install(&service_name, cmd_exe, reporter)?;
 
         // AppParameters を設定する（cmd /c yarn workspace backend start）
-        nssm.set(&service_name, "AppParameters", "/c yarn workspace backend start")?;
+        nssm.set(
+            &service_name,
+            "AppParameters",
+            "/c yarn workspace backend start",
+        )?;
 
         // ステップ 7: NSSM でサービスの詳細設定を行う
         reporter.step_start("nssm_configure", "NSSM サービス設定", 7, 4);
@@ -424,10 +441,7 @@ impl SetupEngine for BackstageEngine {
             // 標準エラーログファイルを指定する
             &stderr_log_str,
             // 追加環境変数（production モードで backend が app/dist/ の静的ファイルを serve する）
-            &[
-                ("NODE_ENV", "production"),
-                ("PORT", &backend_port_str),
-            ],
+            &[("NODE_ENV", "production"), ("PORT", &backend_port_str)],
         )?;
 
         // AppThrottle を追加で設定する（スロットリング 60 秒）
@@ -577,6 +591,8 @@ impl SetupEngine for BackstageEngine {
 
         // エンドポイント URL を構築する（Backstage バックエンドの API URL）
         let endpoint_url = format!("http://127.0.0.1:{}/api/catalog/health", port);
+        // ブラウザで開く Web UI ルート URL を構築する（本番モードではバックエンドがフロントも配信するため backend_port を使う）
+        let web_url = format!("http://127.0.0.1:{}/", port);
         // アプリディレクトリの存在確認を行う
         let data_dir_exists = paths::backstage_app_dir(config).exists();
 
@@ -592,6 +608,8 @@ impl SetupEngine for BackstageEngine {
             endpoint_reachable,
             // エンドポイント URL を格納する
             endpoint_url,
+            // Web UI ルート URL を格納する
+            web_url,
             // データディレクトリの存在確認結果を格納する
             data_dir_exists,
         })

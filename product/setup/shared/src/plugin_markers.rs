@@ -229,7 +229,9 @@ pub fn insert_plugin(
     };
     // マーカー間に同名パッケージが存在する場合は重複登録エラーを返す
     if already_registered {
-        return Err(MarkerError::AlreadyRegistered(registration.package_name.clone()));
+        return Err(MarkerError::AlreadyRegistered(
+            registration.package_name.clone(),
+        ));
     }
 
     // プラグイン種別ごとの挿入処理に振り分ける
@@ -280,7 +282,9 @@ fn contains_in_marker_region(
     };
 
     // マーカー間の行（境界を除く）に needle が含まれているか確認する
-    lines[start_idx + 1..end_idx].iter().any(|l| l.contains(needle))
+    lines[start_idx + 1..end_idx]
+        .iter()
+        .any(|l| l.contains(needle))
 }
 
 // フロントエンド App.tsx にプラグインのインポート行とルート行を挿入する
@@ -312,7 +316,12 @@ fn insert_backend_plugin(
     registration: &PluginRegistration,
 ) -> Result<String, MarkerError> {
     // バックエンドマーカー間に登録行を挿入する
-    insert_between(source, BACKEND_START, BACKEND_END, &registration.register_line)
+    insert_between(
+        source,
+        BACKEND_START,
+        BACKEND_END,
+        &registration.register_line,
+    )
 }
 
 // 指定したマーカー間のコンテンツ末尾に1行を挿入するヘルパー関数
@@ -372,8 +381,12 @@ pub fn remove_plugin(
     match kind {
         PluginKind::Frontend => {
             // インポートマーカー間からプラグインに関連する行を削除する
-            let source =
-                remove_from_between(source, FRONTEND_IMPORT_START, FRONTEND_IMPORT_END, plugin_name)?;
+            let source = remove_from_between(
+                source,
+                FRONTEND_IMPORT_START,
+                FRONTEND_IMPORT_END,
+                plugin_name,
+            )?;
             // ルートマーカー間からプラグインに関連する行を削除する
             remove_from_between(
                 &source,
@@ -487,13 +500,25 @@ backend.start();
         // ensure_markers を呼び出してマーカーを挿入する
         let result = ensure_markers(source, &PluginKind::Frontend).unwrap();
         // インポートマーカーが挿入されていることを確認する
-        assert!(result.contains(FRONTEND_IMPORT_START), "インポート開始マーカーが存在しない");
+        assert!(
+            result.contains(FRONTEND_IMPORT_START),
+            "インポート開始マーカーが存在しない"
+        );
         // インポート終了マーカーが挿入されていることを確認する
-        assert!(result.contains(FRONTEND_IMPORT_END), "インポート終了マーカーが存在しない");
+        assert!(
+            result.contains(FRONTEND_IMPORT_END),
+            "インポート終了マーカーが存在しない"
+        );
         // ルートマーカーが挿入されていることを確認する
-        assert!(result.contains(FRONTEND_ROUTE_START), "ルート開始マーカーが存在しない");
+        assert!(
+            result.contains(FRONTEND_ROUTE_START),
+            "ルート開始マーカーが存在しない"
+        );
         // ルート終了マーカーが挿入されていることを確認する
-        assert!(result.contains(FRONTEND_ROUTE_END), "ルート終了マーカーが存在しない");
+        assert!(
+            result.contains(FRONTEND_ROUTE_END),
+            "ルート終了マーカーが存在しない"
+        );
     }
 
     // ensure_markers はバックエンド index.ts にマーカーを正しく挿入する
@@ -504,14 +529,23 @@ backend.start();
         // ensure_markers を呼び出してバックエンドマーカーを挿入する
         let result = ensure_markers(source, &PluginKind::Backend).unwrap();
         // バックエンド開始マーカーが挿入されていることを確認する
-        assert!(result.contains(BACKEND_START), "バックエンド開始マーカーが存在しない");
+        assert!(
+            result.contains(BACKEND_START),
+            "バックエンド開始マーカーが存在しない"
+        );
         // バックエンド終了マーカーが挿入されていることを確認する
-        assert!(result.contains(BACKEND_END), "バックエンド終了マーカーが存在しない");
+        assert!(
+            result.contains(BACKEND_END),
+            "バックエンド終了マーカーが存在しない"
+        );
         // backend.start() がマーカーの後に存在することを確認する（順序が正しいか）
         let backend_end_pos = result.find(BACKEND_END).unwrap();
         let start_call_pos = result.find("backend.start").unwrap();
         // 終了マーカーが backend.start() より前に来ることを確認する
-        assert!(backend_end_pos < start_call_pos, "マーカーが backend.start() の後に挿入されている");
+        assert!(
+            backend_end_pos < start_call_pos,
+            "マーカーが backend.start() の後に挿入されている"
+        );
     }
 
     // ensure_markers は既にマーカーが存在する場合にソースを変更しない（冪等性）
@@ -537,20 +571,31 @@ backend.start();
         // テスト用のプラグイン登録情報を作成する
         let registration = PluginRegistration {
             package_name: "@backstage/plugin-kubernetes".to_string(),
-            import_line: "import { KubernetesPage } from '@backstage/plugin-kubernetes';".to_string(),
-            register_line: "<Route path=\"/kubernetes\" element={<KubernetesPage />} />".to_string(),
+            import_line: "import { KubernetesPage } from '@backstage/plugin-kubernetes';"
+                .to_string(),
+            register_line: "<Route path=\"/kubernetes\" element={<KubernetesPage />} />"
+                .to_string(),
         };
         // プラグインを挿入する
         let result = insert_plugin(&with_markers, &registration, &PluginKind::Frontend).unwrap();
         // インポート行がマーカー間に挿入されていることを確認する
-        assert!(result.contains("import { KubernetesPage }"), "インポート行が挿入されていない");
+        assert!(
+            result.contains("import { KubernetesPage }"),
+            "インポート行が挿入されていない"
+        );
         // ルート行がマーカー間に挿入されていることを確認する
-        assert!(result.contains("<Route path=\"/kubernetes\""), "ルート行が挿入されていない");
+        assert!(
+            result.contains("<Route path=\"/kubernetes\""),
+            "ルート行が挿入されていない"
+        );
         // インポートマーカーの後にインポート行が来ることを確認する
         let import_start_pos = result.find(FRONTEND_IMPORT_START).unwrap();
         let import_line_pos = result.find("import { KubernetesPage }").unwrap();
         // インポート開始マーカーの後にインポート行が来ることを確認する
-        assert!(import_start_pos < import_line_pos, "インポート行がマーカーの前にある");
+        assert!(
+            import_start_pos < import_line_pos,
+            "インポート行がマーカーの前にある"
+        );
     }
 
     // remove_plugin は対象プラグインの行のみをマーカー間から削除する
@@ -563,8 +608,10 @@ backend.start();
         // 1 個目のプラグインを挿入する
         let reg1 = PluginRegistration {
             package_name: "@backstage/plugin-kubernetes".to_string(),
-            import_line: "import { KubernetesPage } from '@backstage/plugin-kubernetes';".to_string(),
-            register_line: "<Route path=\"/kubernetes\" element={<KubernetesPage />} />".to_string(),
+            import_line: "import { KubernetesPage } from '@backstage/plugin-kubernetes';"
+                .to_string(),
+            register_line: "<Route path=\"/kubernetes\" element={<KubernetesPage />} />"
+                .to_string(),
         };
         // 2 個目のプラグインを挿入する
         let reg2 = PluginRegistration {
@@ -577,8 +624,12 @@ backend.start();
         // 2 個目のプラグインを挿入する
         let with_p2 = insert_plugin(&with_p1, &reg2, &PluginKind::Frontend).unwrap();
         // kubernetes プラグインのみを削除する
-        let after_remove =
-            remove_plugin(&with_p2, "@backstage/plugin-kubernetes", &PluginKind::Frontend).unwrap();
+        let after_remove = remove_plugin(
+            &with_p2,
+            "@backstage/plugin-kubernetes",
+            &PluginKind::Frontend,
+        )
+        .unwrap();
         // kubernetes に関連する行が削除されていることを確認する
         assert!(
             !after_remove.contains("@backstage/plugin-kubernetes"),

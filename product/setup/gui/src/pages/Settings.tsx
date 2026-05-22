@@ -1,5 +1,5 @@
 // 設定編集画面コンポーネント
-// General / Verdaccio / Backstage / Appearance の 4 セクションで SetupConfig を編集する
+// General / Verdaccio / Backstage / BaGet / Appearance の 5 セクションで SetupConfig を編集する
 // dirty 検出・バリデーション・手動保存・ナビ離脱ガードを実装する
 
 // React のフックをインポートする（react-jsx transform を使用しているため React 自体は不要）
@@ -43,6 +43,8 @@ interface ValidationErrors {
   backstage_backend_port?: string;
   // BaGet ポートのエラー（範囲外・非整数の場合）
   baget_port?: string;
+  // BaGet バージョンのエラー（空文字の場合）
+  baget_version?: string;
 }
 
 // ポート番号の有効範囲（OS が割り当てる動的ポート範囲を避けるため 1024 以上）
@@ -97,6 +99,11 @@ function validate(draft: SetupConfig): ValidationErrors {
   // BaGet ポートのバリデーション
   const bagetPortErr = validatePort(draft.baget.port, 'BaGet ポート');
   if (bagetPortErr) errors.baget_port = bagetPortErr;
+
+  // BaGet バージョンの空文字チェック
+  if (!draft.baget.version.trim()) {
+    errors.baget_version = 'バージョンを入力してください';
+  }
 
   // Verdaccio・Backstage・BaGet 全 4 ポートの組合せ重複チェック（バリデーションエラーのないもの同士）
   const portFields: Array<{ key: keyof ValidationErrors; val: number; name: string }> = [
@@ -667,9 +674,13 @@ export function Settings() {
               value={draft.baget.version}
               // 変更時にドラフトを更新する
               onChange={(e) => updateBaget('version', e.target.value)}
-              // スタイルクラスを適用する
-              className={[styles.input, styles.inputNarrow].join(' ')}
+              // バリデーションエラーがある場合はエラースタイルを適用する
+              className={[styles.input, styles.inputNarrow, errors.baget_version ? styles.inputError : ''].join(' ')}
             />
+            {/* バリデーションエラーメッセージを表示する */}
+            {errors.baget_version && (
+              <span className={styles.errorMsg}>{errors.baget_version}</span>
+            )}
           </div>
         </div>
 

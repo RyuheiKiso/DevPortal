@@ -7,6 +7,18 @@ use crate::args::{ConfigAction, ConfigArgs};
 // SetupConfig 型を参照するために使用する
 use shared::config::SetupConfig;
 
+// true/false 系の文字列を bool に変換するヘルパー関数
+fn parse_bool(value: &str) -> anyhow::Result<bool> {
+    match value.to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Ok(true),
+        "false" | "0" | "no" | "off" => Ok(false),
+        _ => Err(anyhow::anyhow!(
+            "真偽値は true/false, yes/no, on/off, 1/0 のいずれかで指定してください: {}",
+            value
+        )),
+    }
+}
+
 // config コマンドのエントリポイント関数
 // args: config サブコマンドの引数（show または set 操作を含む）
 // config: セットアップ設定への可変参照（set 操作で変更するため可変参照を受け取る）
@@ -24,14 +36,14 @@ pub fn run(args: &ConfigArgs, config: &mut SetupConfig) -> anyhow::Result<()> {
         // set: 指定されたキーと値で設定を変更してファイルに保存する
         ConfigAction::Set { key, value } => {
             // キーを "." で分割してドット記法のキーパスを解析する
-            // 対応キー: verdaccio.port / backstage.frontend_port / backstage.backend_port / install_root
+            // 対応キー: verdaccio.port / backstage.frontend_port / backstage.backend_port / baget.* / install_root
             match key.as_str() {
                 // Verdaccio のポート番号を変更する
                 "verdaccio.port" => {
                     // 値を u16 にパースする
-                    let port = value
-                        .parse::<u16>()
-                        .map_err(|_| anyhow::anyhow!("ポート番号は 0〜65535 の整数で指定してください: {}", value))?;
+                    let port = value.parse::<u16>().map_err(|_| {
+                        anyhow::anyhow!("ポート番号は 0〜65535 の整数で指定してください: {}", value)
+                    })?;
                     // 設定のポート番号を更新する
                     config.verdaccio.port = port;
                     // 変更内容を表示する
@@ -40,9 +52,9 @@ pub fn run(args: &ConfigArgs, config: &mut SetupConfig) -> anyhow::Result<()> {
                 // Backstage フロントエンドのポート番号を変更する
                 "backstage.frontend_port" => {
                     // 値を u16 にパースする
-                    let port = value
-                        .parse::<u16>()
-                        .map_err(|_| anyhow::anyhow!("ポート番号は 0〜65535 の整数で指定してください: {}", value))?;
+                    let port = value.parse::<u16>().map_err(|_| {
+                        anyhow::anyhow!("ポート番号は 0〜65535 の整数で指定してください: {}", value)
+                    })?;
                     // 設定のフロントエンドポート番号を更新する
                     config.backstage.frontend_port = port;
                     // 変更内容を表示する
@@ -51,13 +63,47 @@ pub fn run(args: &ConfigArgs, config: &mut SetupConfig) -> anyhow::Result<()> {
                 // Backstage バックエンドのポート番号を変更する
                 "backstage.backend_port" => {
                     // 値を u16 にパースする
-                    let port = value
-                        .parse::<u16>()
-                        .map_err(|_| anyhow::anyhow!("ポート番号は 0〜65535 の整数で指定してください: {}", value))?;
+                    let port = value.parse::<u16>().map_err(|_| {
+                        anyhow::anyhow!("ポート番号は 0〜65535 の整数で指定してください: {}", value)
+                    })?;
                     // 設定のバックエンドポート番号を更新する
                     config.backstage.backend_port = port;
                     // 変更内容を表示する
                     println!("backstage.backend_port を {} に設定しました", port);
+                }
+                // BaGet のポート番号を変更する
+                "baget.port" => {
+                    // 値を u16 にパースする
+                    let port = value.parse::<u16>().map_err(|_| {
+                        anyhow::anyhow!("ポート番号は 0〜65535 の整数で指定してください: {}", value)
+                    })?;
+                    // 設定のポート番号を更新する
+                    config.baget.port = port;
+                    // 変更内容を表示する
+                    println!("baget.port を {} に設定しました", port);
+                }
+                // BaGet のバージョン指定を変更する
+                "baget.version" => {
+                    // 空文字は無効とする
+                    if value.trim().is_empty() {
+                        return Err(anyhow::anyhow!("baget.version は空にできません"));
+                    }
+                    // 設定のバージョン指定を更新する
+                    config.baget.version = value.clone();
+                    // 変更内容を表示する
+                    println!("baget.version を {} に設定しました", value);
+                }
+                // BaGet のアンインストール時データ保持設定を変更する
+                "baget.keep_data_on_uninstall" => {
+                    // 値を bool にパースする
+                    let keep_data = parse_bool(value)?;
+                    // 設定のデータ保持フラグを更新する
+                    config.baget.keep_data_on_uninstall = keep_data;
+                    // 変更内容を表示する
+                    println!(
+                        "baget.keep_data_on_uninstall を {} に設定しました",
+                        keep_data
+                    );
                 }
                 // インストール先のルートディレクトリを変更する
                 "install_root" => {
@@ -72,7 +118,7 @@ pub fn run(args: &ConfigArgs, config: &mut SetupConfig) -> anyhow::Result<()> {
                 unknown_key => {
                     // 不明なキー名を含むエラーメッセージを返す
                     return Err(anyhow::anyhow!(
-                        "不明なキー: '{}'. 対応キー: verdaccio.port / backstage.frontend_port / backstage.backend_port / install_root",
+                        "不明なキー: '{}'. 対応キー: verdaccio.port / backstage.frontend_port / backstage.backend_port / baget.port / baget.version / baget.keep_data_on_uninstall / install_root",
                         unknown_key
                     ));
                 }

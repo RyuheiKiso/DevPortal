@@ -1,5 +1,5 @@
 // コンポーネントの状態と操作ボタンを表示するカードコンポーネント
-// Verdaccio / Backstage のサービスステータス・エンドポイント・データ状態とアクションを提供する
+// Verdaccio / Backstage / BaGet のサービスステータス・エンドポイント・データ状態とアクションを提供する
 
 // CSS Modules のスタイルをインポートする
 import styles from './ComponentCard.module.css';
@@ -11,7 +11,9 @@ import type { BadgeVariant } from '../../ui/Badge';
 import { Button } from '../../ui/Button';
 import { Icon } from '../../ui/Icon';
 // アクションボタンに使用する lucide-react アイコンをインポートする
-import { Play, Square, FileText, Download, Trash2 } from 'lucide-react';
+import { Play, Square, FileText, Download, Trash2, ExternalLink } from 'lucide-react';
+// ブラウザ起動 API をインポートする
+import { openInBrowser } from '../../api/tauri';
 
 // ServiceStatus を Badge の variant とラベルテキストにマッピングするオブジェクト
 const STATUS_BADGE_MAP: Record<ServiceStatus, { variant: BadgeVariant; label: string }> = {
@@ -168,6 +170,12 @@ export function ComponentCard({
 
       {/* ─── アクションボタン群 ─── */}
       <div className={styles.actions}>
+        {/* 開くボタン（実行中のみ有効、busy 中は無効）*/}
+        <Button variant="primary" size="sm" onClick={() => openInBrowser(status.web_url)} disabled={!isRunning || busy}>
+          <Icon icon={ExternalLink} size={14} />
+          開く
+        </Button>
+
         {/* インストールボタン（未インストール時のみ有効、busy 中は無効）*/}
         <Button variant="primary" size="sm" onClick={onInstall} disabled={isInstalled || busy}>
           <Icon icon={Download} size={14} />

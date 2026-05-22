@@ -38,7 +38,12 @@ impl Renderer {
         // イベントの種別に応じて人間向けの表示を行う
         match event {
             // ステップ開始イベントの表示
-            SetupEvent::StepStart { label, index, total_steps, .. } => {
+            SetupEvent::StepStart {
+                label,
+                index,
+                total_steps,
+                ..
+            } => {
                 // ステップ番号とラベルを表示する（">" は ASCII で表現する）
                 println!("> [{}/{}] {}", index + 1, total_steps, label);
             }
@@ -48,7 +53,11 @@ impl Renderer {
                 println!("  Done [{}] ({}ms)", id, duration_ms);
             }
             // 進捗イベントの表示
-            SetupEvent::Progress { id, percent, message } => {
+            SetupEvent::Progress {
+                id,
+                percent,
+                message,
+            } => {
                 // 進捗率と任意のメッセージを表示する
                 if let Some(msg) = message {
                     // メッセージがある場合は一緒に表示する
@@ -159,6 +168,8 @@ impl Renderer {
             // エンドポイントに到達できない場合は NG と URL を表示する
             println!("  エンドポイント: NG ({})", status.endpoint_url);
         }
+        // Web UI URL を表示する（ブラウザでアクセスする際の入口）
+        println!("  Web UI: {}", status.web_url);
 
         // データディレクトリの存在確認結果を表示する
         if status.data_dir_exists {

@@ -26,6 +26,8 @@ pub struct ComponentStatus {
     pub endpoint_reachable: bool,
     // ヘルスチェック対象のエンドポイント URL
     pub endpoint_url: String,
+    // ブラウザで開くための Web UI ルート URL
+    pub web_url: String,
     // データディレクトリが存在するかどうか
     pub data_dir_exists: bool,
 }

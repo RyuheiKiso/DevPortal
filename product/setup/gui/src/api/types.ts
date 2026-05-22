@@ -26,6 +26,8 @@ export interface ComponentStatus {
   endpoint_reachable: boolean;
   // ヘルスチェック対象のエンドポイント URL
   endpoint_url: string;
+  // ブラウザで開くための Web UI ルート URL
+  web_url: string;
   // データディレクトリが存在するかどうか
   data_dir_exists: boolean;
 }

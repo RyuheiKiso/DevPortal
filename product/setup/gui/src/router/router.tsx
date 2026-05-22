@@ -37,6 +37,10 @@ export type Route =
    ハッシュ文字列 ⇔ Route の変換関数
    ============================================================ */
 
+function isComponentKind(value: string | undefined): value is ComponentKind {
+  return value === 'verdaccio' || value === 'backstage' || value === 'baget';
+}
+
 // ハッシュ文字列（例: "#/install/verdaccio"）から Route オブジェクトへ変換する
 function parseHash(hash: string): Route {
   // 先頭の '#' および '/' を除去してパス文字列を取り出す
@@ -45,11 +49,11 @@ function parseHash(hash: string): Route {
   const [seg0, seg1] = path.split('/');
 
   // "#/install/:component" にマッチする場合
-  if (seg0 === 'install' && (seg1 === 'verdaccio' || seg1 === 'backstage')) {
+  if (seg0 === 'install' && isComponentKind(seg1)) {
     return { page: 'install', component: seg1 };
   }
   // "#/uninstall/:component" にマッチする場合
-  if (seg0 === 'uninstall' && (seg1 === 'verdaccio' || seg1 === 'backstage')) {
+  if (seg0 === 'uninstall' && isComponentKind(seg1)) {
     return { page: 'uninstall', component: seg1 };
   }
   // "#/settings" にマッチする場合
@@ -57,7 +61,7 @@ function parseHash(hash: string): Route {
     return { page: 'settings' };
   }
   // "#/component/:component" にマッチする場合（将来の詳細画面用）
-  if (seg0 === 'component' && (seg1 === 'verdaccio' || seg1 === 'backstage')) {
+  if (seg0 === 'component' && isComponentKind(seg1)) {
     return { page: 'detail', component: seg1 };
   }
   // "#/plugins" にマッチする場合（Backstage プラグイン管理画面）

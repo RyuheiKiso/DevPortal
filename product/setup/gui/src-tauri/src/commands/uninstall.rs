@@ -11,7 +11,7 @@ use shared::engine::engine_for;
 // shared クレートの設定構造体をインポートする
 use shared::config::SetupConfig;
 // cmd_uninstall: アンインストールを開始し進捗を Channel で送信する Tauri コマンド
-// component: "verdaccio" または "backstage" を指定する文字列
+// component: "verdaccio" / "backstage" / "baget" を指定する文字列
 // config: アンインストール設定（フロントエンドから JSON でシリアライズされて渡される）
 // keep_data: true のときデータディレクトリを保持する
 // on_event: Tauri v2 の Channel<SetupEvent>（進捗イベントの送信先）

@@ -123,15 +123,24 @@ impl Nssm {
     // reporter: 各ステップの進行状況を GUI/CLI ログに表示するために使用する
     pub fn install(&self, name: &str, exe: &str, reporter: &Reporter) -> Result<(), SetupError> {
         // ベストエフォートで既存サービスを停止する（失敗は無視）
-        reporter.info(&format!("[クリーンアップ] 既存サービス '{}' の停止を試行", name));
+        reporter.info(&format!(
+            "[クリーンアップ] 既存サービス '{}' の停止を試行",
+            name
+        ));
         let _ = self.stop(name);
 
         // ベストエフォートで NSSM 経由のサービス削除を試みる（失敗は無視）
-        reporter.info(&format!("[クリーンアップ] 既存サービス '{}' の NSSM remove を試行", name));
+        reporter.info(&format!(
+            "[クリーンアップ] 既存サービス '{}' の NSSM remove を試行",
+            name
+        ));
         let _ = self.run_nssm(&["remove", name, "confirm"]);
 
         // ベストエフォートで sc.exe 経由の削除を試みる（NSSM remove が失敗した場合の保険）
-        reporter.info(&format!("[クリーンアップ] 既存サービス '{}' の sc.exe delete を試行", name));
+        reporter.info(&format!(
+            "[クリーンアップ] 既存サービス '{}' の sc.exe delete を試行",
+            name
+        ));
         self.run_system_cmd_ignore("sc.exe", &["delete", name]);
 
         // レジストリ残骸を再帰削除する（NSSM の Parameters 初期化を阻害しないよう先に消す）
@@ -159,10 +168,16 @@ impl Nssm {
 
         // Parameters\Application が実際に非空の値で書き込まれたことを winreg で検証する
         // nssm install は exit 0 を返しても稀に Parameters を書かないことがあるため
-        reporter.info(&format!("[検証] Parameters\\Application の書き込みを確認 ('{}')", name));
+        reporter.info(&format!(
+            "[検証] Parameters\\Application の書き込みを確認 ('{}')",
+            name
+        ));
         self.verify_parameters_application(name)?;
 
-        reporter.info(&format!("[検証] OK: nssm install が正常に完了 ('{}')", name));
+        reporter.info(&format!(
+            "[検証] OK: nssm install が正常に完了 ('{}')",
+            name
+        ));
         Ok(())
     }
 
@@ -220,7 +235,10 @@ impl Nssm {
             )
             .trim()
             .to_string();
-            return Err(SetupError::NssmFailed { cmd: cmd_str, output: combined });
+            return Err(SetupError::NssmFailed {
+                cmd: cmd_str,
+                output: combined,
+            });
         }
         Ok(())
     }
@@ -230,8 +248,8 @@ impl Nssm {
     // 削除失敗はログ出力もせずに無視する（ベストエフォート処理）
     #[cfg(windows)]
     fn delete_service_registry(&self, name: &str) {
-        use winreg::RegKey;
         use winreg::enums::HKEY_LOCAL_MACHINE;
+        use winreg::RegKey;
         // 削除対象のキーパスを構築する
         let key_path = format!("SYSTEM\\CurrentControlSet\\Services\\{}", name);
         // HKLM を事前定義ハンドルとして取得する
@@ -248,13 +266,10 @@ impl Nssm {
     // 値が存在しない場合は NssmFailed エラーを返して上位に伝播させる
     #[cfg(windows)]
     fn verify_parameters_application(&self, name: &str) -> Result<(), SetupError> {
-        use winreg::RegKey;
         use winreg::enums::HKEY_LOCAL_MACHINE;
+        use winreg::RegKey;
         // Parameters サブキーのパスを構築する
-        let key_path = format!(
-            "SYSTEM\\CurrentControlSet\\Services\\{}\\Parameters",
-            name
-        );
+        let key_path = format!("SYSTEM\\CurrentControlSet\\Services\\{}\\Parameters", name);
         // HKLM を事前定義ハンドルとして取得する
         let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
         // Parameters キーを書き込み可能で開く（NSSM の検証と同じアクセス権を確認するため）
@@ -276,18 +291,19 @@ impl Nssm {
                 ),
             })?;
         // Application 値を読み出す（存在しない場合はエラー）
-        let app_val: String = params_key
-            .get_value("Application")
-            .map_err(|_| SetupError::NssmFailed {
-                cmd: format!(
-                    "winreg verify ...\\Services\\{}\\Parameters\\Application",
-                    name
-                ),
-                output: format!(
-                    "Parameters\\Application が書き込まれていません。サービス名: {}",
-                    name
-                ),
-            })?;
+        let app_val: String =
+            params_key
+                .get_value("Application")
+                .map_err(|_| SetupError::NssmFailed {
+                    cmd: format!(
+                        "winreg verify ...\\Services\\{}\\Parameters\\Application",
+                        name
+                    ),
+                    output: format!(
+                        "Parameters\\Application が書き込まれていません。サービス名: {}",
+                        name
+                    ),
+                })?;
         // Application が空文字列の場合は NSSM がサービスを起動できないためエラーとする
         if app_val.trim().is_empty() {
             return Err(SetupError::NssmFailed {
@@ -351,9 +367,7 @@ impl Nssm {
                 self.run_system_cmd_strict("sc.exe", &["config", name, "DisplayName=", value])
             }
             // SCM の Description を sc.exe description で設定する
-            "Description" => {
-                self.run_system_cmd_strict("sc.exe", &["description", name, value])
-            }
+            "Description" => self.run_system_cmd_strict("sc.exe", &["description", name, value]),
             // SCM の StartType を sc.exe config で設定する（NSSM 文字列を sc.exe 形式に変換）
             "Start" => self.sc_config_start(name, value),
             // 未対応のパラメータはエラーとして返す（新規パラメータは上記に追加すること）
@@ -408,9 +422,9 @@ impl Nssm {
         value_name: &str,
         value: &str,
     ) -> Result<(), SetupError> {
+        use winreg::enums::{HKEY_LOCAL_MACHINE, REG_EXPAND_SZ};
         use winreg::RegKey;
         use winreg::RegValue;
-        use winreg::enums::{HKEY_LOCAL_MACHINE, REG_EXPAND_SZ};
         // HKLM を事前定義ハンドルとして取得する
         let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
         // Parameters サブキーのパスを構築する
@@ -419,9 +433,9 @@ impl Nssm {
             service_name
         );
         // Parameters キーを作成または開く（create_subkey は存在する場合は開く）
-        let (params_key, _) = hklm
-            .create_subkey(&key_path)
-            .map_err(|e| SetupError::Other(format!("{} の Parameters キー: {}", service_name, e)))?;
+        let (params_key, _) = hklm.create_subkey(&key_path).map_err(|e| {
+            SetupError::Other(format!("{} の Parameters キー: {}", service_name, e))
+        })?;
         // 値を UTF-16LE + null terminator にエンコードする
         let wide: Vec<u8> = value
             .encode_utf16()
@@ -430,9 +444,18 @@ impl Nssm {
             .collect();
         // REG_EXPAND_SZ として書き込む
         params_key
-            .set_raw_value(value_name, &RegValue { bytes: wide, vtype: REG_EXPAND_SZ })
+            .set_raw_value(
+                value_name,
+                &RegValue {
+                    bytes: wide,
+                    vtype: REG_EXPAND_SZ,
+                },
+            )
             .map_err(|e| {
-                SetupError::Other(format!("{} への {} 書き込み失敗: {}", service_name, value_name, e))
+                SetupError::Other(format!(
+                    "{} への {} 書き込み失敗: {}",
+                    service_name, value_name, e
+                ))
             })?;
         Ok(())
     }
@@ -452,9 +475,9 @@ impl Nssm {
         value_name: &str,
         value: u32,
     ) -> Result<(), SetupError> {
+        use winreg::enums::{HKEY_LOCAL_MACHINE, REG_DWORD};
         use winreg::RegKey;
         use winreg::RegValue;
-        use winreg::enums::{HKEY_LOCAL_MACHINE, REG_DWORD};
         // HKLM を事前定義ハンドルとして取得する
         let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
         // Parameters サブキーのパスを構築する
@@ -463,17 +486,23 @@ impl Nssm {
             service_name
         );
         // Parameters キーを作成または開く
-        let (params_key, _) = hklm
-            .create_subkey(&key_path)
-            .map_err(|e| SetupError::Other(format!("{} の Parameters キー: {}", service_name, e)))?;
+        let (params_key, _) = hklm.create_subkey(&key_path).map_err(|e| {
+            SetupError::Other(format!("{} の Parameters キー: {}", service_name, e))
+        })?;
         // 4 バイト little-endian として書き込む
         params_key
             .set_raw_value(
                 value_name,
-                &RegValue { bytes: value.to_le_bytes().to_vec(), vtype: REG_DWORD },
+                &RegValue {
+                    bytes: value.to_le_bytes().to_vec(),
+                    vtype: REG_DWORD,
+                },
             )
             .map_err(|e| {
-                SetupError::Other(format!("{} への {} 書き込み失敗: {}", service_name, value_name, e))
+                SetupError::Other(format!(
+                    "{} への {} 書き込み失敗: {}",
+                    service_name, value_name, e
+                ))
             })?;
         Ok(())
     }
@@ -493,9 +522,9 @@ impl Nssm {
         value_name: &str,
         entry: &str,
     ) -> Result<(), SetupError> {
+        use winreg::enums::{HKEY_LOCAL_MACHINE, REG_MULTI_SZ};
         use winreg::RegKey;
         use winreg::RegValue;
-        use winreg::enums::{HKEY_LOCAL_MACHINE, REG_MULTI_SZ};
         // HKLM を事前定義ハンドルとして取得する
         let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
         // Parameters サブキーのパスを構築する
@@ -504,9 +533,9 @@ impl Nssm {
             service_name
         );
         // Parameters キーを作成または開く
-        let (params_key, _) = hklm
-            .create_subkey(&key_path)
-            .map_err(|e| SetupError::Other(format!("{} の Parameters キー: {}", service_name, e)))?;
+        let (params_key, _) = hklm.create_subkey(&key_path).map_err(|e| {
+            SetupError::Other(format!("{} の Parameters キー: {}", service_name, e))
+        })?;
         // 既存の MULTI_SZ 値を読み出す（存在しない場合は空配列として扱う）
         let mut existing: Vec<String> = params_key.get_value(value_name).unwrap_or_default();
         // 新規エントリを末尾に追記する
@@ -525,9 +554,18 @@ impl Nssm {
         wide_bytes.extend_from_slice(&0u16.to_le_bytes());
         // REG_MULTI_SZ として書き込む
         params_key
-            .set_raw_value(value_name, &RegValue { bytes: wide_bytes, vtype: REG_MULTI_SZ })
+            .set_raw_value(
+                value_name,
+                &RegValue {
+                    bytes: wide_bytes,
+                    vtype: REG_MULTI_SZ,
+                },
+            )
             .map_err(|e| {
-                SetupError::Other(format!("{} への {} 書き込み失敗: {}", service_name, value_name, e))
+                SetupError::Other(format!(
+                    "{} への {} 書き込み失敗: {}",
+                    service_name, value_name, e
+                ))
             })?;
         Ok(())
     }
@@ -560,8 +598,8 @@ impl Nssm {
         exit_code: &str,
         action: &str,
     ) -> Result<(), SetupError> {
-        use winreg::RegKey;
         use winreg::enums::HKEY_LOCAL_MACHINE;
+        use winreg::RegKey;
         // HKLM を事前定義ハンドルとして取得する
         let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
         // AppExit サブキーのパスを構築する
@@ -571,11 +609,9 @@ impl Nssm {
             service_name
         );
         // AppExit サブキーを作成または開く
-        let (exit_key, _) = hklm
-            .create_subkey(&key_path)
-            .map_err(|e| {
-                SetupError::Other(format!("{} の AppExit キー作成失敗: {}", service_name, e))
-            })?;
+        let (exit_key, _) = hklm.create_subkey(&key_path).map_err(|e| {
+            SetupError::Other(format!("{} の AppExit キー作成失敗: {}", service_name, e))
+        })?;
         // 終了コードを値名として、動作文字列を REG_SZ として書き込む
         exit_key
             .set_value(exit_code, &action.to_string())

@@ -88,7 +88,7 @@ function RouteOutlet() {
         </div>
       );
 
-    // コンポーネント詳細ページ（Verdaccio / Backstage の状態・操作・設定を一覧表示する）
+    // コンポーネント詳細ページ（Verdaccio / Backstage / BaGet の状態・操作・設定を一覧表示する）
     case 'detail':
       return (
         <div key={routeKey} className={styles.pageTransition}>

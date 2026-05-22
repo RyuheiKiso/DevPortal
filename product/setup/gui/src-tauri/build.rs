@@ -39,9 +39,8 @@ fn main() {
   </compatibility>
 </assembly>"#;
             // WindowsAttributes にマニフェストを設定して Attributes を構築する
-            tauri_build::Attributes::new().windows_attributes(
-                tauri_build::WindowsAttributes::new().app_manifest(manifest),
-            )
+            tauri_build::Attributes::new()
+                .windows_attributes(tauri_build::WindowsAttributes::new().app_manifest(manifest))
         }
         #[cfg(not(target_os = "windows"))]
         {

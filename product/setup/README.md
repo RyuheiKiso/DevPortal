@@ -1,6 +1,6 @@
 # DevPortal セットアップツール
 
-Verdaccio（社内 npm レジストリ）と BackStage（開発者ポータル）を Windows サービスとしてセットアップ・アンインストールするツールです。
+Verdaccio（社内 npm レジストリ）、Backstage（開発者ポータル）、BaGet（社内 NuGet レジストリ）を Windows サービスとしてセットアップ・アンインストールするツールです。
 
 CLI と GUI（Tauri + React）の両方から操作できます。
 
@@ -12,11 +12,11 @@ CLI と GUI（Tauri + React）の両方から操作できます。
 
 | コマンド | 用途 | インストール方法 |
 |---|---|---|
-| `node` (18 LTS+) | BackStage・Verdaccio の実行環境 | https://nodejs.org/ |
+| `node` (18 LTS+) | Backstage・Verdaccio の実行環境 | https://nodejs.org/ |
 | `npm` | Verdaccio のインストール | Node.js に同梱 |
-| `npx` | BackStage 雛形生成 | Node.js に同梱 |
-| `yarn` | BackStage のパッケージ管理 | `corepack enable` または https://yarnpkg.com/ |
-| `git` | BackStage の初期化 | https://git-scm.com/ |
+| `npx` | Backstage 雛形生成 | Node.js に同梱 |
+| `yarn` | Backstage のパッケージ管理 | `corepack enable` または https://yarnpkg.com/ |
+| `git` | Backstage の初期化 | https://git-scm.com/ |
 
 ---
 
@@ -35,6 +35,13 @@ NSSM を手動で入手して `DEVPORTAL_NSSM_PATH` 環境変数にフルパス�
 ```powershell
 $env:DEVPORTAL_NSSM_PATH = "D:\tools\nssm.exe"
 cargo run -p cli -- install verdaccio
+```
+
+BaGet の ZIP を手動で入手して使う場合は `DEVPORTAL_BAGET_PATH` 環境変数にフルパスを設定してください。
+
+```powershell
+$env:DEVPORTAL_BAGET_PATH = "D:\tools\BaGet.zip"
+cargo run -p cli -- install baget
 ```
 
 ---
@@ -57,7 +64,11 @@ cargo run -p cli -- doctor
 # 管理者 PowerShell で実行（サービス登録に管理者権限が必要）
 cargo run -p cli -- install verdaccio
 cargo run -p cli -- install backstage
+cargo run -p cli -- install baget
 cargo run -p cli -- install all
+
+# ポートを指定する場合
+cargo run -p cli -- install baget --baget-port 5001
 ```
 
 ### アンインストール
@@ -67,6 +78,7 @@ cargo run -p cli -- install all
 cargo run -p cli -- uninstall verdaccio --keep-data
 # データごと完全削除
 cargo run -p cli -- uninstall backstage
+cargo run -p cli -- uninstall baget
 ```
 
 ### 状態確認
@@ -74,6 +86,7 @@ cargo run -p cli -- uninstall backstage
 ```powershell
 cargo run -p cli -- status
 cargo run -p cli -- status verdaccio
+cargo run -p cli -- status baget
 ```
 
 ### サービス制御
@@ -81,8 +94,16 @@ cargo run -p cli -- status verdaccio
 ```powershell
 cargo run -p cli -- service start verdaccio
 cargo run -p cli -- service stop backstage
-cargo run -p cli -- service restart verdaccio
-cargo run -p cli -- service logs verdaccio --tail 100
+cargo run -p cli -- service restart baget
+cargo run -p cli -- service logs baget --tail 100
+```
+
+### 設定
+
+```powershell
+cargo run -p cli -- config show
+cargo run -p cli -- config set baget.port 5001
+cargo run -p cli -- config set baget.version 0.4.0-preview2
 ```
 
 ### JSON 出力（CI・スクリプト連携）
@@ -115,8 +136,12 @@ npm run tauri dev
 | `%ProgramData%\DevPortal\verdaccio\storage\` | npm パッケージのストレージ |
 | `%ProgramData%\DevPortal\verdaccio\config.yaml` | Verdaccio 設定ファイル |
 | `%ProgramData%\DevPortal\verdaccio\logs\` | Verdaccio のログ |
-| `%ProgramData%\DevPortal\backstage\app\` | BackStage アプリケーション |
-| `%ProgramData%\DevPortal\backstage\logs\` | BackStage のログ |
+| `%ProgramData%\DevPortal\backstage\app\` | Backstage アプリケーション |
+| `%ProgramData%\DevPortal\backstage\logs\` | Backstage のログ |
+| `%ProgramData%\DevPortal\baget\app\` | BaGet 本体 |
+| `%ProgramData%\DevPortal\baget\packages\` | NuGet パッケージのストレージ |
+| `%ProgramData%\DevPortal\baget\data\` | BaGet SQLite DB |
+| `%ProgramData%\DevPortal\baget\logs\` | BaGet のログ |
 | `%ProgramData%\DevPortal\config\setup.toml` | セットアップ設定ファイル |
 
 ---
@@ -125,8 +150,9 @@ npm run tauri dev
 
 | コンポーネント | サービス名 | 表示名 |
 |---|---|---|
-| Verdaccio | `DevPortal.Verdaccio` | DevPortal - Verdaccio (npm registry) |
-| BackStage | `DevPortal.Backstage` | DevPortal - Backstage (developer portal) |
+| Verdaccio | `DevPortal-Verdaccio` | DevPortal - Verdaccio npm Registry |
+| Backstage | `DevPortal-Backstage` | DevPortal - Backstage Developer Portal |
+| BaGet | `DevPortal-BaGet` | DevPortal - BaGet NuGet Registry |
 
 ---
 
@@ -134,10 +160,6 @@ npm run tauri dev
 
 ```
 product/setup/
-├─ scripts/
-│  ├─ fetch-nssm.ps1        # NSSM 取得スクリプト
-│  └─ dev-bootstrap.ps1     # 開発者用初期セットアップ
-├─ resources/nssm/win64/    # nssm.exe 配置先（.gitignore 対象）
 ├─ shared/                  # CLI/GUI 共通ロジック（Rust）
 ├─ cli/                     # コマンドラインツール（Rust）
 └─ gui/                     # デスクトップ GUI（Tauri + React）
@@ -151,10 +173,14 @@ product/setup/
 
 `%ProgramData%\DevPortal\` を除外リストに追加することを推奨します。
 
-### BackStage の初回起動に時間がかかる
+### Backstage の初回起動に時間がかかる
 
 `yarn install` + TypeScript コンパイルに数分〜十数分かかります。ログ（`%ProgramData%\DevPortal\backstage\logs\stdout.log`）でリアルタイムに確認できます。
 
 ### Node.js のバージョン変更後にサービスが動かない
 
 インストール時の `node.exe` の絶対パスをサービスに登録しています。Node.js のパスが変わった場合は `uninstall` してから `install` を再実行してください。
+
+### BaGet のダウンロードに失敗する
+
+社内プロキシ環境では `HTTPS_PROXY` または `HTTP_PROXY` を設定してください。オフライン環境では `DEVPORTAL_BAGET_PATH` に BaGet ZIP のフルパスを指定してください。

@@ -1,5 +1,5 @@
 // このファイルは install サブコマンドの実装を提供する
-// Verdaccio / Backstage をインストールして Windows サービスに登録する
+// Verdaccio / Backstage / BaGet をインストールして Windows サービスに登録する
 
 // mpsc チャネルを使ってスレッド間でイベントを通信する
 use std::sync::mpsc;
@@ -113,6 +113,34 @@ pub fn run(
             // 確認スキップフラグを追加する
             elevated_args.push("--yes");
         }
+        // --verdaccio-port が指定されている場合は昇格後のコマンドにも追加する
+        let verdaccio_port_arg;
+        if let Some(port) = args.verdaccio_port {
+            elevated_args.push("--verdaccio-port");
+            verdaccio_port_arg = port.to_string();
+            elevated_args.push(verdaccio_port_arg.as_str());
+        }
+        // --backstage-port が指定されている場合は昇格後のコマンドにも追加する
+        let backstage_port_arg;
+        if let Some(port) = args.backstage_port {
+            elevated_args.push("--backstage-port");
+            backstage_port_arg = port.to_string();
+            elevated_args.push(backstage_port_arg.as_str());
+        }
+        // --baget-port が指定されている場合は昇格後のコマンドにも追加する
+        let baget_port_arg;
+        if let Some(port) = args.baget_port {
+            elevated_args.push("--baget-port");
+            baget_port_arg = port.to_string();
+            elevated_args.push(baget_port_arg.as_str());
+        }
+        // --install-dir が指定されている場合は昇格後のコマンドにも追加する
+        let install_dir_arg;
+        if let Some(dir) = &args.install_dir {
+            elevated_args.push("--install-dir");
+            install_dir_arg = dir.to_string_lossy().to_string();
+            elevated_args.push(install_dir_arg.as_str());
+        }
 
         // 管理者権限で自身を再起動する
         run_self_elevated(&elevated_args)?;
@@ -133,6 +161,12 @@ pub fn run(
     if let Some(port) = args.backstage_port {
         // Backstage フロントエンドのポート番号を上書きする
         effective_config.backstage.frontend_port = port;
+    }
+
+    // --baget-port が指定されている場合は設定を上書きする
+    if let Some(port) = args.baget_port {
+        // BaGet のポート番号を上書きする
+        effective_config.baget.port = port;
     }
 
     // --install-dir が指定されている場合は設定を上書きする
@@ -175,16 +209,14 @@ pub fn run(
             // Verdaccio を先にインストールする（config のクローンをスレッドに渡す）
             let verdaccio_config = effective_config.clone();
             // Verdaccio のインストールを実行する
-            let failed_v =
-                install_component(Component::Verdaccio, verdaccio_config, renderer)?;
+            let failed_v = install_component(Component::Verdaccio, verdaccio_config, renderer)?;
             // 失敗フラグを更新する
             any_failed = any_failed || failed_v;
 
             // Backstage をその後にインストールする
             let backstage_config = effective_config.clone();
             // Backstage のインストールを実行する
-            let failed_b =
-                install_component(Component::Backstage, backstage_config, renderer)?;
+            let failed_b = install_component(Component::Backstage, backstage_config, renderer)?;
             // 失敗フラグを更新する
             any_failed = any_failed || failed_b;
 

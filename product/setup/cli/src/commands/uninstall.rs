@@ -1,5 +1,5 @@
 // このファイルは uninstall サブコマンドの実装を提供する
-// Verdaccio / Backstage のサービスを削除してアンインストールする
+// Verdaccio / Backstage / BaGet のサービスを削除してアンインストールする
 
 // mpsc チャネルを使ってスレッド間でイベントを通信する
 use std::sync::mpsc;
@@ -151,36 +151,24 @@ pub fn run(
         // target が "verdaccio" の場合は Verdaccio のみアンインストールする
         "verdaccio" => {
             // Verdaccio をアンインストールしてフラグを更新する
-            let failed = uninstall_component(
-                Component::Verdaccio,
-                effective_config,
-                renderer,
-                keep_data,
-            )?;
+            let failed =
+                uninstall_component(Component::Verdaccio, effective_config, renderer, keep_data)?;
             // 失敗フラグを更新する
             any_failed = any_failed || failed;
         }
         // target が "backstage" の場合は Backstage のみアンインストールする
         "backstage" => {
             // Backstage をアンインストールしてフラグを更新する
-            let failed = uninstall_component(
-                Component::Backstage,
-                effective_config,
-                renderer,
-                keep_data,
-            )?;
+            let failed =
+                uninstall_component(Component::Backstage, effective_config, renderer, keep_data)?;
             // 失敗フラグを更新する
             any_failed = any_failed || failed;
         }
         // target が "baget" の場合は BaGet のみアンインストールする
         "baget" => {
             // BaGet をアンインストールしてフラグを更新する
-            let failed = uninstall_component(
-                Component::BaGet,
-                effective_config,
-                renderer,
-                keep_data,
-            )?;
+            let failed =
+                uninstall_component(Component::BaGet, effective_config, renderer, keep_data)?;
             // 失敗フラグを更新する
             any_failed = any_failed || failed;
         }
@@ -189,36 +177,24 @@ pub fn run(
             // Verdaccio を先にアンインストールする（config のクローンをスレッドに渡す）
             let verdaccio_config = effective_config.clone();
             // Verdaccio のアンインストールを実行する
-            let failed_v = uninstall_component(
-                Component::Verdaccio,
-                verdaccio_config,
-                renderer,
-                keep_data,
-            )?;
+            let failed_v =
+                uninstall_component(Component::Verdaccio, verdaccio_config, renderer, keep_data)?;
             // 失敗フラグを更新する
             any_failed = any_failed || failed_v;
 
             // Backstage をその後にアンインストールする
             let backstage_config = effective_config.clone();
             // Backstage のアンインストールを実行する
-            let failed_b = uninstall_component(
-                Component::Backstage,
-                backstage_config,
-                renderer,
-                keep_data,
-            )?;
+            let failed_b =
+                uninstall_component(Component::Backstage, backstage_config, renderer, keep_data)?;
             // 失敗フラグを更新する
             any_failed = any_failed || failed_b;
 
             // BaGet を最後にアンインストールする
             let baget_config = effective_config;
             // BaGet のアンインストールを実行する
-            let failed_bg = uninstall_component(
-                Component::BaGet,
-                baget_config,
-                renderer,
-                keep_data,
-            )?;
+            let failed_bg =
+                uninstall_component(Component::BaGet, baget_config, renderer, keep_data)?;
             // 失敗フラグを更新する
             any_failed = any_failed || failed_bg;
         }

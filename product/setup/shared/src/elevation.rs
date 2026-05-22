@@ -153,7 +153,9 @@ mod windows_impl {
         // 現在の実行ファイルのパスを取得する
         let exe_path = std::env::current_exe()
             // 実行ファイルパス取得失敗を SetupError::Other にラップする
-            .map_err(|e| crate::error::SetupError::Other(format!("実行ファイルパス取得失敗: {e}")))?;
+            .map_err(|e| {
+                crate::error::SetupError::Other(format!("実行ファイルパス取得失敗: {e}"))
+            })?;
 
         // exe_path を UTF-16 の null 終端文字列に変換する
         let exe_wide: Vec<u16> = exe_path

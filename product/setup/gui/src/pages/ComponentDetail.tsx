@@ -1,10 +1,10 @@
 // コンポーネント詳細ページコンポーネント
-// 単一コンポーネント（Verdaccio / Backstage）のステータス・設定・サービス操作を詳細表示する
+// 単一コンポーネント（Verdaccio / Backstage / BaGet）のステータス・設定・サービス操作を詳細表示する
 
 // React のフックをインポートする（react-jsx transform を使用しているため React 自体は不要）
 import { useState, useEffect, useCallback } from 'react';
 // API ラッパー関数をインポートする
-import { serviceAction, openLogs, loadConfig } from '../api/tauri';
+import { serviceAction, openLogs, loadConfig, openInBrowser } from '../api/tauri';
 // 型定義をインポートする
 import type { ComponentKind, ComponentStatus, SetupConfig } from '../api/types';
 // ルーターフックをインポートする（Settings へのジャンプに使用）
@@ -43,6 +43,8 @@ import {
   CheckCircle2,
   // エンドポイント到達不可アイコン
   XCircle,
+  // ブラウザで開くボタンのアイコン
+  ExternalLink,
 } from 'lucide-react';
 // CSS Modules のスタイルをインポートする
 import styles from './ComponentDetail.module.css';
@@ -299,8 +301,13 @@ export function ComponentDetail({
   // 実行中かどうかを判定する
   const isRunning = status?.service_status === 'running';
 
-  // このコンポーネントの設定値を取得する（verdaccio / backstage で異なる）
-  const componentConfig = component === 'verdaccio' ? config?.verdaccio : config?.backstage;
+  // このコンポーネントの設定値を取得する（コンポーネント種別ごとに異なる）
+  const componentConfig =
+    component === 'verdaccio'
+      ? config?.verdaccio
+      : component === 'backstage'
+        ? config?.backstage
+        : config?.baget;
 
   // コンポーネント詳細ページを描画する
   return (
@@ -373,6 +380,17 @@ export function ComponentDetail({
 
           {/* 操作ボタン群 */}
           <div className={styles.controlRow}>
+            {/* 開くボタン（実行中のみ有効）*/}
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => openInBrowser(status!.web_url)}
+              disabled={!isRunning || busy}
+            >
+              <Icon icon={ExternalLink} size={14} />
+              開く
+            </Button>
+
             {/* 開始ボタン（実行中は無効）*/}
             <Button
               variant="secondary"
@@ -478,6 +496,23 @@ export function ComponentDetail({
                 {/* アンインストール時のデータ保持設定の行 */}
                 <span className={styles.configLabel}>データ保持</span>
                 <span>{config.backstage.keep_data_on_uninstall ? '保持する' : '削除する'}</span>
+              </>
+            )}
+
+            {/* BaGet 固有の設定値を表示する */}
+            {component === 'baget' && config?.baget && (
+              <>
+                {/* ポート番号の行 */}
+                <span className={styles.configLabel}>ポート</span>
+                <span className={styles.configMono}>{config.baget.port}</span>
+
+                {/* バージョン指定の行 */}
+                <span className={styles.configLabel}>バージョン</span>
+                <span className={styles.configMono}>{config.baget.version}</span>
+
+                {/* アンインストール時のデータ保持設定の行 */}
+                <span className={styles.configLabel}>データ保持</span>
+                <span>{config.baget.keep_data_on_uninstall ? '保持する' : '削除する'}</span>
               </>
             )}
 
