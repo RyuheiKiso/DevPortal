@@ -5,6 +5,8 @@
 use shared::nssm::Nssm;
 // shared クレートのデフォルト設定をインポートする
 use shared::config::SetupConfig;
+// shared クレートのパスユーティリティをインポートする（設定ファイルパス取得に使用）
+use shared::paths;
 // shared クレートのエンジンファクトリ関数をインポートする
 use shared::engine::engine_for;
 // shared クレートのコンポーネント種別をインポートする
@@ -31,8 +33,14 @@ pub fn cmd_service_action(
         other => return Err(format!("未知のコンポーネント: {}", other)),
     };
 
-    // デフォルト設定を使用してサービス名を取得する
-    let config = SetupConfig::default();
+    // setup.toml から設定を読み込む（存在しない場合はデフォルトにフォールバックする）
+    // デフォルト設定を使用するとユーザーが変更した service_prefix が無視されるため
+    let config_path = paths::config_file();
+    let config = if config_path.exists() {
+        SetupConfig::from_file(&config_path).unwrap_or_default()
+    } else {
+        SetupConfig::default()
+    };
     // コンポーネントに対応するエンジンを取得する
     let engine = engine_for(comp);
     // エンジンからサービス名を取得する

@@ -77,6 +77,31 @@
   letter-spacing: -0.01em;
 }
 
+/* コンポーネント名をクリック可能にする場合のボタンスタイル（詳細ページへ遷移用）*/
+.nameButton {
+  /* ボタンデフォルトスタイルをリセットする */
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0 0 2px;
+  /* 見出しフォントサイズ */
+  font-size: var(--fs-h2);
+  /* 太字 */
+  font-weight: 700;
+  /* アクセントカラーでリンクであることを示す */
+  color: var(--accent);
+  /* テキストの文字間を少し詰める */
+  letter-spacing: -0.01em;
+  /* カーソルをポインターにする */
+  cursor: pointer;
+  /* ホバー時にアンダーラインで遷移可能を示す */
+  text-decoration: underline;
+  /* アンダーラインのスタイルを控えめにする */
+  text-decoration-style: dotted;
+  /* アンダーラインの色を薄くする */
+  text-underline-offset: 3px;
+}
+
 /* コンポーネントの説明文 */
 .desc {
   /* 小さいフォントサイズ */

@@ -3,9 +3,11 @@
 // dirty 検出・バリデーション・手動保存・ナビ離脱ガードを実装する
 
 // React のフックをインポートする（react-jsx transform を使用しているため React 自体は不要）
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 // API ラッパー関数をインポートする
 import { loadConfig, saveConfig, pickDirectory } from '../api/tauri';
+// ナビゲーション離脱ガードフックをインポートする
+import { useNavigationGuard } from '../router/router';
 // SetupConfig 型をインポートする
 import type { SetupConfig } from '../api/types';
 // テーマ管理フックをインポートする
@@ -90,13 +92,22 @@ function validate(draft: SetupConfig): ValidationErrors {
   const backendPortErr = validatePort(draft.backstage.backend_port, 'バックエンドポート');
   if (backendPortErr) errors.backstage_backend_port = backendPortErr;
 
-  // フロントエンドとバックエンドのポートが重複していないか確認する
-  if (
-    !frontendPortErr && !backendPortErr &&
-    draft.backstage.frontend_port === draft.backstage.backend_port
-  ) {
-    errors.backstage_frontend_port = 'フロントエンドとバックエンドのポートが重複しています';
-    errors.backstage_backend_port = 'フロントエンドとバックエンドのポートが重複しています';
+  // Verdaccio・Backstage 全 3 ポートの組合せ重複チェック（バリデーションエラーのないもの同士）
+  const portFields: Array<{ key: keyof ValidationErrors; val: number; name: string }> = [
+    { key: 'verdaccio_port',           val: draft.verdaccio.port,          name: 'Verdaccio ポート' },
+    { key: 'backstage_frontend_port',  val: draft.backstage.frontend_port,  name: 'フロントエンドポート' },
+    { key: 'backstage_backend_port',   val: draft.backstage.backend_port,   name: 'バックエンドポート' },
+  ];
+  // バリデーション済みのポートフィールドだけを抽出して全組合せで重複を検出する
+  const validPorts = portFields.filter((p) => !errors[p.key]);
+  for (let i = 0; i < validPorts.length; i++) {
+    for (let j = i + 1; j < validPorts.length; j++) {
+      // 値が同じならどちらのフィールドにも重複エラーをセットする
+      if (validPorts[i].val === validPorts[j].val) {
+        errors[validPorts[i].key] = '他のポートと重複しています';
+        errors[validPorts[j].key] = '他のポートと重複しています';
+      }
+    }
   }
 
   return errors;
@@ -129,8 +140,6 @@ export function Settings() {
   const [loadError, setLoadError] = useState<string | null>(null);
   // 保存中フラグ
   const [saving, setSaving] = useState(false);
-  // dirty 状態を hashchange ハンドラで参照するための ref
-  const isDirtyRef = useRef(false);
 
   // dirty かどうかを JSON.stringify で比較して判定する
   const isDirty = useMemo(
@@ -138,9 +147,6 @@ export function Settings() {
       JSON.stringify(draft) !== JSON.stringify(savedConfig),
     [savedConfig, draft]
   );
-
-  // isDirtyRef を最新の isDirty 値に同期する（イベントハンドラ内から参照するため）
-  isDirtyRef.current = isDirty;
 
   // ドラフトのバリデーションエラーを計算する
   const errors = useMemo(
@@ -153,41 +159,34 @@ export function Settings() {
 
   // 初回マウント時に setup.toml から設定を読み込む
   useEffect(() => {
-    // Rust 側の cmd_load_config を呼び出して設定を取得する
+    // アンマウント後に setState が走らないよう mounted フラグで保護する
+    let mounted = true;
     loadConfig()
       .then((config) => {
+        // アンマウント済みの場合は state 更新をスキップする
+        if (!mounted) return;
         // 読み込んだ設定を保存済みとドラフトの両方にセットする
         setSavedConfig(config);
         setDraft(config);
       })
       .catch((e) => {
+        // アンマウント済みの場合は state 更新をスキップする
+        if (!mounted) return;
         // 読み込み失敗時はエラーメッセージを表示する
         setLoadError(`設定読み込み失敗: ${String(e)}`);
       });
+    return () => { mounted = false; };
   }, []);
 
-  // ナビゲーション離脱ガード（dirty 状態で他のページへ移動しようとした場合に確認する）
-  useEffect(() => {
-    // hashchange イベントハンドラを定義する
-    const handler = (e: HashChangeEvent) => {
-      // Settings ページ以外へ遷移しようとしていて、dirty 状態の場合のみ確認する
-      if (isDirtyRef.current && !e.newURL.includes('#/settings')) {
-        // ネイティブ確認ダイアログで離脱するかどうかを確認する（同期処理）
-        const confirmed = window.confirm(
-          '変更が保存されていません。このページを離れますか？'
-        );
-        // キャンセルされた場合は Settings ページに戻す
-        if (!confirmed) {
-          // ハッシュを settings に戻してルーターを Settings に再遷移させる
-          window.location.hash = '#/settings';
-        }
-      }
-    };
-    // hashchange イベントを購読する
-    window.addEventListener('hashchange', handler);
-    // アンマウント時にイベントリスナーを解除する
-    return () => window.removeEventListener('hashchange', handler);
-  }, []);
+  // ナビゲーション離脱ガード（dirty 状態でサイドバー等から他ページへ遷移しようとした場合に確認する）
+  // ルーター層の navigate() が呼ばれる前に同期的に確認するため、Settings がアンマウントされる前に動く
+  // 注意: Tauri ウィンドウの「×」ボタンによる終了には対応できない（OS レベルの操作のため）
+  useNavigationGuard(
+    // dirty 状態のときのみガードを有効にする
+    isDirty,
+    // ネイティブ確認ダイアログで離脱を確認する（true で遷移許可、false でキャンセル）
+    () => window.confirm('変更が保存されていません。このページを離れますか？'),
+  );
 
   // ドラフトの特定フィールドを更新するヘルパー関数
   const updateDraft = useCallback(<K extends keyof SetupConfig>(
@@ -259,7 +258,7 @@ export function Settings() {
     // キーダウンイベントのハンドラを定義する
     const handler = (e: KeyboardEvent) => {
       // Ctrl キー（Windows/Linux）または Meta キー（macOS）+ S の組み合わせを検出する
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         // ブラウザのデフォルト保存ダイアログを抑制する
         e.preventDefault();
         // dirty かつバリデーションエラーなしかつ保存中でない場合のみ保存する

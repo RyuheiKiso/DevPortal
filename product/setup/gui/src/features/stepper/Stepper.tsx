@@ -115,13 +115,27 @@ export function Stepper({ state, onRetry, onBack }: StepperProps) {
   return (
     <div className={styles.stepper}>
 
-      {/* ─── ステップリスト ─── */}
+      {/* ─── ステップリスト（aria-live でスクリーンリーダーに進捗変化を通知する）─── */}
+      {/* aria-relevant="additions text" で追加・テキスト変化のみ通知し過剰な読み上げを防ぐ */}
+      <div role="list" aria-live="polite" aria-relevant="additions text">
       {state.steps.map((step, i) => {
         // 最後のステップかどうかを判定する（コネクター線の表示に使用）
         const isLast = i === state.steps.length - 1;
 
         return (
-          <div key={step.id} className={styles.step}>
+          // ステップのラベルと状態をスクリーンリーダーが読み上げられるよう aria-label を付ける
+          <div
+            key={step.id}
+            className={styles.step}
+            role="listitem"
+            aria-label={`ステップ: ${step.label} / 状態: ${
+              step.status === 'done'    ? '完了'      :
+              step.status === 'running' ? '実行中'   :
+              step.status === 'failed'  ? '失敗'      :
+              step.status === 'skipped' ? 'スキップ済み' :
+              '待機中'
+            }`}
+          >
 
             {/* 左側のトラック（アイコン + コネクター線）*/}
             <div className={styles.track}>
@@ -187,6 +201,7 @@ export function Stepper({ state, onRetry, onBack }: StepperProps) {
           </div>
         );
       })}
+      </div>
 
       {/* ─── 完了バナー（finished イベント受信後に表示する）─── */}
       {/* aria-live="polite" でスクリーンリーダーに結果が出たことを通知する */}

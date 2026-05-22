@@ -74,10 +74,17 @@ export function Install({ component, onBack }: InstallProps) {
 
   // 画面マウント時に setup.toml から設定を読み込む
   useEffect(() => {
-    // Rust 側の cmd_load_config を呼び出して設定を取得する
-    loadConfig().then(setConfig).catch(() => {
-      // 読み込み失敗時はデフォルト設定のまま継続する（致命的ではない）
-    });
+    // アンマウント後に setConfig が走らないよう mounted フラグで保護する
+    let mounted = true;
+    loadConfig()
+      .then((cfg) => {
+        // アンマウント済みの場合は state 更新をスキップしてフォルダ選択結果を上書きしない
+        if (mounted) setConfig(cfg);
+      })
+      .catch(() => {
+        // 読み込み失敗時はデフォルト設定のまま継続する（致命的ではない）
+      });
+    return () => { mounted = false; };
   }, []);
 
   // フォルダ選択ダイアログを開くコールバック

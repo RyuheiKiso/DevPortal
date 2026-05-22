@@ -1,8 +1,6 @@
 // アプリ上部の全幅固定バーコンポーネント（パンくずナビと右側アクションを提供する）
 // 現在のルートに応じたパンくずとリフレッシュ・前提チェックボタンを表示する
 
-// useState フックをインポートする
-import { useState } from 'react';
 // CSS Modules のスタイルをインポートする
 import styles from './TopBar.module.css';
 // ルーター（現在のルートと navigate 関数）をインポートする
@@ -44,7 +42,7 @@ function getBreadcrumbs(route: Route): string[] {
     // 設定画面
     case 'settings':
       return ['Settings'];
-    // 詳細画面（将来用）
+    // 詳細画面
     case 'detail':
       return [
         // コンポーネント名（先頭大文字）
@@ -60,47 +58,15 @@ function getBreadcrumbs(route: Route): string[] {
 export function TopBar() {
   // 現在のルートを取得する
   const { route } = useRouter();
-  // Overview の関数を共有するコンテキストを取得する
+  // 共有コンテキストからローディング状態とラッパー関数を取得する
   const appActions = useAppActions();
-  // 更新ボタンのローディング状態
-  const [refreshing, setRefreshing] = useState(false);
-  // 前提チェックボタンのローディング状態
-  const [prereqing, setPrereqing] = useState(false);
+  // 共有ローディング状態を取得する（TopBar・Overview 両方で同じ値を参照する）
+  const isRefreshing = appActions?.isRefreshing ?? false;
+  // 前提チェックのローディング状態を取得する
+  const isPrereqChecking = appActions?.isPrereqChecking ?? false;
 
   // 現在のルートからパンくず配列を生成する
   const breadcrumbs = getBreadcrumbs(route);
-
-  // ステータス更新ボタンのクリックハンドラ
-  // Overview の loadStatuses を呼び出してコンポーネントの状態を再取得する
-  const handleRefresh = async () => {
-    // 既に更新中の場合は重複実行しない
-    if (refreshing) return;
-    // 更新中フラグを立てる
-    setRefreshing(true);
-    try {
-      // AppActionsContext 経由で Overview の loadStatuses を呼び出す
-      await appActions?.loadStatuses.current();
-    } finally {
-      // 更新中フラグを解除する
-      setRefreshing(false);
-    }
-  };
-
-  // 前提チェックボタンのクリックハンドラ
-  // Overview の handlePrereqCheck を呼び出して前提条件を確認する
-  const handlePrereqCheck = async () => {
-    // 既にチェック中の場合は重複実行しない
-    if (prereqing) return;
-    // チェック中フラグを立てる
-    setPrereqing(true);
-    try {
-      // AppActionsContext 経由で Overview の handlePrereqCheck を呼び出す
-      await appActions?.prereqCheck.current();
-    } finally {
-      // チェック中フラグを解除する
-      setPrereqing(false);
-    }
-  };
 
   // Overview ページ以外ではアクションボタンを非表示にする
   // （更新・前提チェックは Overview のコンテキストでのみ意味を持つ）
@@ -133,42 +99,42 @@ export function TopBar() {
       {/* 右側: アクションボタン群（Overview ページのみ表示する）*/}
       {showActions && (
         <div className={styles.right}>
-          {/* 前提チェックボタン */}
+          {/* 前提チェックボタン（AppActionsContext の runPrereqCheck を呼び出す）*/}
           <Button
             // ゴーストボタンとして表示する
             variant="ghost"
             // 小さいサイズ
             size="sm"
-            // Overview の handlePrereqCheck を呼び出す
-            onClick={handlePrereqCheck}
-            // チェック中は無効にする
-            disabled={prereqing}
+            // 共有ラッパー関数を呼び出す（二重発火防止は内部で行う）
+            onClick={() => appActions?.runPrereqCheck()}
+            // 共有ローディング状態でボタンを無効にする
+            disabled={isPrereqChecking}
             // アクセシブルラベル
             aria-label="前提条件を再チェックする"
           >
             {/* 前提チェックアイコン */}
             <Icon icon={ShieldCheck} size={14} />
             {/* 実行中はラベルを変更する */}
-            {prereqing ? '確認中…' : '前提チェック'}
+            {isPrereqChecking ? '確認中…' : '前提チェック'}
           </Button>
 
-          {/* ステータス更新ボタン */}
+          {/* ステータス更新ボタン（AppActionsContext の runLoadStatuses を呼び出す）*/}
           <Button
             // ゴーストボタンとして表示する
             variant="ghost"
             // 小さいサイズ
             size="sm"
-            // Overview の loadStatuses を呼び出す
-            onClick={handleRefresh}
-            // 更新中は無効にする
-            disabled={refreshing}
+            // 共有ラッパー関数を呼び出す（二重発火防止は内部で行う）
+            onClick={() => appActions?.runLoadStatuses()}
+            // 共有ローディング状態でボタンを無効にする
+            disabled={isRefreshing}
             // アクセシブルラベル
             aria-label="ステータスを更新する"
           >
             {/* 更新アイコン */}
             <Icon icon={RefreshCw} size={14} />
             {/* 実行中はラベルを変更する */}
-            {refreshing ? '更新中…' : '更新'}
+            {isRefreshing ? '更新中…' : '更新'}
           </Button>
         </div>
       )}

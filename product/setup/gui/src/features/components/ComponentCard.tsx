@@ -46,10 +46,14 @@ function getStatusClass(status: ServiceStatus): string {
   }
 }
 
-// ComponentCard コンポーネントが受け取る Props 型（既存 API と互換性を保つ）
+// ComponentCard コンポーネントが受け取る Props 型
 interface ComponentCardProps {
   // 表示するコンポーネントのステータス情報
   status: ComponentStatus;
+  // このカードのサービス操作が実行中かどうか（true の場合は操作ボタンを disable する）
+  busy?: boolean;
+  // コンポーネント名クリック時に詳細ページへ遷移するコールバック
+  onDetail?: () => void;
   // インストールボタンが押されたときのコールバック
   onInstall: () => void;
   // アンインストールボタンが押されたときのコールバック
@@ -81,6 +85,8 @@ const DESCRIPTIONS: Record<string, string> = {
 // コンポーネントの状態カードコンポーネント
 export function ComponentCard({
   status,
+  busy = false,
+  onDetail,
   onInstall,
   onUninstall,
   onStart,
@@ -104,10 +110,16 @@ export function ComponentCard({
 
       {/* ─── ヘッダー（コンポーネント名・説明・ステータスバッジ）─── */}
       <div className={styles.header}>
-        {/* 左側: コンポーネント名と説明 */}
+        {/* 左側: コンポーネント名（クリックで詳細ページへ遷移する）と説明 */}
         <div>
-          {/* コンポーネント名の見出し */}
-          <h2 className={styles.name}>{displayName}</h2>
+          {/* コンポーネント名の見出し（onDetail が指定された場合はボタンとして描画する）*/}
+          {onDetail ? (
+            <button className={styles.nameButton} onClick={onDetail}>
+              {displayName}
+            </button>
+          ) : (
+            <h2 className={styles.name}>{displayName}</h2>
+          )}
           {/* コンポーネントの説明文 */}
           <p className={styles.desc}>{description}</p>
         </div>
@@ -152,32 +164,32 @@ export function ComponentCard({
 
       {/* ─── アクションボタン群 ─── */}
       <div className={styles.actions}>
-        {/* インストールボタン（未インストール時のみ有効）*/}
-        <Button variant="primary" size="sm" onClick={onInstall} disabled={isInstalled}>
+        {/* インストールボタン（未インストール時のみ有効、busy 中は無効）*/}
+        <Button variant="primary" size="sm" onClick={onInstall} disabled={isInstalled || busy}>
           <Icon icon={Download} size={14} />
           インストール
         </Button>
 
-        {/* 削除ボタン（インストール済み時のみ有効）*/}
-        <Button variant="danger" size="sm" onClick={onUninstall} disabled={!isInstalled}>
+        {/* 削除ボタン（インストール済み時のみ有効、busy 中は無効）*/}
+        <Button variant="danger" size="sm" onClick={onUninstall} disabled={!isInstalled || busy}>
           <Icon icon={Trash2} size={14} />
           削除
         </Button>
 
-        {/* 開始ボタン（インストール済みかつ停止中のみ有効）*/}
-        <Button variant="secondary" size="sm" onClick={onStart} disabled={!isInstalled || isRunning}>
+        {/* 開始ボタン（インストール済みかつ停止中のみ有効、busy 中は無効）*/}
+        <Button variant="secondary" size="sm" onClick={onStart} disabled={!isInstalled || isRunning || busy}>
           <Icon icon={Play} size={14} />
           開始
         </Button>
 
-        {/* 停止ボタン（実行中のみ有効）*/}
-        <Button variant="secondary" size="sm" onClick={onStop} disabled={!isRunning}>
+        {/* 停止ボタン（実行中のみ有効、busy 中は無効）*/}
+        <Button variant="secondary" size="sm" onClick={onStop} disabled={!isRunning || busy}>
           <Icon icon={Square} size={14} />
           停止
         </Button>
 
-        {/* ログを開くボタン（常に有効）*/}
-        <Button variant="ghost" size="sm" onClick={onOpenLogs}>
+        {/* ログを開くボタン（busy 中は無効）*/}
+        <Button variant="ghost" size="sm" onClick={onOpenLogs} disabled={busy}>
           <Icon icon={FileText} size={14} />
           ログ
         </Button>

@@ -1,0 +1,185 @@
+/* ComponentDetail ページの CSS Modules スタイル定義 */
+/* コンポーネント詳細・ステータス・設定・操作ボタンのレイアウトを管理する */
+
+/* ページ全体のコンテナ */
+.page {
+  /* 内側余白を設ける */
+  padding: var(--space-7);
+  /* 縦方向フレックスで各セクションを並べる */
+  display: flex;
+  flex-direction: column;
+  /* セクション間の間隔 */
+  gap: var(--space-6);
+  /* 最大幅を制限してコンテンツを読みやすくする */
+  max-width: 720px;
+}
+
+/* ページヘッダー（戻るボタン + タイトル + バッジ）*/
+.pageHeader {
+  /* 水平フレックスで要素を横並びにする */
+  display: flex;
+  /* 縦方向の中央揃え */
+  align-items: center;
+  /* 要素間の間隔 */
+  gap: var(--space-4);
+}
+
+/* タイトルとサブタイトルをまとめるグループ */
+.titleGroup {
+  /* 縦方向フレックスでタイトルと説明文を積み重ねる */
+  display: flex;
+  flex-direction: column;
+  /* 残りのスペースを埋める */
+  flex: 1;
+  /* タイトルと説明文の間隔 */
+  gap: 2px;
+}
+
+/* ページタイトル（コンポーネント名）*/
+.pageTitle {
+  /* 表示用フォントサイズを使用する */
+  font-size: var(--fs-display);
+  /* 太字 */
+  font-weight: 700;
+  /* 主要テキスト色 */
+  color: var(--text);
+  /* デフォルトのマージンを除去する */
+  margin: 0;
+  /* 文字間を少し詰める */
+  letter-spacing: -0.02em;
+}
+
+/* ページの説明文（コンポーネントの機能説明）*/
+.pageDesc {
+  /* 小さいフォントサイズ */
+  font-size: var(--fs-small);
+  /* 補助テキスト色 */
+  color: var(--text-muted);
+  /* デフォルトのマージンを除去する */
+  margin: 0;
+}
+
+/* 各セクションのコンテナ */
+.section {
+  /* 縦方向フレックスで内部要素を並べる */
+  display: flex;
+  flex-direction: column;
+  /* 内部要素の間隔 */
+  gap: var(--space-3);
+  /* 罫線でカード風に囲む */
+  border: 1px solid var(--border);
+  /* 角丸を設定する */
+  border-radius: var(--radius-md);
+  /* 内側余白を設ける */
+  padding: var(--space-5);
+  /* 面色の背景 */
+  background: var(--surface);
+}
+
+/* セクションのヘッダー行（ラベルと右端ボタン）*/
+.sectionHeader {
+  /* 水平フレックスでラベルとボタンを両端に配置する */
+  display: flex;
+  /* 縦方向の中央揃え */
+  align-items: center;
+  /* ラベルとボタンを両端に配置する */
+  justify-content: space-between;
+}
+
+/* セクションの CAPS ラベル */
+.sectionLabel {
+  /* ラベルフォントサイズを使用する */
+  font-size: var(--fs-label);
+  /* 大文字で表示する */
+  text-transform: uppercase;
+  /* 文字間隔を広げてキャップス感を出す */
+  letter-spacing: 0.06em;
+  /* 太字 */
+  font-weight: 600;
+  /* 弱いテキスト色で控えめに表示する */
+  color: var(--text-subtle);
+}
+
+/* ステータス詳細のグリッドレイアウト（ラベル + 値の 2 列）*/
+.statusGrid {
+  /* 2 列グリッドでラベルと値を整列する */
+  display: grid;
+  /* 左列（ラベル）は固定幅、右列（値）は残りを埋める */
+  grid-template-columns: 140px 1fr;
+  /* 行間の間隔 */
+  row-gap: var(--space-2);
+  /* 列間の間隔 */
+  column-gap: var(--space-4);
+}
+
+/* ステータスのラベル列 */
+.statusLabel {
+  /* 小さいフォントサイズ */
+  font-size: var(--fs-small);
+  /* 弱いテキスト色で控えめに表示する */
+  color: var(--text-muted);
+  /* 縦方向の中央揃え */
+  align-self: center;
+}
+
+/* ステータスの等幅フォント値 */
+.statusMono {
+  /* 等幅フォントで表示する */
+  font-family: var(--font-mono);
+  /* 等幅フォントサイズ */
+  font-size: var(--fs-mono);
+  /* 縦方向の中央揃え */
+  align-self: center;
+}
+
+/* エンドポイント行（アイコン + URL を横並びにする）*/
+.statusEndpoint {
+  /* 水平フレックスでアイコンと URL を横並びにする */
+  display: flex;
+  /* 縦方向の中央揃え */
+  align-items: center;
+  /* アイコンと URL の間隔 */
+  gap: var(--space-2);
+}
+
+/* 設定値のグリッドレイアウト（ラベル + 値の 2 列）*/
+.configGrid {
+  /* 2 列グリッドでラベルと値を整列する */
+  display: grid;
+  /* 左列（ラベル）は固定幅、右列（値）は残りを埋める */
+  grid-template-columns: 160px 1fr;
+  /* 行間の間隔 */
+  row-gap: var(--space-2);
+  /* 列間の間隔 */
+  column-gap: var(--space-4);
+}
+
+/* 設定のラベル列 */
+.configLabel {
+  /* 小さいフォントサイズ */
+  font-size: var(--fs-small);
+  /* 弱いテキスト色で控えめに表示する */
+  color: var(--text-muted);
+  /* 縦方向の中央揃え */
+  align-self: center;
+}
+
+/* 設定の等幅フォント値 */
+.configMono {
+  /* 等幅フォントで表示する */
+  font-family: var(--font-mono);
+  /* 等幅フォントサイズ */
+  font-size: var(--fs-mono);
+  /* 縦方向の中央揃え */
+  align-self: center;
+}
+
+/* 操作ボタン群の横並び行 */
+.controlRow {
+  /* 水平フレックスでボタンを横並びにする */
+  display: flex;
+  /* ボタン間の間隔 */
+  gap: var(--space-3);
+  /* ボタンが多い場合は折り返す */
+  flex-wrap: wrap;
+}

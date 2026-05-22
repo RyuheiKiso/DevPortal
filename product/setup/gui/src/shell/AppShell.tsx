@@ -1,8 +1,8 @@
 // アプリのシェルコンポーネント（トップバー・サイドバー・メインコンテンツを Grid で配置する）
 // ルーターから現在のルートを読んでメインエリアに適切なページを表示する
 
-// useRef フックをインポートする
-import { useRef } from 'react';
+// useRef・useState・useCallback・useMemo フックをインポートする
+import { useRef, useState, useCallback, useMemo } from 'react';
 // CSS Modules のスタイルをインポートする
 import styles from './AppShell.module.css';
 // トップバーコンポーネントをインポートする
@@ -17,6 +17,8 @@ import { Install } from '../pages/Install';
 import { Uninstall } from '../pages/Uninstall';
 // 設定ページをインポートする
 import { Settings } from '../pages/Settings';
+// コンポーネント詳細ページをインポートする
+import { ComponentDetail } from '../pages/ComponentDetail';
 // TopBar と Overview の間でアクション関数を共有するコンテキストをインポートする
 import { AppActionsContext } from './AppActionsContext';
 
@@ -35,6 +37,8 @@ function RouteOutlet() {
           onGoInstall={(component) => navigate({ page: 'install', component })}
           // アンインストール画面へ遷移するコールバックを渡す
           onGoUninstall={(component) => navigate({ page: 'uninstall', component })}
+          // 詳細画面へ遷移するコールバックを渡す
+          onGoDetail={(component) => navigate({ page: 'detail', component })}
         />
       );
 
@@ -65,12 +69,18 @@ function RouteOutlet() {
       // Settings は onBack コールバックを受け取らず自前のナビゲーションガードを使う
       return <Settings />;
 
-    // コンポーネント詳細ページ（将来実装のため暫定的に Overview を表示する）
+    // コンポーネント詳細ページ（Verdaccio / Backstage の状態・操作・設定を一覧表示する）
     case 'detail':
       return (
-        <Overview
-          onGoInstall={(component) => navigate({ page: 'install', component })}
-          onGoUninstall={(component) => navigate({ page: 'uninstall', component })}
+        <ComponentDetail
+          // 表示するコンポーネントの種別を渡す
+          component={route.component}
+          // インストール画面へ遷移するコールバックを渡す
+          onGoInstall={() => navigate({ page: 'install', component: route.component })}
+          // アンインストール画面へ遷移するコールバックを渡す
+          onGoUninstall={() => navigate({ page: 'uninstall', component: route.component })}
+          // Overview へ戻るコールバックを渡す
+          onBack={() => navigate({ page: 'overview' })}
         />
       );
   }
@@ -78,16 +88,60 @@ function RouteOutlet() {
 
 // Grid レイアウトでトップバー・サイドバー・メインを組み合わせるシェルコンポーネント
 export function AppShell() {
-  // TopBar → Overview のアクション関数を格納する ref を生成する
+  // TopBar → Overview の実関数を格納する ref を生成する
   // 初期値はマウント前の no-op（Overview がマウント時に実際の関数を登録する）
   const loadStatusesRef = useRef<() => Promise<void>>(async () => {});
-  // 前提チェック関数への ref（Overview がマウント時に登録する）
+  // 前提チェック実関数への ref（Overview がマウント時に登録する）
   const prereqCheckRef = useRef<() => Promise<void>>(async () => {});
+  // ステータス更新の実行中フラグ（TopBar・Overview で共有して二重発火を防ぐ）
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  // 前提チェックの実行中フラグ（TopBar・Overview で共有して二重発火を防ぐ）
+  const [isPrereqChecking, setIsPrereqChecking] = useState(false);
+
+  // ローディング管理込みのステータス更新ラッパー（実行中なら早期 return して二重発火を防ぐ）
+  const runLoadStatuses = useCallback(async () => {
+    // 既に実行中の場合は重複実行しない
+    if (isRefreshing) return;
+    // 実行中フラグを立てる
+    setIsRefreshing(true);
+    try {
+      // ref に登録された Overview の loadStatuses 実関数を呼び出す
+      await loadStatusesRef.current();
+    } finally {
+      // 完了後（成功・失敗問わず）フラグを解除する
+      setIsRefreshing(false);
+    }
+  }, [isRefreshing]);
+
+  // ローディング管理込みの前提チェックラッパー（実行中なら早期 return して二重発火を防ぐ）
+  const runPrereqCheck = useCallback(async () => {
+    // 既に実行中の場合は重複実行しない
+    if (isPrereqChecking) return;
+    // 実行中フラグを立てる
+    setIsPrereqChecking(true);
+    try {
+      // ref に登録された Overview の handlePrereqCheck 実関数を呼び出す
+      await prereqCheckRef.current();
+    } finally {
+      // 完了後（成功・失敗問わず）フラグを解除する
+      setIsPrereqChecking(false);
+    }
+  }, [isPrereqChecking]);
+
+  // コンテキスト値を useMemo で安定化して不要な子再レンダリングを抑制する
+  const actionsContextValue = useMemo(() => ({
+    loadStatusesRef,
+    prereqCheckRef,
+    isRefreshing,
+    isPrereqChecking,
+    runLoadStatuses,
+    runPrereqCheck,
+  }), [isRefreshing, isPrereqChecking, runLoadStatuses, runPrereqCheck]);
 
   // シェルの構造: トップバー（全幅）+ サイドバー（240px）+ メイン（残り）
   return (
-    // AppActionsContext でシェル全体を包み、TopBar と Overview が ref を共有できるようにする
-    <AppActionsContext.Provider value={{ loadStatuses: loadStatusesRef, prereqCheck: prereqCheckRef }}>
+    // AppActionsContext でシェル全体を包み、TopBar と Overview がローディング状態を共有できるようにする
+    <AppActionsContext.Provider value={actionsContextValue}>
       <div className={styles.shell}>
         {/* トップバー（グリッド 1 行目全幅） */}
         <div className={styles.topbar}>

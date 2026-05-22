@@ -73,15 +73,22 @@ export function Uninstall({ component, onBack }: UninstallProps) {
   // コンポーネントの表示名を取得する
   const displayName = DISPLAY_NAMES[component];
 
-  // 確認入力がコンポーネント名と一致するかどうかを判定する
-  const isConfirmed = confirmText === component;
+  // 確認入力がコンポーネント名と一致するかどうかを判定する（大文字小文字・前後空白を正規化する）
+  const isConfirmed = confirmText.trim().toLowerCase() === component;
 
   // 画面マウント時に setup.toml から設定を読み込む
   useEffect(() => {
-    // Rust 側の cmd_load_config を呼び出して設定を取得する
-    loadConfig().then(setConfig).catch(() => {
-      // 読み込み失敗時はデフォルト設定のまま継続する（致命的ではない）
-    });
+    // アンマウント後に setConfig が走らないよう mounted フラグで保護する
+    let mounted = true;
+    loadConfig()
+      .then((cfg) => {
+        // アンマウント済みの場合は state 更新をスキップする
+        if (mounted) setConfig(cfg);
+      })
+      .catch(() => {
+        // 読み込み失敗時はデフォルト設定のまま継続する（致命的ではない）
+      });
+    return () => { mounted = false; };
   }, []);
 
   // アンインストールを実行するコールバック
@@ -199,6 +206,8 @@ export function Uninstall({ component, onBack }: UninstallProps) {
               // 入力フィールドのスタイルクラスを適用する
               className={styles.confirmInput}
             />
+            {/* ヒントテキスト（大文字小文字不問であることを案内する）*/}
+            <span className={styles.confirmHint}>大文字・小文字は問いません</span>
           </section>
 
           {/* アンインストール実行ボタン */}

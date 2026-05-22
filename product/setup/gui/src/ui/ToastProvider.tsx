@@ -2,7 +2,7 @@
 // アプリ全体を <ToastProvider> で包み、useToast() フックでどこからでも通知を表示できる
 
 // React の各種フックと型をインポートする
-import React, { createContext, useCallback, useContext, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 // トーストコンポーネントとデータ型をインポートする
 import { Toast, ToastData } from './Toast';
 // CSS Modules のスタイルをインポートする
@@ -31,9 +31,25 @@ let toastIdCounter = 0;
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   // 現在表示中のトーストリストを state で管理する
   const [toasts, setToasts] = useState<ToastData[]>([]);
+  // 自動削除タイマーを ID をキーに管理する ref（アンマウント時にクリアするため）
+  const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  // アンマウント時に未発火のタイマーをすべてクリアする副作用
+  useEffect(() => {
+    return () => {
+      // 保留中の全タイマーをクリアしてメモリリークを防ぐ
+      timersRef.current.forEach(clearTimeout);
+    };
+  }, []);
 
   // 指定した ID のトーストを削除する関数
   const dismiss = useCallback((id: string) => {
+    // 対応するタイマーが残っていればキャンセルする
+    const timer = timersRef.current.get(id);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timersRef.current.delete(id);
+    }
     // 指定 ID 以外のトーストを残して state を更新する
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
@@ -44,8 +60,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     const id = String(++toastIdCounter);
     // 新しいトーストを state に追加する
     setToasts((prev) => [...prev, { id, message, variant }]);
-    // 指定時間後に自動削除するタイマーをセットする
-    setTimeout(() => dismiss(id), duration);
+    // 指定時間後に自動削除するタイマーをセットして ref に保存する
+    const timer = setTimeout(() => dismiss(id), duration);
+    timersRef.current.set(id, timer);
   }, [dismiss]);
 
   // 成功通知を表示するコールバック関数

@@ -43,6 +43,8 @@ interface OverviewProps {
   onGoInstall: (component: ComponentKind) => void;
   // Uninstall 画面へ遷移するコールバック（コンポーネント種別を渡す）
   onGoUninstall: (component: ComponentKind) => void;
+  // Detail 画面へ遷移するコールバック（コンポーネント種別を渡す）
+  onGoDetail: (component: ComponentKind) => void;
 }
 
 // PrereqReport の all_ok フラグに応じて Badge の variant を返すヘルパー関数
@@ -52,28 +54,27 @@ function prereqBadgeVariant(allOk: boolean): BadgeVariant {
 }
 
 // コンポーネント一覧と前提条件チェックを表示するページコンポーネント
-export function Overview({ onGoInstall, onGoUninstall }: OverviewProps) {
+export function Overview({ onGoInstall, onGoUninstall, onGoDetail }: OverviewProps) {
   // コンポーネントのステータスリスト
   const [statuses, setStatuses] = useState<ComponentStatus[]>([]);
-  // ステータス取得中のローディングフラグ
-  const [loading, setLoading] = useState(false);
   // ステータス取得エラーメッセージ
   const [error, setError] = useState<string | null>(null);
   // 前提条件チェック結果
   const [prereqReport, setPrereqReport] = useState<PrereqReport | null>(null);
-  // 前提条件チェック中のローディングフラグ
-  const [prereqLoading, setPrereqLoading] = useState(false);
   // 前提条件セクションの展開/折りたたみ状態
   const [prereqOpen, setPrereqOpen] = useState(true);
+  // 現在サービス操作中のコンポーネント種別（連打防止のため null = 操作なし）
+  const [busyComponent, setBusyComponent] = useState<ComponentKind | null>(null);
   // トースト通知の関数を取得する
   const { showSuccess, showDanger } = useToast();
   // TopBar のボタンから呼び出せるよう関数を共有するコンテキストを取得する
   const appActions = useAppActions();
+  // 共有コンテキストからローディング状態と呼び出しラッパーを取得する
+  const isRefreshing = appActions?.isRefreshing ?? false;
+  const isPrereqChecking = appActions?.isPrereqChecking ?? false;
 
-  // ステータスを取得するコールバック（初回マウント時と更新ボタン押下時に使用）
+  // ステータスを取得する内部コールバック（AppActionsContext の ref に登録して TopBar からも使われる）
   const loadStatuses = useCallback(async () => {
-    // ローディングフラグを立てる
-    setLoading(true);
     // エラーをリセットする
     setError(null);
     try {
@@ -84,24 +85,21 @@ export function Overview({ onGoInstall, onGoUninstall }: OverviewProps) {
     } catch (e) {
       // 取得失敗時はエラーメッセージを state にセットする
       setError(`ステータス取得失敗: ${String(e)}`);
-    } finally {
-      // ローディングフラグを解除する
-      setLoading(false);
     }
   }, []);
 
   // 初回マウント時にステータスを取得する副作用
   useEffect(() => {
-    // loadStatuses を呼び出してコンポーネントの状態を読み込む
-    loadStatuses();
-  }, [loadStatuses]);
+    // runLoadStatuses 経由で呼ぶことで isRefreshing 共有状態も更新される
+    appActions?.runLoadStatuses();
+    // appActions は Provider で useMemo 化されているが、依存配列に含める
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // 前提条件チェックを実行するコールバック
+  // 前提条件チェックを実行する内部コールバック
   const handlePrereqCheck = useCallback(async () => {
     // チェック開始時は必ず展開して結果を見えるようにする
     setPrereqOpen(true);
-    // 前提条件チェック中フラグを立てる
-    setPrereqLoading(true);
     // 以前の結果をリセットする
     setPrereqReport(null);
     try {
@@ -112,31 +110,32 @@ export function Overview({ onGoInstall, onGoUninstall }: OverviewProps) {
     } catch (e) {
       // チェック失敗時はエラートーストを表示する
       showDanger(`前提条件チェック失敗: ${String(e)}`);
-    } finally {
-      // チェック中フラグを解除する
-      setPrereqLoading(false);
     }
   }, [showDanger]);
 
-  // Overview がマウントされたとき、TopBar から呼び出せるよう関数を ref に登録する
+  // Overview がマウントされたとき、TopBar から呼び出せるよう実関数を ref に登録する
   // アンマウント時は no-op に戻して他のページ表示中に誤呼び出しされないようにする
   useEffect(() => {
     // appActions が利用可能な場合（AppActionsContext のスコープ内）のみ登録する
     if (!appActions) return;
-    // loadStatuses を TopBar から呼び出せるよう ref に設定する
-    appActions.loadStatuses.current = loadStatuses;
-    // handlePrereqCheck を TopBar から呼び出せるよう ref に設定する
-    appActions.prereqCheck.current = handlePrereqCheck;
+    // loadStatuses を AppShell の ref に設定する（runLoadStatuses ラッパーを通じて呼ばれる）
+    appActions.loadStatusesRef.current = loadStatuses;
+    // handlePrereqCheck を AppShell の ref に設定する（runPrereqCheck ラッパーを通じて呼ばれる）
+    appActions.prereqCheckRef.current = handlePrereqCheck;
     // アンマウント時（他のページに遷移したとき）は no-op に戻す
     return () => {
       // no-op の async 関数を設定することで誤呼び出しを防ぐ
-      appActions.loadStatuses.current = async () => {};
-      appActions.prereqCheck.current = async () => {};
+      appActions.loadStatusesRef.current = async () => {};
+      appActions.prereqCheckRef.current = async () => {};
     };
   }, [appActions, loadStatuses, handlePrereqCheck]);
 
-  // サービスを開始するコールバック
+  // サービスを開始するコールバック（busyComponent で連打防止）
   const handleStart = useCallback(async (component: ComponentKind) => {
+    // 既に操作中のコンポーネントがある場合は実行しない
+    if (busyComponent) return;
+    // 操作対象を busy にする
+    setBusyComponent(component);
     try {
       // serviceAction で start アクションを実行する
       await serviceAction(component, 'start');
@@ -147,11 +146,18 @@ export function Overview({ onGoInstall, onGoUninstall }: OverviewProps) {
     } catch (e) {
       // 失敗時はエラートーストを表示する
       showDanger(`開始失敗: ${String(e)}`);
+    } finally {
+      // 操作完了後は busy を解除する
+      setBusyComponent(null);
     }
-  }, [loadStatuses, showSuccess, showDanger]);
+  }, [busyComponent, loadStatuses, showSuccess, showDanger]);
 
-  // サービスを停止するコールバック
+  // サービスを停止するコールバック（busyComponent で連打防止）
   const handleStop = useCallback(async (component: ComponentKind) => {
+    // 既に操作中のコンポーネントがある場合は実行しない
+    if (busyComponent) return;
+    // 操作対象を busy にする
+    setBusyComponent(component);
     try {
       // serviceAction で stop アクションを実行する
       await serviceAction(component, 'stop');
@@ -162,19 +168,29 @@ export function Overview({ onGoInstall, onGoUninstall }: OverviewProps) {
     } catch (e) {
       // 失敗時はエラートーストを表示する
       showDanger(`停止失敗: ${String(e)}`);
+    } finally {
+      // 操作完了後は busy を解除する
+      setBusyComponent(null);
     }
-  }, [loadStatuses, showSuccess, showDanger]);
+  }, [busyComponent, loadStatuses, showSuccess, showDanger]);
 
-  // ログフォルダを開くコールバック
+  // ログフォルダを開くコールバック（busyComponent で連打防止）
   const handleOpenLogs = useCallback(async (component: ComponentKind) => {
+    // 既に操作中のコンポーネントがある場合は実行しない
+    if (busyComponent) return;
+    // 操作対象を busy にする
+    setBusyComponent(component);
     try {
       // openLogs でエクスプローラーにログフォルダを開かせる
       await openLogs(component);
     } catch (e) {
       // 失敗時はエラートーストを表示する
       showDanger(`ログを開けませんでした: ${String(e)}`);
+    } finally {
+      // 操作完了後は busy を解除する
+      setBusyComponent(null);
     }
-  }, [showDanger]);
+  }, [busyComponent, showDanger]);
 
   // Overview ページを描画する
   return (
@@ -189,25 +205,25 @@ export function Overview({ onGoInstall, onGoUninstall }: OverviewProps) {
         </div>
         {/* 右側: 操作ボタン群 */}
         <div className={styles.headerActions}>
-          {/* 前提チェックボタン */}
+          {/* 前提チェックボタン（TopBar と共有の isPrereqChecking で disable する）*/}
           <Button
             variant="ghost"
             size="sm"
-            onClick={handlePrereqCheck}
-            disabled={prereqLoading}
+            onClick={() => appActions?.runPrereqCheck()}
+            disabled={isPrereqChecking}
           >
             <Icon icon={ShieldCheck} size={14} />
-            {prereqLoading ? '確認中…' : '前提チェック'}
+            {isPrereqChecking ? '確認中…' : '前提チェック'}
           </Button>
-          {/* ステータス更新ボタン */}
+          {/* ステータス更新ボタン（TopBar と共有の isRefreshing で disable する）*/}
           <Button
             variant="secondary"
             size="sm"
-            onClick={loadStatuses}
-            disabled={loading}
+            onClick={() => appActions?.runLoadStatuses()}
+            disabled={isRefreshing}
           >
             <Icon icon={RefreshCw} size={14} />
-            {loading ? '更新中…' : '更新'}
+            {isRefreshing ? '更新中…' : '更新'}
           </Button>
         </div>
       </div>
@@ -220,7 +236,7 @@ export function Overview({ onGoInstall, onGoUninstall }: OverviewProps) {
       )}
 
       {/* ─── 前提条件チェックセクション（チェック実行後に表示）─── */}
-      {(prereqReport !== null || prereqLoading) && (
+      {(prereqReport !== null || isPrereqChecking) && (
         <section className={styles.section}>
           {/* セクションヘッダー（クリックで折りたたみ切り替え）*/}
           <button
@@ -305,7 +321,7 @@ export function Overview({ onGoInstall, onGoUninstall }: OverviewProps) {
         </div>
 
         {/* ローディング中かつステータスが空の場合はスケルトンを表示する */}
-        {loading && statuses.length === 0 && (
+        {isRefreshing && statuses.length === 0 && (
           <div className={styles.componentGrid}>
             <Skeleton height={200} />
             <Skeleton height={200} />
@@ -313,7 +329,7 @@ export function Overview({ onGoInstall, onGoUninstall }: OverviewProps) {
         )}
 
         {/* ステータスが空でローディングもエラーもない場合の空状態メッセージ */}
-        {!loading && statuses.length === 0 && !error && (
+        {!isRefreshing && statuses.length === 0 && !error && (
           <p className={styles.empty}>コンポーネントが見つかりません</p>
         )}
 
@@ -327,6 +343,10 @@ export function Overview({ onGoInstall, onGoUninstall }: OverviewProps) {
                 key={s.component}
                 // ステータス情報を渡す
                 status={s}
+                // このコンポーネントが busy かどうかを渡す（連打防止）
+                busy={busyComponent === s.component}
+                // 詳細ページへ遷移するコールバックを渡す
+                onDetail={() => onGoDetail(s.component)}
                 // インストールボタンのコールバックを渡す
                 onInstall={() => onGoInstall(s.component)}
                 // アンインストールボタンのコールバックを渡す

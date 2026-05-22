@@ -131,6 +131,8 @@ export function Sidebar() {
               key={item.label}
               // ベーススタイルとアクティブスタイルを結合する
               className={[styles.navItem, active ? styles.active : ''].join(' ')}
+              // アクティブなナビアイテムにスクリーンリーダー向けのカレントページ情報を付与する
+              aria-current={active ? 'page' : undefined}
               // クリックで対応するルートに遷移する
               onClick={() => {
                 // detail ページはコンポーネント種別を含む Route オブジェクトで遷移する
