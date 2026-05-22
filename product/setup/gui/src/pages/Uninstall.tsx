@@ -225,7 +225,7 @@ export const Uninstall: React.FC<UninstallProps> = ({ component, onBack }) => {
           />
           {/* チェックボックスのラベル */}
           <label htmlFor="keepData" style={{ cursor: running ? 'not-allowed' : 'pointer', fontWeight: '500' }}>
-            データディレクトリを保持する（Verdaccio のパッケージ・設定を残す）
+            データディレクトリを保持する（{displayName} のデータ・設定を残す）
           </label>
         </div>
 

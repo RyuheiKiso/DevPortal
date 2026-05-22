@@ -364,8 +364,9 @@ impl SetupEngine for BackstageEngine {
         // production モードでは backend が packages/app/dist/ の静的ファイルを serve する
         // yarn build を実行しないと GET / が 404 になりブラウザから UI にアクセスできない
         reporter.step_start("yarn_build", "フロントエンドをビルドしています（数分かかります）", 7, 2);
-        // yarn build コマンドを構築する
-        let mut yarn_build_cmd = build_command("yarn", &["build"]);
+        // yarn workspace app build でフロントエンドパッケージのみビルドする
+        // ルート package.json に "build" スクリプトはなく workspace 指定が必要
+        let mut yarn_build_cmd = build_command("yarn", &["workspace", "app", "build"]);
         // 作業ディレクトリを app_dir に設定する
         yarn_build_cmd.current_dir(&app_dir_str);
         // yarn build をストリーミング実行する
