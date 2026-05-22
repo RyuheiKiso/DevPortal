@@ -48,7 +48,16 @@ pub fn run(args: &StatusArgs, config: &SetupConfig, renderer: &Renderer) -> anyh
             // 取得した状態を renderer で表示する
             renderer.render_component_status(&status);
         }
-        // target が None（省略）または "all" の場合は両方確認する
+        // target が "baget" の場合は BaGet のみ確認する
+        Some("baget") => {
+            // BaGetEngine を使って BaGet の状態を取得する
+            let engine = engine_for(Component::BaGet);
+            // status メソッドを呼び出して ComponentStatus を取得する
+            let status = engine.status(config)?;
+            // 取得した状態を renderer で表示する
+            renderer.render_component_status(&status);
+        }
+        // target が None（省略）または "all" の場合は全コンポーネントを確認する
         None | Some("all") => {
             // VerdaccioEngine を使って Verdaccio の状態を取得する
             let verdaccio_engine = engine_for(Component::Verdaccio);
@@ -63,12 +72,19 @@ pub fn run(args: &StatusArgs, config: &SetupConfig, renderer: &Renderer) -> anyh
             let backstage_status = backstage_engine.status(config)?;
             // Backstage の状態を renderer で表示する
             renderer.render_component_status(&backstage_status);
+
+            // BaGetEngine を使って BaGet の状態を取得する
+            let baget_engine = engine_for(Component::BaGet);
+            // BaGet の status を取得する
+            let baget_status = baget_engine.status(config)?;
+            // BaGet の状態を renderer で表示する
+            renderer.render_component_status(&baget_status);
         }
         // 未知の target が指定された場合はエラーを返す
         Some(unknown) => {
             // 不明なターゲット名を含むエラーメッセージを返す
             return Err(anyhow::anyhow!(
-                "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / all",
+                "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / baget / all",
                 unknown
             ));
         }

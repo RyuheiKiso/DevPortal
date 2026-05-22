@@ -13,6 +13,10 @@ pub enum Component {
     Verdaccio,
     // 開発者ポータルフレームワークの Backstage コンポーネント
     Backstage,
+    // NuGet プライベートレジストリの BaGet コンポーネント
+    // snake_case 変換では "ba_get" になるため "baget" に明示的にリネームする
+    #[serde(rename = "baget")]
+    BaGet,
 }
 
 // ActionKind: セットアップ操作の種別を表す列挙型

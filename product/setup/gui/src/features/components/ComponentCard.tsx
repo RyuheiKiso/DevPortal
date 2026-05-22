@@ -72,6 +72,8 @@ const DISPLAY_NAMES: Record<string, string> = {
   verdaccio: 'Verdaccio',
   // Backstage の表示名
   backstage:  'Backstage',
+  // BaGet の表示名
+  baget: 'BaGet',
 };
 
 // コンポーネント種別ごとの説明文マップ
@@ -80,6 +82,8 @@ const DESCRIPTIONS: Record<string, string> = {
   verdaccio: 'プライベート npm レジストリ',
   // Backstage の説明文
   backstage:  '開発者ポータル',
+  // BaGet の説明文
+  baget: 'プライベート NuGet レジストリ',
 };
 
 // コンポーネントの状態カードコンポーネント

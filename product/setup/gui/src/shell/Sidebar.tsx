@@ -23,6 +23,8 @@ import {
   Package,
   // Backstage ページのアイコン（開発者ポータル）
   Building2,
+  // BaGet ページのアイコン（NuGet パッケージ）
+  PackageOpen,
   // Settings ページのアイコン
   Settings,
   // Plugins ページのアイコン（パズルピース）
@@ -63,6 +65,8 @@ const NAV_ITEMS: NavItemDef[] = [
   { label: 'Verdaccio', page: 'detail', component: 'verdaccio', icon: Package },
   // Backstage コンポーネント詳細ページへのリンク
   { label: 'Backstage', page: 'detail', component: 'backstage', icon: Building2 },
+  // BaGet コンポーネント詳細ページへのリンク
+  { label: 'BaGet', page: 'detail', component: 'baget', icon: PackageOpen },
   // Backstage プラグイン管理ページへのリンク
   { label: 'Plugins', page: 'plugins', icon: Puzzle },
   // 設定ページへのリンク

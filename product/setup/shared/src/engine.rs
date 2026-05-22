@@ -66,5 +66,7 @@ pub fn engine_for(component: Component) -> Box<dyn SetupEngine> {
         Component::Verdaccio => Box::new(crate::verdaccio::VerdaccioEngine),
         // Backstage コンポーネントには BackstageEngine を返す
         Component::Backstage => Box::new(crate::backstage::BackstageEngine),
+        // BaGet コンポーネントには BaGetEngine を返す
+        Component::BaGet => Box::new(crate::baget::BaGetEngine),
     }
 }

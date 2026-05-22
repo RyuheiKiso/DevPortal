@@ -35,7 +35,7 @@ use shared::paths;
 use shared::elevation::{is_elevated, run_self_elevated};
 
 // target 文字列を Component に変換するヘルパー関数
-// "verdaccio" → Component::Verdaccio、"backstage" → Component::Backstage
+// "verdaccio" → Component::Verdaccio、"backstage" → Component::Backstage、"baget" → Component::BaGet
 fn parse_component(target: &str) -> anyhow::Result<Component> {
     // target を小文字に正規化してマッチングする
     match target.to_lowercase().as_str() {
@@ -43,9 +43,11 @@ fn parse_component(target: &str) -> anyhow::Result<Component> {
         "verdaccio" => Ok(Component::Verdaccio),
         // "backstage" の場合は Backstage コンポーネントを返す
         "backstage" => Ok(Component::Backstage),
+        // "baget" の場合は BaGet コンポーネントを返す
+        "baget" => Ok(Component::BaGet),
         // 未知の値の場合はエラーを返す
         _ => Err(anyhow::anyhow!(
-            "不明なターゲット: '{}'. 有効な値: verdaccio / backstage",
+            "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / baget",
             target
         )),
     }
@@ -75,6 +77,8 @@ pub fn run(
                 Component::Verdaccio => paths::verdaccio_logs_dir(config),
                 // Backstage の場合は backstage のログディレクトリを取得する
                 Component::Backstage => paths::backstage_logs_dir(config),
+                // BaGet の場合は baget のログディレクトリを取得する
+                Component::BaGet => paths::baget_logs_dir(config),
             };
 
             // stdout.log ファイルのパスを構築する

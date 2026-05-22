@@ -98,6 +98,41 @@ pub fn backstage_logs_dir(config: &SetupConfig) -> PathBuf {
     backstage_root(config).join("logs")
 }
 
+// BaGet のルートディレクトリを返す関数
+// devportal_root/baget に対応する
+pub fn baget_dir(config: &SetupConfig) -> PathBuf {
+    // devportal_root に baget サブディレクトリを追加する
+    devportal_root(config).join("baget")
+}
+
+// BaGet バイナリ展開先ディレクトリを返す関数
+// baget_dir/app に対応する（ZIP を展開してバイナリを配置する場所）
+pub fn baget_app_dir(config: &SetupConfig) -> PathBuf {
+    // baget_dir に app サブディレクトリを追加する
+    baget_dir(config).join("app")
+}
+
+// BaGet パッケージストレージディレクトリを返す関数
+// baget_dir/packages に対応する（NuGet パッケージを保存する場所）
+pub fn baget_packages_dir(config: &SetupConfig) -> PathBuf {
+    // baget_dir に packages サブディレクトリを追加する
+    baget_dir(config).join("packages")
+}
+
+// BaGet SQLite DB 格納先ディレクトリを返す関数
+// baget_dir/data に対応する（baget.db を保存する場所）
+pub fn baget_data_dir(config: &SetupConfig) -> PathBuf {
+    // baget_dir に data サブディレクトリを追加する
+    baget_dir(config).join("data")
+}
+
+// BaGet ログ出力ディレクトリを返す関数
+// baget_dir/logs に対応する
+pub fn baget_logs_dir(config: &SetupConfig) -> PathBuf {
+    // baget_dir に logs サブディレクトリを追加する
+    baget_dir(config).join("logs")
+}
+
 // セットアップ設定ファイル（setup.toml）のパスを返す関数
 // %ProgramData%\DevPortal\config\setup.toml に対応する
 pub fn config_file() -> PathBuf {

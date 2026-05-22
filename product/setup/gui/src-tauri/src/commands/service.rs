@@ -29,6 +29,8 @@ pub fn cmd_service_action(
         "verdaccio" => Component::Verdaccio,
         // "backstage" を Component::Backstage に変換する
         "backstage" => Component::Backstage,
+        // "baget" を Component::BaGet に変換する
+        "baget" => Component::BaGet,
         // 未知のコンポーネント名の場合はエラーを返す
         other => return Err(format!("未知のコンポーネント: {}", other)),
     };

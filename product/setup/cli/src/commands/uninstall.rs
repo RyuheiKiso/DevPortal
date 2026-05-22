@@ -172,7 +172,19 @@ pub fn run(
             // 失敗フラグを更新する
             any_failed = any_failed || failed;
         }
-        // target が "all" の場合は Verdaccio → Backstage の順でアンインストールする
+        // target が "baget" の場合は BaGet のみアンインストールする
+        "baget" => {
+            // BaGet をアンインストールしてフラグを更新する
+            let failed = uninstall_component(
+                Component::BaGet,
+                effective_config,
+                renderer,
+                keep_data,
+            )?;
+            // 失敗フラグを更新する
+            any_failed = any_failed || failed;
+        }
+        // target が "all" の場合は Verdaccio → Backstage → BaGet の順でアンインストールする
         "all" => {
             // Verdaccio を先にアンインストールする（config のクローンをスレッドに渡す）
             let verdaccio_config = effective_config.clone();
@@ -187,7 +199,7 @@ pub fn run(
             any_failed = any_failed || failed_v;
 
             // Backstage をその後にアンインストールする
-            let backstage_config = effective_config;
+            let backstage_config = effective_config.clone();
             // Backstage のアンインストールを実行する
             let failed_b = uninstall_component(
                 Component::Backstage,
@@ -197,12 +209,24 @@ pub fn run(
             )?;
             // 失敗フラグを更新する
             any_failed = any_failed || failed_b;
+
+            // BaGet を最後にアンインストールする
+            let baget_config = effective_config;
+            // BaGet のアンインストールを実行する
+            let failed_bg = uninstall_component(
+                Component::BaGet,
+                baget_config,
+                renderer,
+                keep_data,
+            )?;
+            // 失敗フラグを更新する
+            any_failed = any_failed || failed_bg;
         }
         // 未知の target が指定された場合はエラーを返す
         unknown => {
             // 不明なターゲット名を含むエラーメッセージを返す
             return Err(anyhow::anyhow!(
-                "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / all",
+                "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / baget / all",
                 unknown
             ));
         }

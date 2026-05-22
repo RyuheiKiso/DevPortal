@@ -41,6 +41,8 @@ interface ValidationErrors {
   backstage_frontend_port?: string;
   // Backstage バックエンドポートのエラー
   backstage_backend_port?: string;
+  // BaGet ポートのエラー（範囲外・非整数の場合）
+  baget_port?: string;
 }
 
 // ポート番号の有効範囲（OS が割り当てる動的ポート範囲を避けるため 1024 以上）
@@ -92,11 +94,16 @@ function validate(draft: SetupConfig): ValidationErrors {
   const backendPortErr = validatePort(draft.backstage.backend_port, 'バックエンドポート');
   if (backendPortErr) errors.backstage_backend_port = backendPortErr;
 
-  // Verdaccio・Backstage 全 3 ポートの組合せ重複チェック（バリデーションエラーのないもの同士）
+  // BaGet ポートのバリデーション
+  const bagetPortErr = validatePort(draft.baget.port, 'BaGet ポート');
+  if (bagetPortErr) errors.baget_port = bagetPortErr;
+
+  // Verdaccio・Backstage・BaGet 全 4 ポートの組合せ重複チェック（バリデーションエラーのないもの同士）
   const portFields: Array<{ key: keyof ValidationErrors; val: number; name: string }> = [
     { key: 'verdaccio_port',           val: draft.verdaccio.port,          name: 'Verdaccio ポート' },
     { key: 'backstage_frontend_port',  val: draft.backstage.frontend_port,  name: 'フロントエンドポート' },
     { key: 'backstage_backend_port',   val: draft.backstage.backend_port,   name: 'バックエンドポート' },
+    { key: 'baget_port',               val: draft.baget.port,               name: 'BaGet ポート' },
   ];
   // バリデーション済みのポートフィールドだけを抽出して全組合せで重複を検出する
   const validPorts = portFields.filter((p) => !errors[p.key]);
@@ -214,6 +221,17 @@ export function Settings() {
   ) => {
     setDraft((prev) =>
       prev ? { ...prev, backstage: { ...prev.backstage, [key]: value } } : prev
+    );
+  }, []);
+
+  // BaGet 設定のフィールドを更新するヘルパー関数
+  const updateBaget = useCallback(<K extends keyof SetupConfig['baget']>(
+    key: K,
+    value: SetupConfig['baget'][K],
+  ) => {
+    // 既存のドラフトをスプレッドして baget フィールドを部分更新する
+    setDraft((prev) =>
+      prev ? { ...prev, baget: { ...prev.baget, [key]: value } } : prev
     );
   }, []);
 
@@ -593,6 +611,84 @@ export function Settings() {
                 checked={draft.backstage.keep_data_on_uninstall}
                 // 変更時にドラフトを更新する
                 onChange={(e) => updateBackstage('keep_data_on_uninstall', e.target.checked)}
+                // チェックボックスのスタイルクラスを適用する
+                className={styles.checkbox}
+              />
+              {/* チェックボックスのラベルテキスト */}
+              <span>アンインストール時にデータを保持する</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── BaGet セクション ─── */}
+      <section className={styles.section}>
+        {/* セクションラベル */}
+        <span className={styles.sectionLabel}>BaGet</span>
+
+        {/* BaGet ポートの設定行 */}
+        <div className={styles.formRow}>
+          <label className={styles.formLabel} htmlFor="baget-port">
+            ポート
+          </label>
+          <div className={styles.formControl}>
+            {/* ポート番号の数値入力 */}
+            <input
+              id="baget-port"
+              type="number"
+              // ポートの有効範囲を指定する
+              min={PORT_MIN}
+              max={PORT_MAX}
+              // ドラフトの値を表示する
+              value={draft.baget.port}
+              // 変更時に数値に変換してドラフトを更新する
+              onChange={(e) => updateBaget('port', Number(e.target.value))}
+              // バリデーションエラーがある場合はエラースタイルを適用する
+              className={[styles.input, styles.inputNarrow, errors.baget_port ? styles.inputError : ''].join(' ')}
+            />
+            {/* バリデーションエラーメッセージを表示する */}
+            {errors.baget_port && (
+              <span className={styles.errorMsg}>{errors.baget_port}</span>
+            )}
+          </div>
+        </div>
+
+        {/* BaGet バージョンの設定行 */}
+        <div className={styles.formRow}>
+          <label className={styles.formLabel} htmlFor="baget-version">
+            バージョン指定
+          </label>
+          <div className={styles.formControl}>
+            {/* バージョン指定のテキスト入力（例: 0.4.0-preview2） */}
+            <input
+              id="baget-version"
+              type="text"
+              // ドラフトの値を表示する
+              value={draft.baget.version}
+              // 変更時にドラフトを更新する
+              onChange={(e) => updateBaget('version', e.target.value)}
+              // スタイルクラスを適用する
+              className={[styles.input, styles.inputNarrow].join(' ')}
+            />
+          </div>
+        </div>
+
+        {/* データ保持オプションの設定行 */}
+        <div className={styles.formRow}>
+          <label className={styles.formLabel} htmlFor="baget-keep-data">
+            データを保持
+          </label>
+          <div className={styles.formControl}>
+            {/* チェックボックスとラベルを横並びにする行 */}
+            <label className={styles.checkboxRow}>
+              {/* データ保持チェックボックス */}
+              <input
+                id="baget-keep-data"
+                type="checkbox"
+                // ドラフトの値でチェック状態を制御する
+                checked={draft.baget.keep_data_on_uninstall}
+                // 変更時にドラフトを更新する
+                onChange={(e) => updateBaget('keep_data_on_uninstall', e.target.checked)}
                 // チェックボックスのスタイルクラスを適用する
                 className={styles.checkbox}
               />

@@ -35,6 +35,8 @@ const DISPLAY_NAMES: Record<ComponentKind, string> = {
   verdaccio: 'Verdaccio',
   // Backstage の表示名
   backstage: 'Backstage',
+  // BaGet の表示名
+  baget: 'BaGet',
 };
 
 // アンインストール画面コンポーネント

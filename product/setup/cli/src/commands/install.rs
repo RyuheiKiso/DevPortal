@@ -163,7 +163,14 @@ pub fn run(
             // 失敗フラグを更新する
             any_failed = any_failed || failed;
         }
-        // target が "all" の場合は Verdaccio → Backstage の順でインストールする
+        // target が "baget" の場合は BaGet のみインストールする
+        "baget" => {
+            // BaGet をインストールしてフラグを更新する
+            let failed = install_component(Component::BaGet, effective_config, renderer)?;
+            // 失敗フラグを更新する
+            any_failed = any_failed || failed;
+        }
+        // target が "all" の場合は Verdaccio → Backstage → BaGet の順でインストールする
         "all" => {
             // Verdaccio を先にインストールする（config のクローンをスレッドに渡す）
             let verdaccio_config = effective_config.clone();
@@ -174,18 +181,25 @@ pub fn run(
             any_failed = any_failed || failed_v;
 
             // Backstage をその後にインストールする
-            let backstage_config = effective_config;
+            let backstage_config = effective_config.clone();
             // Backstage のインストールを実行する
             let failed_b =
                 install_component(Component::Backstage, backstage_config, renderer)?;
             // 失敗フラグを更新する
             any_failed = any_failed || failed_b;
+
+            // BaGet を最後にインストールする
+            let baget_config = effective_config;
+            // BaGet のインストールを実行する
+            let failed_bg = install_component(Component::BaGet, baget_config, renderer)?;
+            // 失敗フラグを更新する
+            any_failed = any_failed || failed_bg;
         }
         // 未知の target が指定された場合はエラーを返す
         unknown => {
             // 不明なターゲット名を含むエラーメッセージを返す
             return Err(anyhow::anyhow!(
-                "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / all",
+                "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / baget / all",
                 unknown
             ));
         }

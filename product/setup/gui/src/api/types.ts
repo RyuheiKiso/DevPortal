@@ -11,7 +11,7 @@ export type ServiceStatus =
   | 'unknown';
 
 // セットアップ対象コンポーネントの種別を表す文字列ユニオン型
-export type ComponentKind = 'verdaccio' | 'backstage';
+export type ComponentKind = 'verdaccio' | 'backstage' | 'baget';
 
 // ComponentStatus: 1 コンポーネントのステータス情報を表すインターフェース
 // Rust 側の ComponentStatus 構造体と対応する
@@ -80,6 +80,17 @@ export interface BackstageConfig {
   mode: 'dev' | 'build';
 }
 
+// BaGetConfig: BaGet 固有の設定インターフェース
+// Rust 側の BaGetConfig 構造体と対応する
+export interface BaGetConfig {
+  // BaGet が待ち受けるポート番号
+  port: number;
+  // インストールする BaGet のバージョン指定文字列
+  version: string;
+  // アンインストール時にデータを保持するかどうか
+  keep_data_on_uninstall: boolean;
+}
+
 // SetupConfig: セットアップ全体の設定をまとめたインターフェース
 // Rust 側の SetupConfig 構造体と対応する
 export interface SetupConfig {
@@ -91,6 +102,8 @@ export interface SetupConfig {
   verdaccio: VerdaccioConfig;
   // Backstage 固有の設定
   backstage: BackstageConfig;
+  // BaGet 固有の設定
+  baget: BaGetConfig;
 }
 
 // PluginKind: プラグインの適用対象種別を表す文字列ユニオン型

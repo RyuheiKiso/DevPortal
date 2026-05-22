@@ -92,6 +92,33 @@ impl Default for BackstageConfig {
     }
 }
 
+// BaGetConfig: BaGet 固有の設定をまとめた構造体
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BaGetConfig {
+    // BaGet が待ち受けるポート番号（デフォルト 5000）
+    pub port: u16,
+    // インストールする BaGet のバージョン指定文字列（デフォルト "0.4.0-preview2"）
+    pub version: String,
+    // アンインストール時にデータ（packages / db）を保持するかどうか（デフォルト true）
+    pub keep_data_on_uninstall: bool,
+}
+
+// BaGetConfig のデフォルト値を定義する
+impl Default for BaGetConfig {
+    // デフォルト値を持つ BaGetConfig を返す
+    fn default() -> Self {
+        // 各フィールドに仕様書で指定されたデフォルト値を設定する
+        Self {
+            // BaGet のデフォルトポート
+            port: 5000,
+            // インストールするデフォルトバージョン
+            version: "0.4.0-preview2".to_string(),
+            // データは保持する（誤削除防止のため true がデフォルト）
+            keep_data_on_uninstall: true,
+        }
+    }
+}
+
 // SetupConfig: セットアップ全体の設定をまとめたルート構造体
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SetupConfig {
@@ -103,6 +130,9 @@ pub struct SetupConfig {
     pub verdaccio: VerdaccioConfig,
     // Backstage 固有の設定
     pub backstage: BackstageConfig,
+    // BaGet 固有の設定（[baget] セクションがない既存 TOML からの読み込み時にデフォルト値を使う）
+    #[serde(default)]
+    pub baget: BaGetConfig,
 }
 
 // SetupConfig のデフォルト値を定義する
@@ -119,6 +149,8 @@ impl Default for SetupConfig {
             verdaccio: VerdaccioConfig::default(),
             // Backstage のデフォルト設定を使用する
             backstage: BackstageConfig::default(),
+            // BaGet のデフォルト設定を使用する
+            baget: BaGetConfig::default(),
         }
     }
 }
