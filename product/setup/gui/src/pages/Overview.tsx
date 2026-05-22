@@ -13,7 +13,6 @@ import { statusAll, prereqCheck, serviceAction, openLogs } from '../api/tauri';
 import { ComponentCard } from '../features/components/ComponentCard';
 // UI プリミティブをインポートする
 import { Banner } from '../ui/Banner';
-import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import type { BadgeVariant } from '../ui/Badge';
 import { Icon } from '../ui/Icon';
@@ -21,10 +20,6 @@ import { Skeleton } from '../ui/Skeleton';
 import { useToast } from '../ui/ToastProvider';
 // ページで使用する lucide-react アイコンをインポートする
 import {
-  // ステータス更新ボタンのアイコン
-  RefreshCw,
-  // 前提チェックボタンのアイコン
-  ShieldCheck,
   // 折りたたみが開いているときのアイコン
   ChevronDown,
   // 折りたたみが閉じているときのアイコン
@@ -201,35 +196,12 @@ export function Overview({ onGoInstall, onGoUninstall, onGoDetail }: OverviewPro
   return (
     <div className={styles.page}>
 
-      {/* ─── ページヘッダー（タイトル + 操作ボタン）─── */}
+      {/* ─── ページヘッダー（タイトル + 説明文）─── */}
+      {/* 更新・前提チェックボタンは TopBar に表示しているため重複させない */}
       <div className={styles.pageHeader}>
-        {/* 左側: ページタイトルと説明文 */}
         <div>
           <h1 className={styles.pageTitle}>Overview</h1>
           <p className={styles.pageDesc}>コンポーネントの状態を確認・操作します</p>
-        </div>
-        {/* 右側: 操作ボタン群 */}
-        <div className={styles.headerActions}>
-          {/* 前提チェックボタン（TopBar と共有の isPrereqChecking で disable する）*/}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => appActions?.runPrereqCheck()}
-            disabled={isPrereqChecking}
-          >
-            <Icon icon={ShieldCheck} size={14} />
-            {isPrereqChecking ? '確認中…' : '前提チェック'}
-          </Button>
-          {/* ステータス更新ボタン（TopBar と共有の isRefreshing で disable する）*/}
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => appActions?.runLoadStatuses()}
-            disabled={isRefreshing}
-          >
-            <Icon icon={RefreshCw} size={14} />
-            {isRefreshing ? '更新中…' : '更新'}
-          </Button>
         </div>
       </div>
 
