@@ -39,6 +39,15 @@ pub mod backstage;
 // NSSM バイナリを HTTP で動的取得・SHA-256 検証・ZIP 展開するモジュール
 pub mod nssm_fetcher;
 
+// Backstage ソースファイルへのマーカーコメント挿入・管理ロジックを定義するモジュール
+pub mod plugin_markers;
+
+// npm レジストリ検索クライアントを定義するモジュール
+pub mod registry;
+
+// Backstage プラグインの一覧・インストール・削除ロジックを定義するモジュール
+pub mod plugin;
+
 // Hello World 文字列を返す共通関数（cli と gui-backend の両方から利用される）
 pub fn greeting() -> &'static str {
     // 固定文字列 "Hello World" を返す

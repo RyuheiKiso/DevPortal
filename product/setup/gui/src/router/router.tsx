@@ -21,6 +21,8 @@ type UninstallRoute = { page: 'uninstall'; component: ComponentKind };
 type SettingsRoute  = { page: 'settings' };
 // コンポーネント詳細画面のルート型（将来の拡張用）
 type DetailRoute    = { page: 'detail';    component: ComponentKind };
+// Backstage プラグイン管理画面のルート型
+type PluginsRoute   = { page: 'plugins' };
 
 // アプリ内に存在する全ルートを表す判別ユニオン型
 export type Route =
@@ -28,7 +30,8 @@ export type Route =
   | InstallRoute
   | UninstallRoute
   | SettingsRoute
-  | DetailRoute;
+  | DetailRoute
+  | PluginsRoute;
 
 /* ============================================================
    ハッシュ文字列 ⇔ Route の変換関数
@@ -57,6 +60,10 @@ function parseHash(hash: string): Route {
   if (seg0 === 'component' && (seg1 === 'verdaccio' || seg1 === 'backstage')) {
     return { page: 'detail', component: seg1 };
   }
+  // "#/plugins" にマッチする場合（Backstage プラグイン管理画面）
+  if (seg0 === 'plugins') {
+    return { page: 'plugins' };
+  }
   // 上記いずれにもマッチしない場合は Overview にフォールバックする
   return { page: 'overview' };
 }
@@ -77,6 +84,9 @@ export function routeToHash(route: Route): string {
       return '#/settings';
     case 'detail':
       return `#/component/${route.component}`;
+    // plugins ページはルートパスに "plugins" を付ける
+    case 'plugins':
+      return '#/plugins';
   }
 }
 

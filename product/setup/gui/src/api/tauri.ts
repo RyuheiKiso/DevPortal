@@ -12,6 +12,10 @@ import type {
   ComponentStatus,
   SetupConfig,
   SetupEvent,
+  InstalledPlugin,
+  PluginCandidate,
+  PluginInstallRequest,
+  PluginRemoveRequest,
 } from './types';
 
 // prereqCheck: フロントエンドから前提条件チェックコマンドを呼び出す関数
@@ -134,4 +138,50 @@ export async function openLogs(
 ): Promise<void> {
   // invoke で cmd_open_logs コマンドを呼び出す
   return invoke<void>('cmd_open_logs', { component });
+}
+
+// pluginList: インストール済みプラグイン一覧を取得する関数
+// Rust 側の cmd_plugin_list を invoke して InstalledPlugin 配列を返す
+export async function pluginList(): Promise<InstalledPlugin[]> {
+  // invoke で cmd_plugin_list コマンドを呼び出す
+  return invoke<InstalledPlugin[]>('cmd_plugin_list');
+}
+
+// pluginSearch: npm レジストリでプラグインを検索する関数
+// query 文字列を受け取り、PluginCandidate 配列を返す
+export async function pluginSearch(query: string): Promise<PluginCandidate[]> {
+  // invoke で cmd_plugin_search コマンドを呼び出す
+  return invoke<PluginCandidate[]>('cmd_plugin_search', { query });
+}
+
+// pluginInstall: プラグインをインストールし進捗イベントを受け取る関数
+// Channel を作成して進捗イベントを onEvent コールバックにブリッジする
+export async function pluginInstall(
+  // インストール要求オブジェクト
+  request: PluginInstallRequest,
+  // 進捗イベントを受け取るコールバック関数
+  onEvent: (ev: SetupEvent) => void,
+): Promise<void> {
+  // SetupEvent 型の Channel を作成する
+  const channel = new Channel<SetupEvent>();
+  // Channel にメッセージが届いたときに onEvent コールバックを呼び出す
+  channel.onmessage = onEvent;
+  // invoke で cmd_plugin_install コマンドを呼び出す
+  return invoke<void>('cmd_plugin_install', { request, onEvent: channel });
+}
+
+// pluginRemove: プラグインを削除し進捗イベントを受け取る関数
+// Channel を作成して進捗イベントを onEvent コールバックにブリッジする
+export async function pluginRemove(
+  // 削除要求オブジェクト
+  request: PluginRemoveRequest,
+  // 進捗イベントを受け取るコールバック関数
+  onEvent: (ev: SetupEvent) => void,
+): Promise<void> {
+  // SetupEvent 型の Channel を作成する
+  const channel = new Channel<SetupEvent>();
+  // Channel にメッセージが届いたときに onEvent コールバックを呼び出す
+  channel.onmessage = onEvent;
+  // invoke で cmd_plugin_remove コマンドを呼び出す
+  return invoke<void>('cmd_plugin_remove', { request, onEvent: channel });
 }

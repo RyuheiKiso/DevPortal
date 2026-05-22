@@ -25,6 +25,8 @@ import {
   Building2,
   // Settings ページのアイコン
   Settings,
+  // Plugins ページのアイコン（パズルピース）
+  Puzzle,
   // ライトテーマのアイコン
   Sun,
   // ダークテーマのアイコン
@@ -61,6 +63,8 @@ const NAV_ITEMS: NavItemDef[] = [
   { label: 'Verdaccio', page: 'detail', component: 'verdaccio', icon: Package },
   // Backstage コンポーネント詳細ページへのリンク
   { label: 'Backstage', page: 'detail', component: 'backstage', icon: Building2 },
+  // Backstage プラグイン管理ページへのリンク
+  { label: 'Plugins', page: 'plugins', icon: Puzzle },
   // 設定ページへのリンク
   { label: 'Settings', page: 'settings', icon: Settings },
 ];

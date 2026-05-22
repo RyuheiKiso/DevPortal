@@ -19,6 +19,8 @@ import { Uninstall } from '../pages/Uninstall';
 import { Settings } from '../pages/Settings';
 // コンポーネント詳細ページをインポートする
 import { ComponentDetail } from '../pages/ComponentDetail';
+// Backstage プラグイン管理ページをインポートする
+import { Plugins } from '../pages/Plugins';
 // TopBar と Overview の間でアクション関数を共有するコンテキストをインポートする
 import { AppActionsContext } from './AppActionsContext';
 // ステータスキャッシュの型をインポートする
@@ -100,6 +102,14 @@ function RouteOutlet() {
             // Overview へ戻るコールバックを渡す
             onBack={() => navigate({ page: 'overview' })}
           />
+        </div>
+      );
+
+    // Backstage プラグイン管理ページ
+    case 'plugins':
+      return (
+        <div key={routeKey} className={styles.pageTransition}>
+          <Plugins />
         </div>
       );
   }

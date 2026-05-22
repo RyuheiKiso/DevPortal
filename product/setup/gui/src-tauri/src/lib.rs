@@ -41,6 +41,14 @@ pub fn run() {
             commands::config_cmd::cmd_load_config,
             // 設定保存コマンドを登録する
             commands::config_cmd::cmd_save_config,
+            // プラグイン一覧コマンドを登録する
+            commands::plugin::cmd_plugin_list,
+            // プラグイン検索コマンドを登録する
+            commands::plugin::cmd_plugin_search,
+            // プラグインインストールコマンドを登録する
+            commands::plugin::cmd_plugin_install,
+            // プラグイン削除コマンドを登録する
+            commands::plugin::cmd_plugin_remove,
         ])
         // tauri.conf.json などの設定を取り込んでアプリを起動する
         .run(tauri::generate_context!())

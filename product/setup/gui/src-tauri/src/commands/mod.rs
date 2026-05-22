@@ -21,3 +21,6 @@ pub mod elevate;
 
 // 設定の読み込みと保存コマンドを提供するサブモジュール
 pub mod config_cmd;
+
+// プラグイン管理コマンド（一覧・検索・インストール・削除）を提供するサブモジュール
+pub mod plugin;

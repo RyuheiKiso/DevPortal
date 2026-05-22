@@ -93,6 +93,54 @@ export interface SetupConfig {
   backstage: BackstageConfig;
 }
 
+// PluginKind: プラグインの適用対象種別を表す文字列ユニオン型
+// Rust 側の PluginKind 列挙型と対応する（serde snake_case）
+export type PluginKind = 'frontend' | 'backend';
+
+// InstalledPlugin: インストール済みプラグインの情報を表すインターフェース
+// Rust 側の InstalledPlugin 構造体と対応する
+export interface InstalledPlugin {
+  // npm パッケージ名（例: @backstage/plugin-kubernetes）
+  name: string;
+  // インストールされているバージョン文字列
+  version: string;
+  // プラグインの適用対象種別
+  kind: PluginKind;
+}
+
+// PluginCandidate: npm レジストリから取得したプラグイン候補を表すインターフェース
+// Rust 側の PluginCandidate 構造体と対応する
+export interface PluginCandidate {
+  // npm パッケージ名
+  name: string;
+  // 最新バージョン文字列
+  version: string;
+  // パッケージの説明文
+  description: string;
+  // プラグインの適用対象種別
+  kind: PluginKind;
+  // リポジトリ URL（取得できない場合は null）
+  repository_url: string | null;
+}
+
+// PluginInstallRequest: プラグインインストール要求を表すインターフェース
+// Rust 側の PluginInstallRequest 構造体と対応する
+export interface PluginInstallRequest {
+  // インストールする npm パッケージ名
+  package_name: string;
+  // プラグインの適用対象種別
+  kind: PluginKind;
+}
+
+// PluginRemoveRequest: プラグイン削除要求を表すインターフェース
+// Rust 側の PluginRemoveRequest 構造体と対応する
+export interface PluginRemoveRequest {
+  // 削除する npm パッケージ名
+  package_name: string;
+  // プラグインの適用対象種別
+  kind: PluginKind;
+}
+
 // SetupEvent: CLI/GUI 共通の進捗イベントを表す判別ユニオン型
 // Rust 側の SetupEvent 列挙型と対応する（tag = "kind" の内部タグ方式）
 export type SetupEvent =
