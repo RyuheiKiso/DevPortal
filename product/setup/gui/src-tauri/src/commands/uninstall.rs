@@ -50,8 +50,8 @@ pub async fn cmd_uninstall(
         // アンインストールエンジンを取得する（comp を clone して engine_for に渡し、元の値はエラー報告用に保持する）
         let engine = engine_for(comp.clone());
 
-        // 別スレッドでエンジンの uninstall を実行する
-        std::thread::spawn(move || {
+        // 別スレッドでエンジンの uninstall を実行する（JoinHandle を保持して panic を検知する）
+        let handle = std::thread::spawn(move || {
             // エンジンの uninstall メソッドを呼び出してアンインストールを実行する
             if let Err(e) = engine.uninstall(&config, &reporter, keep_data) {
                 // エンジンが reporter.failed() を呼ばずに Err を返した場合のフォールバック
@@ -80,6 +80,12 @@ pub async fn cmd_uninstall(
             // on_event.send() でフロントエンドの Channel にイベントを送信する
             // 送信失敗は無視する（フロントエンドが切断している場合など）
             let _ = on_event.send(event);
+        }
+
+        // スレッドの終了を待ち、panic が発生した場合は Err を返す
+        if handle.join().is_err() {
+            // panic 時は false success を避けるためエラーを返す
+            return Err("アンインストール中に予期しないエラーが発生しました".to_string());
         }
 
         // Failed イベントが来た場合はエラーを返す

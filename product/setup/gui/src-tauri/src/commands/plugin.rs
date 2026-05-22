@@ -77,8 +77,8 @@ pub async fn cmd_plugin_install(
         // パッケージ名のクローンをエラー報告用に保持する
         let package_name = request.package_name.clone();
 
-        // 別スレッドでプラグインインストールを実行する
-        std::thread::spawn(move || {
+        // 別スレッドでプラグインインストールを実行する（JoinHandle を保持して panic を検知する）
+        let handle = std::thread::spawn(move || {
             // プラグインのインストール処理を実行する
             if let Err(e) = shared::plugin::install(&config, &reporter, &request_clone) {
                 // エンジンが reporter.failed() を呼ばずに Err を返した場合のフォールバック
@@ -106,6 +106,16 @@ pub async fn cmd_plugin_install(
             }
             // on_event.send() でフロントエンドの Channel にイベントを送信する
             let _ = on_event.send(event);
+        }
+
+        // スレッドの終了を待ち、panic が発生した場合は Err を返す
+        // join() が Err を返すのはスレッドが panic した場合のみ
+        if handle.join().is_err() {
+            // panic 時は false success を避けるためエラーを返す
+            return Err(format!(
+                "プラグイン '{}' のインストール中に予期しないエラーが発生しました",
+                package_name
+            ));
         }
 
         // Failed イベントが来た場合はエラーを返す
@@ -152,8 +162,8 @@ pub async fn cmd_plugin_remove(
         // パッケージ名のクローンをエラー報告用に保持する
         let package_name = request.package_name.clone();
 
-        // 別スレッドでプラグイン削除を実行する
-        std::thread::spawn(move || {
+        // 別スレッドでプラグイン削除を実行する（JoinHandle を保持して panic を検知する）
+        let handle = std::thread::spawn(move || {
             // プラグインの削除処理を実行する
             if let Err(e) = shared::plugin::remove(&config, &reporter, &request_clone) {
                 // エラー発生時は Failed イベントを送信する
@@ -180,6 +190,15 @@ pub async fn cmd_plugin_remove(
             }
             // フロントエンドにイベントを送信する
             let _ = on_event.send(event);
+        }
+
+        // スレッドの終了を待ち、panic が発生した場合は Err を返す
+        if handle.join().is_err() {
+            // panic 時は false success を避けるためエラーを返す
+            return Err(format!(
+                "プラグイン '{}' の削除中に予期しないエラーが発生しました",
+                package_name
+            ));
         }
 
         // 失敗フラグが立っている場合はエラーを返す
