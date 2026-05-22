@@ -235,7 +235,7 @@ impl SetupEngine for BackstageEngine {
         fs::create_dir_all(&logs_dir)?;
 
         // ステップ 2: create-app を実行して Backstage アプリを生成する
-        reporter.step_start("create_app", "Backstage アプリを生成しています（時間がかかります）", 6, 0);
+        reporter.step_start("create_app", "Backstage アプリを生成しています（時間がかかります）", 7, 0);
 
         // npx @backstage/create-app コマンドを構築する
         // --path app でアプリディレクトリ名を指定する
@@ -341,7 +341,7 @@ impl SetupEngine for BackstageEngine {
         }
 
         // ステップ 3: yarn install を実行して依存関係をインストールする
-        reporter.step_start("yarn_install", "yarn install を実行しています", 6, 1);
+        reporter.step_start("yarn_install", "yarn install を実行しています", 7, 1);
         // Backstage アプリディレクトリを取得する
         let app_dir = paths::backstage_app_dir(config);
         // app_dir の文字列を取得する
@@ -360,17 +360,28 @@ impl SetupEngine for BackstageEngine {
         // yarn install をストリーミング実行する
         run_streaming(yarn_install_cmd, "yarn_install", reporter)?;
 
-        // ステップ 4: app-config.yaml のポート番号を更新する
+        // ステップ 4: フロントエンドをビルドする
+        // production モードでは backend が packages/app/dist/ の静的ファイルを serve する
+        // yarn build を実行しないと GET / が 404 になりブラウザから UI にアクセスできない
+        reporter.step_start("yarn_build", "フロントエンドをビルドしています（数分かかります）", 7, 2);
+        // yarn build コマンドを構築する
+        let mut yarn_build_cmd = build_command("yarn", &["build"]);
+        // 作業ディレクトリを app_dir に設定する
+        yarn_build_cmd.current_dir(&app_dir_str);
+        // yarn build をストリーミング実行する
+        run_streaming(yarn_build_cmd, "yarn_build", reporter)?;
+
+        // ステップ 5: app-config.yaml のポート番号を更新する
         reporter.info("app-config.yaml のポート設定を更新しています...");
         // ポート設定の更新（失敗しても続行するためエラーは reporter に警告として出力）
         Self::update_app_config_ports(config, reporter);
 
-        // ステップ 5: NSSM を確保する（キャッシュがあれば即時、なければ HTTP 動的取得）
-        reporter.step_start("nssm_fetch", "NSSM を確保しています", 6, 2);
+        // ステップ 6: NSSM を確保する（キャッシュがあれば即時、なければ HTTP 動的取得）
+        reporter.step_start("nssm_fetch", "NSSM を確保しています", 7, 3);
         // Nssm::ensure はキャッシュ確認 → 必要なら自動ダウンロードを行う
         let nssm = Nssm::ensure(reporter)?;
         // NSSM サービス登録ステップを開始する
-        reporter.step_start("nssm_install", "NSSM サービス登録", 6, 2);
+        reporter.step_start("nssm_install", "NSSM サービス登録", 7, 3);
         // backend_port を文字列に変換する
         let backend_port_str = config.backstage.backend_port.to_string();
 
@@ -386,8 +397,8 @@ impl SetupEngine for BackstageEngine {
         // AppParameters を設定する（cmd /c yarn workspace backend start）
         nssm.set(&service_name, "AppParameters", "/c yarn workspace backend start")?;
 
-        // ステップ 6: NSSM でサービスの詳細設定を行う
-        reporter.step_start("nssm_configure", "NSSM サービス設定", 6, 3);
+        // ステップ 7: NSSM でサービスの詳細設定を行う
+        reporter.step_start("nssm_configure", "NSSM サービス設定", 7, 4);
         // ログファイルのパスを構築する
         let stdout_log = logs_dir.join("backstage-stdout.log");
         // stderr ログファイルのパスを構築する
@@ -411,9 +422,9 @@ impl SetupEngine for BackstageEngine {
             &stdout_log_str,
             // 標準エラーログファイルを指定する
             &stderr_log_str,
-            // 追加環境変数（NODE_ENV と PORT を設定する）
+            // 追加環境変数（production モードで backend が app/dist/ の静的ファイルを serve する）
             &[
-                ("NODE_ENV", "development"),
+                ("NODE_ENV", "production"),
                 ("PORT", &backend_port_str),
             ],
         )?;
@@ -421,13 +432,13 @@ impl SetupEngine for BackstageEngine {
         // AppThrottle を追加で設定する（スロットリング 60 秒）
         nssm.set(&service_name, "AppThrottle", "60000")?;
 
-        // ステップ 7: サービスを起動する
-        reporter.step_start("service_start", "サービスを起動しています", 6, 4);
-        // nssm start でサービスを起動する
+        // ステップ 8: サービスを起動する
+        reporter.step_start("service_start", "サービスを起動しています", 7, 5);
+        // sc.exe start でサービスを起動する（起動完了はヘルスチェックで確認する）
         nssm.start(&service_name)?;
 
-        // ステップ 8: ヘルスチェックを実施する（最大 100 回・3 秒ごと = 最大 300 秒）
-        reporter.step_start("health_check", "ヘルスチェック待機中（最大 5 分）", 6, 5);
+        // ステップ 9: ヘルスチェックを実施する（最大 100 回・3 秒ごと = 最大 300 秒）
+        reporter.step_start("health_check", "ヘルスチェック待機中（最大 5 分）", 7, 6);
         // Backstage バックエンドポートへの TCP 接続確認
         let backend_port = config.backstage.backend_port;
         // TCP 接続で Backstage が応答するまで待機する
