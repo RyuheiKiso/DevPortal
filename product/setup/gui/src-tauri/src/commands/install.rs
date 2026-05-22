@@ -15,8 +15,9 @@ use shared::config::SetupConfig;
 // config: インストール設定（フロントエンドから JSON でシリアライズされて渡される）
 // on_event: Tauri v2 の Channel<SetupEvent>（進捗イベントの送信先）
 // 注: 管理者権限は app.manifest の requireAdministrator で OS レベルで保証される
+// async にすることで Tauri の非同期ランタイム上で実行し、メインスレッドをブロックしない
 #[tauri::command]
-pub fn cmd_install(
+pub async fn cmd_install(
     // インストール対象のコンポーネント名文字列
     component: String,
     // インストール設定をフロントエンドから受け取る
@@ -34,54 +35,61 @@ pub fn cmd_install(
         other => return Err(format!("未知のコンポーネント: {}", other)),
     };
 
-    // メインスレッドとワーカースレッド間でイベントを受け渡す mpsc チャネルを作成する
-    let (tx, rx) = mpsc::channel::<SetupEvent>();
+    // ブロッキング処理（mpsc 受信ループ）を専用スレッドで実行して非同期ランタイムを解放する
+    // spawn_blocking を使わないと for event in rx がメインスレッドを占有しウィンドウが応答なしになる
+    tauri::async_runtime::spawn_blocking(move || {
+        // メインスレッドとワーカースレッド間でイベントを受け渡す mpsc チャネルを作成する
+        let (tx, rx) = mpsc::channel::<SetupEvent>();
 
-    // Reporter を作成する（送信端を渡してイベントを Reporter 経由で送信する）
-    let reporter = Reporter::new(tx);
+        // Reporter を作成する（送信端を渡してイベントを Reporter 経由で送信する）
+        let reporter = Reporter::new(tx);
 
-    // インストールエンジンを取得する（comp を clone して engine_for に渡し、元の値はエラー報告用に保持する）
-    let engine = engine_for(comp.clone());
+        // インストールエンジンを取得する（comp を clone して engine_for に渡し、元の値はエラー報告用に保持する）
+        let engine = engine_for(comp.clone());
 
-    // 別スレッドでエンジンの install を実行する（Tauri コマンドはメインスレッドで動作するため）
-    std::thread::spawn(move || {
-        // エンジンの install メソッドを呼び出してインストールを実行する
-        if let Err(e) = engine.install(&config, &reporter) {
-            // エンジンが reporter.failed() を呼ばずに Err を返した場合のフォールバック
-            // （例: NSSM ダウンロード失敗など途中のエラーが ? で伝播した場合）
-            reporter.failed(
-                // 対象コンポーネントを渡す
-                comp,
-                // インストール操作であることを示す
-                ActionKind::Install,
-                // エラー内容をそのまま渡す
-                e.to_string(),
-                // 回復可能でないエラーとして通知する
-                false,
-            );
+        // 別スレッドでエンジンの install を実行する
+        std::thread::spawn(move || {
+            // エンジンの install メソッドを呼び出してインストールを実行する
+            if let Err(e) = engine.install(&config, &reporter) {
+                // エンジンが reporter.failed() を呼ばずに Err を返した場合のフォールバック
+                // （例: NSSM ダウンロード失敗など途中のエラーが ? で伝播した場合）
+                reporter.failed(
+                    // 対象コンポーネントを渡す
+                    comp,
+                    // インストール操作であることを示す
+                    ActionKind::Install,
+                    // エラー内容をそのまま渡す
+                    e.to_string(),
+                    // 回復可能でないエラーとして通知する
+                    false,
+                );
+            }
+        });
+
+        // 受信ループでイベントを Channel 経由でフロントエンドに送信する
+        let mut failed = false;
+        // recv() でチャネルからイベントを受信し、送信端が Drop されるまでループする
+        for event in rx {
+            // Failed イベントが来た場合はフラグを立てる
+            if let SetupEvent::Failed { .. } = &event {
+                // インストール失敗フラグをセットする
+                failed = true;
+            }
+            // on_event.send() でフロントエンドの Channel にイベントを送信する
+            // 送信失敗は無視する（フロントエンドが切断している場合など）
+            let _ = on_event.send(event);
         }
-    });
 
-    // メインスレッドで受信ループを実行してイベントを Channel 経由でフロントエンドに送信する
-    let mut failed = false;
-    // recv() でチャネルからイベントを受信し、送信端が Drop されるまでループする
-    for event in rx {
-        // Failed イベントが来た場合はフラグを立てる
-        if let SetupEvent::Failed { .. } = &event {
-            // インストール失敗フラグをセットする
-            failed = true;
+        // Failed イベントが来た場合はエラーを返す
+        if failed {
+            // インストールが失敗したことをフロントエンドに通知する
+            Err("インストールに失敗しました".to_string())
+        } else {
+            // インストールが正常に完了したことを示す Ok(()) を返す
+            Ok(())
         }
-        // on_event.send() でフロントエンドの Channel にイベントを送信する
-        // 送信失敗は無視する（フロントエンドが切断している場合など）
-        let _ = on_event.send(event);
-    }
-
-    // Failed イベントが来た場合はエラーを返す
-    if failed {
-        // インストールが失敗したことをフロントエンドに通知する
-        Err("インストールに失敗しました".to_string())
-    } else {
-        // インストールが正常に完了したことを示す Ok(()) を返す
-        Ok(())
-    }
+    })
+    // spawn_blocking の JoinError を String に変換する
+    .await
+    .map_err(|e| e.to_string())?
 }
