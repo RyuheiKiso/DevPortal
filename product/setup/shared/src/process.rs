@@ -64,6 +64,12 @@ pub fn run_streaming(
     cmd.stdout(Stdio::piped());
     // stderr もパイプ（キャプチャ）に設定する
     cmd.stderr(Stdio::piped());
+    // コンソールウィンドウを非表示にする（cmd /c 実行時のちらつき防止）
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
 
     // コマンドを起動して子プロセスのハンドルを取得する
     let mut child = cmd.spawn().map_err(|e| SetupError::Io(e))?;
@@ -161,6 +167,12 @@ pub fn run_output(mut cmd: Command) -> Result<String, SetupError> {
     cmd.stdout(Stdio::piped());
     // stderr は無視する（出力を捨てる）
     cmd.stderr(Stdio::null());
+    // コンソールウィンドウを非表示にする（cmd /c 実行時のちらつき防止）
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
 
     // コマンドを実行して全出力を一括取得する
     let output = cmd.output().map_err(|e| SetupError::Io(e))?;

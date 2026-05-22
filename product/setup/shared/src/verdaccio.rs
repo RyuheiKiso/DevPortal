@@ -221,8 +221,8 @@ impl SetupEngine for VerdaccioEngine {
         // ステップ 5: node.exe の絶対パスを取得する
         reporter.info("node.exe のパスを取得しています...");
 
-        // node -e "process.execPath" を実行して node.exe のパスを取得する
-        let node_exe_raw = run_output(build_command("node", &["-e", "process.execPath"]))?;
+        // node -e でスクリプトモード実行時は式だけでは出力されないため console.log を使う
+        let node_exe_raw = run_output(build_command("node", &["-e", "console.log(process.execPath)"]))?;
         // 取得したパスの前後の空白と改行を除去する
         let node_exe = node_exe_raw.trim().to_string();
 
@@ -252,7 +252,7 @@ impl SetupEngine for VerdaccioEngine {
         // nssm install でサービスを登録する（引数なし）
         // NSSM 2.24 は追加引数を install に渡すと Parameters レジストリが壊れる場合があるため
         // AppParameters は直後の nssm set で別途設定する
-        nssm.install(&service_name, &node_exe)?;
+        nssm.install(&service_name, &node_exe, reporter)?;
 
         // AppParameters を設定する（verdaccio エントリポイントと起動引数）
         // パスにスペースが含まれる場合に備えてダブルクォートで囲む

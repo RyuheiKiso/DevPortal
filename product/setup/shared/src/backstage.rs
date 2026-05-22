@@ -381,7 +381,7 @@ impl SetupEngine for BackstageEngine {
         // nssm install でサービスを登録する（引数なし）
         // NSSM 2.24 は追加引数を install に渡すと Parameters レジストリが壊れる場合があるため
         // AppParameters は直後の nssm set で別途設定する
-        nssm.install(&service_name, cmd_exe)?;
+        nssm.install(&service_name, cmd_exe, reporter)?;
 
         // AppParameters を設定する（cmd /c yarn workspace backend start）
         nssm.set(&service_name, "AppParameters", "/c yarn workspace backend start")?;
