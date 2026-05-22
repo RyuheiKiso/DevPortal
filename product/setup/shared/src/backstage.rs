@@ -71,6 +71,53 @@ impl BackstageEngine {
         false
     }
 
+    // serde_yaml::Value の指定パスに値を設定するヘルパーメソッド
+    // 中間キーが存在しない場合は Mapping として作成する
+    fn set_yaml_path(root: &mut serde_yaml::Value, path: &[&str], value: serde_yaml::Value) {
+        // 空パスの場合はルート値そのものを置き換える
+        if path.is_empty() {
+            *root = value;
+            return;
+        }
+
+        // 現在位置をルートから開始する
+        let mut current = root;
+        // 最後のキーの手前まで Mapping をたどる
+        for key in &path[..path.len() - 1] {
+            // 現在位置が Mapping でない場合は Mapping に置き換える
+            if !matches!(current, serde_yaml::Value::Mapping(_)) {
+                *current = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
+            }
+
+            // 現在位置の Mapping を取得する
+            let map = match current {
+                serde_yaml::Value::Mapping(map) => map,
+                _ => unreachable!(),
+            };
+            // キーを serde_yaml::Value として作成する
+            let key_value = serde_yaml::Value::String((*key).to_string());
+            // 中間キーが存在しない場合は空 Mapping を挿入する
+            if !map.contains_key(&key_value) {
+                map.insert(
+                    key_value.clone(),
+                    serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
+                );
+            }
+            // 次の階層へ移動する
+            current = map.get_mut(&key_value).expect("inserted key must exist");
+        }
+
+        // 最後のキーを書き込むため、現在位置を Mapping にする
+        if !matches!(current, serde_yaml::Value::Mapping(_)) {
+            *current = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
+        }
+        // 最後のキーへ値を挿入する
+        if let serde_yaml::Value::Mapping(map) = current {
+            let last_key = serde_yaml::Value::String(path[path.len() - 1].to_string());
+            map.insert(last_key, value);
+        }
+    }
+
     // app-config.yaml のポート番号を serde_yaml を使って更新するヘルパーメソッド
     // 失敗しても続行するため Result は返さずに Reporter へ警告を出す
     fn update_app_config_ports(config: &SetupConfig, reporter: &Reporter) {
@@ -118,57 +165,36 @@ impl BackstageEngine {
 
         // backend.listen.port を更新する
         let backend_port = config.backstage.backend_port;
-        // app.baseUrl と backend.baseUrl のポートを更新する
-        let frontend_port = config.backstage.frontend_port;
+        // dev モードはフロントエンド開発サーバー、build モードは backend が静的ファイルを配信する
+        let app_port = match config.backstage.mode {
+            BackstageMode::Dev => config.backstage.frontend_port,
+            BackstageMode::Build => backend_port,
+        };
 
-        // backend.listen.port を更新する（パスが存在しない場合はスキップ）
-        if let serde_yaml::Value::Mapping(ref mut map) = yaml_value {
-            // backend キーを取得する
-            if let Some(backend) = map.get_mut("backend") {
-                // backend が Mapping の場合に処理する
-                if let serde_yaml::Value::Mapping(ref mut backend_map) = backend {
-                    // listen キーを取得する
-                    if let Some(listen) = backend_map.get_mut("listen") {
-                        // listen が Mapping の場合に port を更新する
-                        if let serde_yaml::Value::Mapping(ref mut listen_map) = listen {
-                            // port キーの値を更新する
-                            listen_map.insert(
-                                // port というキーを設定する
-                                serde_yaml::Value::String("port".to_string()),
-                                // バックエンドポート番号を数値として設定する
-                                serde_yaml::Value::Number(serde_yaml::Number::from(backend_port)),
-                            );
-                        }
-                    }
-                }
-            }
-            // app.baseUrl を更新する
-            if let Some(app) = map.get_mut("app") {
-                // app が Mapping の場合に baseUrl を更新する
-                if let serde_yaml::Value::Mapping(ref mut app_map) = app {
-                    // baseUrl の値を更新する（フロントエンドポート）
-                    app_map.insert(
-                        // baseUrl というキーを設定する
-                        serde_yaml::Value::String("baseUrl".to_string()),
-                        // フロントエンドの URL を設定する
-                        serde_yaml::Value::String(format!("http://localhost:{}", frontend_port)),
-                    );
-                }
-            }
-            // backend.baseUrl を更新する
-            if let Some(backend) = map.get_mut("backend") {
-                // backend が Mapping の場合に baseUrl を更新する
-                if let serde_yaml::Value::Mapping(ref mut backend_map) = backend {
-                    // baseUrl の値を更新する（バックエンドポート）
-                    backend_map.insert(
-                        // baseUrl というキーを設定する
-                        serde_yaml::Value::String("baseUrl".to_string()),
-                        // バックエンドの URL を設定する
-                        serde_yaml::Value::String(format!("http://localhost:{}", backend_port)),
-                    );
-                }
-            }
-        }
+        // backend.listen.port を設定する
+        Self::set_yaml_path(
+            &mut yaml_value,
+            &["backend", "listen", "port"],
+            serde_yaml::Value::Number(serde_yaml::Number::from(backend_port)),
+        );
+        // app.baseUrl をモードに応じた Web UI URL に設定する
+        Self::set_yaml_path(
+            &mut yaml_value,
+            &["app", "baseUrl"],
+            serde_yaml::Value::String(format!("http://localhost:{}", app_port)),
+        );
+        // backend.baseUrl をバックエンド URL に設定する
+        Self::set_yaml_path(
+            &mut yaml_value,
+            &["backend", "baseUrl"],
+            serde_yaml::Value::String(format!("http://localhost:{}", backend_port)),
+        );
+        // dev モードでフロントエンドポートを変えた場合に CORS origin も追随させる
+        Self::set_yaml_path(
+            &mut yaml_value,
+            &["backend", "cors", "origin"],
+            serde_yaml::Value::String(format!("http://localhost:{}", app_port)),
+        );
 
         // 更新した YAML を文字列にシリアライズする
         let updated_content = match serde_yaml::to_string(&yaml_value) {
@@ -213,14 +239,15 @@ impl SetupEngine for BackstageEngine {
 
     // Backstage をインストールして Windows サービスとして登録する
     fn install(&self, config: &SetupConfig, reporter: &Reporter) -> Result<(), SetupError> {
-        // Build モードは未実装のためエラーを返す
-        if config.backstage.mode == BackstageMode::Build {
-            // Build モードは現時点では未実装であることを示すエラーを返す
-            return Err(SetupError::Other("Build モードは未実装です".to_string()));
-        }
-
         // サービス名を取得する
         let service_name = self.service_name(config);
+        // Backstage の起動モードごとの総ステップ数を決定する
+        let total_steps = match config.backstage.mode {
+            // dev はビルドを行わず yarn dev をサービス化する
+            BackstageMode::Dev => 8,
+            // build は frontend/backend をビルドして production backend をサービス化する
+            BackstageMode::Build => 10,
+        };
 
         // 前提条件チェックを実行する（node/npm/npx/yarn/git が必要）
         let prereq = crate::prereq::check_prereqs();
@@ -252,7 +279,7 @@ impl SetupEngine for BackstageEngine {
         reporter.step_start(
             "create_app",
             "Backstage アプリを生成しています（時間がかかります）",
-            7,
+            total_steps,
             0,
         );
 
@@ -355,7 +382,12 @@ impl SetupEngine for BackstageEngine {
         }
 
         // ステップ 3: yarn install を実行して依存関係をインストールする
-        reporter.step_start("yarn_install", "yarn install を実行しています", 7, 1);
+        reporter.step_start(
+            "yarn_install",
+            "yarn install を実行しています",
+            total_steps,
+            1,
+        );
         // Backstage アプリディレクトリを取得する
         let app_dir = paths::backstage_app_dir(config);
         // app_dir の文字列を取得する
@@ -368,38 +400,74 @@ impl SetupEngine for BackstageEngine {
         // yarn install をストリーミング実行する
         run_streaming(yarn_install_cmd, "yarn_install", reporter)?;
 
-        // ステップ 4: フロントエンドをビルドする
-        // production モードでは backend が packages/app/dist/ の静的ファイルを serve する
-        // yarn build を実行しないと GET / が 404 になりブラウザから UI にアクセスできない
+        // ステップ 4: app-config.yaml のポート番号を更新する
+        // Backstage の frontend build は app-config.yaml を読むため、build より前に更新する
         reporter.step_start(
-            "yarn_build",
-            "フロントエンドをビルドしています（数分かかります）",
-            7,
+            "app_config",
+            "app-config.yaml のポート設定を更新しています",
+            total_steps,
             2,
         );
-        // yarn workspace app build でフロントエンドパッケージのみビルドする
-        // ルート package.json に "build" スクリプトはなく workspace 指定が必要
-        let mut yarn_build_cmd = build_command("yarn", &["workspace", "app", "build"]);
-        // 作業ディレクトリを app_dir に設定する
-        yarn_build_cmd.current_dir(&app_dir_str);
-        // yarn build をストリーミング実行する
-        run_streaming(yarn_build_cmd, "yarn_build", reporter)?;
-
-        // ステップ 5: app-config.yaml のポート番号を更新する
-        reporter.info("app-config.yaml のポート設定を更新しています...");
         // ポート設定の更新（失敗しても続行するためエラーは reporter に警告として出力）
         Self::update_app_config_ports(config, reporter);
 
-        // ステップ 6: NSSM を確保する（キャッシュがあれば即時、なければ HTTP 動的取得）
-        reporter.step_start("nssm_fetch", "NSSM を確保しています", 7, 3);
+        // build モードの場合のみ frontend/backend をビルドする
+        let nssm_fetch_index = match config.backstage.mode {
+            BackstageMode::Dev => 3,
+            BackstageMode::Build => {
+                // production モードでは backend が packages/app/dist/ の静的ファイルを serve する
+                // yarn build を実行しないと GET / が 404 になりブラウザから UI にアクセスできない
+                reporter.step_start(
+                    "yarn_app_build",
+                    "Backstage フロントエンドをビルドしています（数分かかります）",
+                    total_steps,
+                    3,
+                );
+                // yarn workspace app build でフロントエンドパッケージのみビルドする
+                let mut yarn_app_build_cmd = build_command("yarn", &["workspace", "app", "build"]);
+                // 作業ディレクトリを app_dir に設定する
+                yarn_app_build_cmd.current_dir(&app_dir_str);
+                // yarn build をストリーミング実行する
+                run_streaming(yarn_app_build_cmd, "yarn_app_build", reporter)?;
+
+                // backend パッケージも事前にビルドして production 起動前にコンパイルエラーを検出する
+                reporter.step_start(
+                    "yarn_backend_build",
+                    "Backstage バックエンドをビルドしています",
+                    total_steps,
+                    4,
+                );
+                // yarn workspace backend build を実行する
+                let mut yarn_backend_build_cmd =
+                    build_command("yarn", &["workspace", "backend", "build"]);
+                // 作業ディレクトリを app_dir に設定する
+                yarn_backend_build_cmd.current_dir(&app_dir_str);
+                // backend build をストリーミング実行する
+                run_streaming(yarn_backend_build_cmd, "yarn_backend_build", reporter)?;
+
+                5
+            }
+        };
+
+        // ステップ 5/7: NSSM を確保する（キャッシュがあれば即時、なければ HTTP 動的取得）
+        reporter.step_start(
+            "nssm_fetch",
+            "NSSM を確保しています",
+            total_steps,
+            nssm_fetch_index,
+        );
         // Nssm::ensure はキャッシュ確認 → 必要なら自動ダウンロードを行う
         let nssm = Nssm::ensure(reporter)?;
         // NSSM サービス登録ステップを開始する
-        reporter.step_start("nssm_install", "NSSM サービス登録", 7, 3);
+        reporter.step_start(
+            "nssm_install",
+            "NSSM サービス登録",
+            total_steps,
+            nssm_fetch_index + 1,
+        );
         // backend_port を文字列に変換する
         let backend_port_str = config.backstage.backend_port.to_string();
 
-        // Dev モードの場合: yarn workspace backend start を使用する
         // Windows では cmd.exe 経由になるため、nssm には cmd.exe を実行ファイルとして指定する
         let cmd_exe = "cmd.exe";
 
@@ -408,15 +476,23 @@ impl SetupEngine for BackstageEngine {
         // AppParameters は直後の nssm set で別途設定する
         nssm.install(&service_name, cmd_exe, reporter)?;
 
-        // AppParameters を設定する（cmd /c yarn workspace backend start）
-        nssm.set(
-            &service_name,
-            "AppParameters",
-            "/c yarn workspace backend start",
-        )?;
+        // AppParameters を起動モードに応じて設定する
+        let app_parameters = match config.backstage.mode {
+            // dev は frontend/backend の開発サーバーをまとめて起動する
+            BackstageMode::Dev => "/c yarn dev",
+            // build はビルド済み frontend を production backend から配信する
+            BackstageMode::Build => "/c yarn workspace backend start --config app-config.yaml",
+        };
+        // AppParameters を設定する
+        nssm.set(&service_name, "AppParameters", app_parameters)?;
 
-        // ステップ 7: NSSM でサービスの詳細設定を行う
-        reporter.step_start("nssm_configure", "NSSM サービス設定", 7, 4);
+        // ステップ 7/9: NSSM でサービスの詳細設定を行う
+        reporter.step_start(
+            "nssm_configure",
+            "NSSM サービス設定",
+            total_steps,
+            nssm_fetch_index + 2,
+        );
         // ログファイルのパスを構築する
         let stdout_log = logs_dir.join("backstage-stdout.log");
         // stderr ログファイルのパスを構築する
@@ -425,6 +501,12 @@ impl SetupEngine for BackstageEngine {
         let stdout_log_str = stdout_log.to_string_lossy().to_string();
         // stderr ログパスの文字列を取得する
         let stderr_log_str = stderr_log.to_string_lossy().to_string();
+
+        // NODE_ENV を起動モードに応じて設定する
+        let node_env = match config.backstage.mode {
+            BackstageMode::Dev => "development",
+            BackstageMode::Build => "production",
+        };
 
         // サービスの詳細設定を一括で行う
         nssm.configure_service(
@@ -440,20 +522,30 @@ impl SetupEngine for BackstageEngine {
             &stdout_log_str,
             // 標準エラーログファイルを指定する
             &stderr_log_str,
-            // 追加環境変数（production モードで backend が app/dist/ の静的ファイルを serve する）
-            &[("NODE_ENV", "production"), ("PORT", &backend_port_str)],
+            // 追加環境変数（PORT は backend.listen.port と揃える）
+            &[("NODE_ENV", node_env), ("PORT", &backend_port_str)],
         )?;
 
         // AppThrottle を追加で設定する（スロットリング 60 秒）
         nssm.set(&service_name, "AppThrottle", "60000")?;
 
-        // ステップ 8: サービスを起動する
-        reporter.step_start("service_start", "サービスを起動しています", 7, 5);
+        // ステップ 8/10: サービスを起動する
+        reporter.step_start(
+            "service_start",
+            "サービスを起動しています",
+            total_steps,
+            nssm_fetch_index + 3,
+        );
         // sc.exe start でサービスを起動する（起動完了はヘルスチェックで確認する）
         nssm.start(&service_name)?;
 
-        // ステップ 9: ヘルスチェックを実施する（最大 100 回・3 秒ごと = 最大 300 秒）
-        reporter.step_start("health_check", "ヘルスチェック待機中（最大 5 分）", 7, 6);
+        // ステップ 9/11: ヘルスチェックを実施する（最大 100 回・3 秒ごと = 最大 300 秒）
+        reporter.step_start(
+            "health_check",
+            "ヘルスチェック待機中（最大 5 分）",
+            total_steps,
+            nssm_fetch_index + 4,
+        );
         // Backstage バックエンドポートへの TCP 接続確認
         let backend_port = config.backstage.backend_port;
         // TCP 接続で Backstage が応答するまで待機する
@@ -484,8 +576,13 @@ impl SetupEngine for BackstageEngine {
             ActionKind::Install,
             // 完了の要約テキストを生成する
             format!(
-                "Backstage を Windows サービス '{}' としてインストールしました（バックエンドポート {}）",
-                service_name, backend_port
+                "Backstage を {} モードで Windows サービス '{}' としてインストールしました（バックエンドポート {}）",
+                match config.backstage.mode {
+                    BackstageMode::Dev => "dev",
+                    BackstageMode::Build => "build",
+                },
+                service_name,
+                backend_port
             ),
         );
 
@@ -591,8 +688,13 @@ impl SetupEngine for BackstageEngine {
 
         // エンドポイント URL を構築する（Backstage バックエンドの API URL）
         let endpoint_url = format!("http://127.0.0.1:{}/api/catalog/health", port);
-        // ブラウザで開く Web UI ルート URL を構築する（本番モードではバックエンドがフロントも配信するため backend_port を使う）
-        let web_url = format!("http://127.0.0.1:{}/", port);
+        // ブラウザで開く Web UI ルート URL を構築する
+        // dev モードではフロントエンド開発サーバー、build モードでは backend 配信を開く
+        let web_port = match config.backstage.mode {
+            BackstageMode::Dev => config.backstage.frontend_port,
+            BackstageMode::Build => port,
+        };
+        let web_url = format!("http://127.0.0.1:{}/", web_port);
         // アプリディレクトリの存在確認を行う
         let data_dir_exists = paths::backstage_app_dir(config).exists();
 

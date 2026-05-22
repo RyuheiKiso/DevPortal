@@ -4,8 +4,8 @@
 // ConfigArgs と ConfigAction 型を参照するために使用する
 use crate::args::{ConfigAction, ConfigArgs};
 
-// SetupConfig 型を参照するために使用する
-use shared::config::SetupConfig;
+// SetupConfig 型と BackstageMode 型を参照するために使用する
+use shared::config::{BackstageMode, SetupConfig};
 
 // true/false 系の文字列を bool に変換するヘルパー関数
 fn parse_bool(value: &str) -> anyhow::Result<bool> {
@@ -36,7 +36,7 @@ pub fn run(args: &ConfigArgs, config: &mut SetupConfig) -> anyhow::Result<()> {
         // set: 指定されたキーと値で設定を変更してファイルに保存する
         ConfigAction::Set { key, value } => {
             // キーを "." で分割してドット記法のキーパスを解析する
-            // 対応キー: verdaccio.port / backstage.frontend_port / backstage.backend_port / baget.* / install_root
+            // 対応キー: verdaccio.port / backstage.* / baget.* / install_root
             match key.as_str() {
                 // Verdaccio のポート番号を変更する
                 "verdaccio.port" => {
@@ -70,6 +70,24 @@ pub fn run(args: &ConfigArgs, config: &mut SetupConfig) -> anyhow::Result<()> {
                     config.backstage.backend_port = port;
                     // 変更内容を表示する
                     println!("backstage.backend_port を {} に設定しました", port);
+                }
+                // Backstage の起動モードを変更する
+                "backstage.mode" => {
+                    // 値を BackstageMode に変換する
+                    let mode = match value.to_ascii_lowercase().as_str() {
+                        "dev" => BackstageMode::Dev,
+                        "build" => BackstageMode::Build,
+                        _ => {
+                            return Err(anyhow::anyhow!(
+                                "backstage.mode は dev または build を指定してください: {}",
+                                value
+                            ));
+                        }
+                    };
+                    // 設定の起動モードを更新する
+                    config.backstage.mode = mode;
+                    // 変更内容を表示する
+                    println!("backstage.mode を {} に設定しました", value);
                 }
                 // BaGet のポート番号を変更する
                 "baget.port" => {
@@ -118,7 +136,7 @@ pub fn run(args: &ConfigArgs, config: &mut SetupConfig) -> anyhow::Result<()> {
                 unknown_key => {
                     // 不明なキー名を含むエラーメッセージを返す
                     return Err(anyhow::anyhow!(
-                        "不明なキー: '{}'. 対応キー: verdaccio.port / backstage.frontend_port / backstage.backend_port / baget.port / baget.version / baget.keep_data_on_uninstall / install_root",
+                        "不明なキー: '{}'. 対応キー: verdaccio.port / backstage.frontend_port / backstage.backend_port / backstage.mode / baget.port / baget.version / baget.keep_data_on_uninstall / install_root",
                         unknown_key
                     ));
                 }

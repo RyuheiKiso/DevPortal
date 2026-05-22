@@ -10,8 +10,8 @@ use crate::args::InstallArgs;
 // Renderer 型を参照するために使用する
 use crate::render::Renderer;
 
-// SetupConfig 型を参照するために使用する
-use shared::config::SetupConfig;
+// SetupConfig 型と BackstageMode 型を参照するために使用する
+use shared::config::{BackstageMode, SetupConfig};
 
 // エンジンファクトリ関数を参照するために使用する
 use shared::engine::engine_for;
@@ -127,6 +127,13 @@ pub fn run(
             backstage_port_arg = port.to_string();
             elevated_args.push(backstage_port_arg.as_str());
         }
+        // --backstage-mode が指定されている場合は昇格後のコマンドにも追加する
+        let backstage_mode_arg;
+        if let Some(mode) = &args.backstage_mode {
+            elevated_args.push("--backstage-mode");
+            backstage_mode_arg = mode.clone();
+            elevated_args.push(backstage_mode_arg.as_str());
+        }
         // --baget-port が指定されている場合は昇格後のコマンドにも追加する
         let baget_port_arg;
         if let Some(port) = args.baget_port {
@@ -161,6 +168,21 @@ pub fn run(
     if let Some(port) = args.backstage_port {
         // Backstage フロントエンドのポート番号を上書きする
         effective_config.backstage.frontend_port = port;
+    }
+
+    // --backstage-mode が指定されている場合は設定を上書きする
+    if let Some(mode) = &args.backstage_mode {
+        // 文字列を BackstageMode に変換する
+        effective_config.backstage.mode = match mode.to_ascii_lowercase().as_str() {
+            "dev" => BackstageMode::Dev,
+            "build" => BackstageMode::Build,
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "backstage-mode は dev または build を指定してください: {}",
+                    mode
+                ));
+            }
+        };
     }
 
     // --baget-port が指定されている場合は設定を上書きする

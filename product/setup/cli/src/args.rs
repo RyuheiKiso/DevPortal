@@ -63,6 +63,10 @@ pub struct InstallArgs {
     // オプション引数として Backstage フロントエンドのポート番号を受け取る
     #[arg(long)]
     pub backstage_port: Option<u16>,
+    /// Backstage の起動モード（dev / build）
+    // オプション引数として Backstage の起動モードを受け取る
+    #[arg(long)]
+    pub backstage_mode: Option<String>,
     /// BaGet のポート番号
     // オプション引数として BaGet のポート番号を受け取る
     #[arg(long)]
