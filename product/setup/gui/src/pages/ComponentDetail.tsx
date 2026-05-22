@@ -4,11 +4,13 @@
 // React のフックをインポートする（react-jsx transform を使用しているため React 自体は不要）
 import { useState, useEffect, useCallback } from 'react';
 // API ラッパー関数をインポートする
-import { statusAll, serviceAction, openLogs, loadConfig } from '../api/tauri';
+import { serviceAction, openLogs, loadConfig } from '../api/tauri';
 // 型定義をインポートする
 import type { ComponentKind, ComponentStatus, SetupConfig } from '../api/types';
 // ルーターフックをインポートする（Settings へのジャンプに使用）
 import { useRouter } from '../router/router';
+// AppActionsContext からステータスキャッシュを取得するフックをインポートする
+import { useAppActions } from '../shell/AppActionsContext';
 // UI プリミティブをインポートする
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -96,12 +98,14 @@ export function ComponentDetail({
   onGoUninstall,
   onBack,
 }: ComponentDetailProps) {
-  // コンポーネントのステータス情報
-  const [status, setStatus] = useState<ComponentStatus | null>(null);
-  // セットアップ設定情報
+  // AppActionsContext からステータスキャッシュを取得する
+  const appActions = useAppActions();
+  // コンテキストのキャッシュからこのコンポーネントのステータスを即時取得する（null = 未ロード）
+  const cachedStatus = appActions?.statuses?.find((s) => s.component === component) ?? null;
+  // コンポーネントのステータス情報（キャッシュがあれば即時描画、なければ取得を待つ）
+  const [status, setStatus] = useState<ComponentStatus | null>(cachedStatus);
+  // セットアップ設定情報（null = 取得前）
   const [config, setConfig] = useState<SetupConfig | null>(null);
-  // データ取得中フラグ
-  const [loading, setLoading] = useState(true);
   // データ取得エラーメッセージ
   const [error, setError] = useState<string | null>(null);
   // サービス操作中フラグ（連打防止のため操作中は true）
@@ -116,43 +120,58 @@ export function ComponentDetail({
   // コンポーネントの説明文を取得する
   const description = DESCRIPTIONS[component];
 
+  // コンテキストのキャッシュが更新されたときにローカル status も追随させる
+  useEffect(() => {
+    // キャッシュから最新のステータスを取得する
+    const found = appActions?.statuses?.find((s) => s.component === component) ?? null;
+    // null でない場合のみ更新する（キャッシュが未ロードでも現在の値を消さない）
+    if (found !== null) {
+      setStatus(found);
+    }
+  // appActions?.statuses が変わるたびに実行する（component 変更時も）
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appActions?.statuses, component]);
+
   // ステータスを再取得する（サービス操作後に呼ぶ）
+  // コンテキストの runLoadStatuses を通じて共有キャッシュを更新する
   const refreshStatus = useCallback(async () => {
     try {
-      // statusAll を呼び出して全コンポーネントのステータスを取得する
-      const all = await statusAll();
-      // このコンポーネントのステータスだけ抽出して state を更新する
-      setStatus(all.find((s) => s.component === component) ?? null);
+      // コンテキスト経由でステータスを更新し、キャッシュと Overview を同期させる
+      await appActions?.runLoadStatuses();
     } catch (e) {
       // 更新失敗時はトーストでエラーを通知する
       showDanger(`ステータス更新失敗: ${String(e)}`);
     }
-  }, [component, showDanger]);
+  }, [appActions, showDanger]);
 
-  // 初回マウント時にステータスと設定を並行取得する
+  // 初回マウント時にステータスキャッシュがなければリフレッシュを発火する
+  useEffect(() => {
+    // キャッシュが空（null）の場合のみ取得を開始する（重複発火防止）
+    if (appActions?.statuses === null) {
+      // runLoadStatuses を通じて共有キャッシュを取得する
+      appActions?.runLoadStatuses();
+    }
+  // マウント時のみ実行する
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 設定を独立して取得する（ステータスとは別に解決できるようにして部分的な描画を実現する）
   useEffect(() => {
     // アンマウント後に setState が走らないよう mounted フラグで保護する
     let mounted = true;
-    setLoading(true);
-    // ステータスと設定を並行して取得する
-    Promise.all([statusAll(), loadConfig()])
-      .then(([all, cfg]) => {
+    // loadConfig は軽量（ファイル読み込みのみ）なので素早く解決する
+    loadConfig()
+      .then((cfg) => {
         // アンマウント済みの場合は state 更新をスキップする
         if (!mounted) return;
-        // このコンポーネントのステータスを抽出して state にセットする
-        setStatus(all.find((s) => s.component === component) ?? null);
         // 設定情報を state にセットする
         setConfig(cfg);
       })
       .catch((e) => {
         // アンマウント済みの場合は state 更新をスキップする
         if (!mounted) return;
-        // 取得失敗時はエラーメッセージを state にセットする
-        setError(`データ取得失敗: ${String(e)}`);
-      })
-      .finally(() => {
-        // アンマウント済みの場合は state 更新をスキップする
-        if (mounted) setLoading(false);
+        // 設定取得失敗時はエラーメッセージを state にセットする
+        setError(`設定取得失敗: ${String(e)}`);
       });
     return () => { mounted = false; };
   }, [component]);
@@ -241,11 +260,12 @@ export function ComponentDetail({
     }
   }, [busy, component, showDanger]);
 
-  // ローディング中はスケルトンを表示する
-  if (loading) {
+  // ステータスキャッシュが未ロードかつ設定も未取得の場合は全画面スケルトンを表示する
+  // キャッシュがあれば status は即時利用可能なので、config 取得中も描画を開始できる
+  if (status === null && config === null && !error) {
     return (
       <div className={styles.page}>
-        {/* ローディング中はスケルトンで読み込み中状態を示す */}
+        {/* 両方未ロードの間だけスケルトンで読み込み中状態を示す */}
         <Skeleton height={40} />
         <Skeleton height={120} />
         <Skeleton height={120} />

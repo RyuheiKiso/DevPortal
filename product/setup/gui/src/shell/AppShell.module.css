@@ -54,3 +54,30 @@
   /* メインエリアの背景色を適用する */
   background-color: var(--bg);
 }
+
+/* ページ切り替え時の短いフェードイン（120ms で瞬時感を演出する） */
+.pageTransition {
+  /* フェードインアニメーションを適用する */
+  animation: pageFadeIn 120ms ease-out both;
+}
+
+/* pageFadeIn: 不透明度と微小な上方向スライドで遷移をなめらかにする */
+@keyframes pageFadeIn {
+  /* 開始: 完全透明 + わずかに下にずれた位置 */
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  /* 終了: 完全不透明 + 通常位置 */
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* prefers-reduced-motion: アニメーションを無効化する */
+@media (prefers-reduced-motion: reduce) {
+  .pageTransition {
+    animation: none;
+  }
+}

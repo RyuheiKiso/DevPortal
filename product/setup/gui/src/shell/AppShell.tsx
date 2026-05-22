@@ -21,67 +21,86 @@ import { Settings } from '../pages/Settings';
 import { ComponentDetail } from '../pages/ComponentDetail';
 // TopBar と Overview の間でアクション関数を共有するコンテキストをインポートする
 import { AppActionsContext } from './AppActionsContext';
+// ステータスキャッシュの型をインポートする
+import type { ComponentStatus } from '../api/types';
 
 // 現在のルートに応じたページコンポーネントを描画するアウトレットコンポーネント
+// key に route の識別情報を含めることで遷移ごとにフェードインアニメーションを発動する
 function RouteOutlet() {
   // 現在のルートと遷移関数を取得する
   const { route, navigate } = useRouter();
 
+  // ルートの page と component を組み合わせたキーを生成する（遷移ごとにフェードインを発動する）
+  const routeKey = route.page + ('component' in route ? `_${route.component}` : '');
+
   // ルートの page に応じて描画するページコンポーネントを切り替える
+  // key が変わるたびに DOM 要素が再生成され pageTransition のアニメーションが発動する
   switch (route.page) {
     // Overview（ダッシュボード）ページ
     case 'overview':
       return (
-        <Overview
-          // インストール画面へ遷移するコールバックを渡す
-          onGoInstall={(component) => navigate({ page: 'install', component })}
-          // アンインストール画面へ遷移するコールバックを渡す
-          onGoUninstall={(component) => navigate({ page: 'uninstall', component })}
-          // 詳細画面へ遷移するコールバックを渡す
-          onGoDetail={(component) => navigate({ page: 'detail', component })}
-        />
+        <div key={routeKey} className={styles.pageTransition}>
+          <Overview
+            // インストール画面へ遷移するコールバックを渡す
+            onGoInstall={(component) => navigate({ page: 'install', component })}
+            // アンインストール画面へ遷移するコールバックを渡す
+            onGoUninstall={(component) => navigate({ page: 'uninstall', component })}
+            // 詳細画面へ遷移するコールバックを渡す
+            onGoDetail={(component) => navigate({ page: 'detail', component })}
+          />
+        </div>
       );
 
     // インストール実行ページ
     case 'install':
       return (
-        <Install
-          // インストールするコンポーネント種別を渡す
-          component={route.component}
-          // 戻るボタンで Overview に遷移するコールバックを渡す
-          onBack={() => navigate({ page: 'overview' })}
-        />
+        <div key={routeKey} className={styles.pageTransition}>
+          <Install
+            // インストールするコンポーネント種別を渡す
+            component={route.component}
+            // 戻るボタンで Overview に遷移するコールバックを渡す
+            onBack={() => navigate({ page: 'overview' })}
+          />
+        </div>
       );
 
     // アンインストール実行ページ
     case 'uninstall':
       return (
-        <Uninstall
-          // アンインストールするコンポーネント種別を渡す
-          component={route.component}
-          // 戻るボタンで Overview に遷移するコールバックを渡す
-          onBack={() => navigate({ page: 'overview' })}
-        />
+        <div key={routeKey} className={styles.pageTransition}>
+          <Uninstall
+            // アンインストールするコンポーネント種別を渡す
+            component={route.component}
+            // 戻るボタンで Overview に遷移するコールバックを渡す
+            onBack={() => navigate({ page: 'overview' })}
+          />
+        </div>
       );
 
     // 設定ページ
     case 'settings':
       // Settings は onBack コールバックを受け取らず自前のナビゲーションガードを使う
-      return <Settings />;
+      return (
+        <div key={routeKey} className={styles.pageTransition}>
+          <Settings />
+        </div>
+      );
 
     // コンポーネント詳細ページ（Verdaccio / Backstage の状態・操作・設定を一覧表示する）
     case 'detail':
       return (
-        <ComponentDetail
-          // 表示するコンポーネントの種別を渡す
-          component={route.component}
-          // インストール画面へ遷移するコールバックを渡す
-          onGoInstall={() => navigate({ page: 'install', component: route.component })}
-          // アンインストール画面へ遷移するコールバックを渡す
-          onGoUninstall={() => navigate({ page: 'uninstall', component: route.component })}
-          // Overview へ戻るコールバックを渡す
-          onBack={() => navigate({ page: 'overview' })}
-        />
+        <div key={routeKey} className={styles.pageTransition}>
+          <ComponentDetail
+            // 表示するコンポーネントの種別を渡す
+            component={route.component}
+            // インストール画面へ遷移するコールバックを渡す
+            onGoInstall={() => navigate({ page: 'install', component: route.component })}
+            // アンインストール画面へ遷移するコールバックを渡す
+            onGoUninstall={() => navigate({ page: 'uninstall', component: route.component })}
+            // Overview へ戻るコールバックを渡す
+            onBack={() => navigate({ page: 'overview' })}
+          />
+        </div>
       );
   }
 }
@@ -97,6 +116,9 @@ export function AppShell() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   // 前提チェックの実行中フラグ（TopBar・Overview で共有して二重発火を防ぐ）
   const [isPrereqChecking, setIsPrereqChecking] = useState(false);
+  // 全コンポーネントのステータスキャッシュ（null = 未ロード）
+  // ページ遷移後も即時描画できるよう Provider 側で一元管理する
+  const [statuses, setStatuses] = useState<ComponentStatus[] | null>(null);
 
   // ローディング管理込みのステータス更新ラッパー（実行中なら早期 return して二重発火を防ぐ）
   const runLoadStatuses = useCallback(async () => {
@@ -136,7 +158,10 @@ export function AppShell() {
     isPrereqChecking,
     runLoadStatuses,
     runPrereqCheck,
-  }), [isRefreshing, isPrereqChecking, runLoadStatuses, runPrereqCheck]);
+    // ステータスキャッシュと更新関数を Provider から提供する
+    statuses,
+    setStatuses,
+  }), [isRefreshing, isPrereqChecking, runLoadStatuses, runPrereqCheck, statuses]);
 
   // シェルの構造: トップバー（全幅）+ サイドバー（240px）+ メイン（残り）
   return (

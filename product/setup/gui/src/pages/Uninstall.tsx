@@ -15,6 +15,7 @@ import { Stepper } from '../features/stepper/Stepper';
 import { Button } from '../ui/Button';
 import { Banner } from '../ui/Banner';
 import { Icon } from '../ui/Icon';
+import { Skeleton } from '../ui/Skeleton';
 // ページのアイコンをインポートする
 import { Trash2, ArrowLeft } from 'lucide-react';
 // CSS Modules のスタイルをインポートする
@@ -27,24 +28,6 @@ interface UninstallProps {
   // 戻るボタンが押されたときに呼ぶコールバック
   onBack: () => void;
 }
-
-// フロントエンド側のデフォルト設定（loadConfig 完了前のフォールバック）
-const defaultConfig: SetupConfig = {
-  // Windows サービス名のプレフィックス
-  service_prefix: 'DevPortal',
-  // インストールルートは null（%ProgramData%\DevPortal を使用する）
-  install_root: null,
-  // Verdaccio のデフォルト設定
-  verdaccio: { port: 4873, version: '^5', keep_data_on_uninstall: true },
-  // Backstage のデフォルト設定
-  backstage: {
-    app_name: 'devportal-backstage',
-    frontend_port: 3000,
-    backend_port: 7007,
-    keep_data_on_uninstall: true,
-    mode: 'dev',
-  },
-};
 
 // コンポーネント種別ごとの表示名マップ
 const DISPLAY_NAMES: Record<ComponentKind, string> = {
@@ -64,8 +47,8 @@ export function Uninstall({ component, onBack }: UninstallProps) {
   const [keepData, setKeepData] = useState(true);
   // テキスト確認入力フィールドの値（コンポーネント名が入力されると実行可能になる）
   const [confirmText, setConfirmText] = useState('');
-  // 現在の設定（アンインストール先のパスを表示するために読み込む）
-  const [config, setConfig] = useState<SetupConfig>(defaultConfig);
+  // 現在の設定（null = loadConfig 完了前、デフォルト値が一瞬見えるフラッシュを防ぐ）
+  const [config, setConfig] = useState<SetupConfig | null>(null);
 
   // useStepState フックで SetupEvent 配列をステップ状態に変換する
   const stepState = useStepState(events);
@@ -106,6 +89,9 @@ export function Uninstall({ component, onBack }: UninstallProps) {
       // events 配列にイベントを追加する
       setEvents((prev) => [...prev, ev]);
     };
+
+    // config が未ロードの場合は実行しない
+    if (!config) { setRunning(false); return; }
 
     try {
       // uninstallComponent を呼び出してアンインストールを実行する
@@ -155,10 +141,15 @@ export function Uninstall({ component, onBack }: UninstallProps) {
           <section className={styles.section}>
             {/* セクションラベル */}
             <span className={styles.sectionLabel}>削除対象ディレクトリ</span>
-            {/* install_root のパスを読み取り専用で表示する */}
-            <span className={styles.dirDisplay}>
-              {config.install_root ?? '%ProgramData%\\DevPortal（既定）'}
-            </span>
+            {/* config 未ロード中はスケルトンを表示してデフォルト値のフラッシュを防ぐ */}
+            {config === null ? (
+              <Skeleton height={20} />
+            ) : (
+              /* install_root のパスを読み取り専用で表示する */
+              <span className={styles.dirDisplay}>
+                {config.install_root ?? '%ProgramData%\\DevPortal（既定）'}
+              </span>
+            )}
           </section>
 
           {/* データ保持オプションのチェックボックスセクション */}
@@ -216,8 +207,8 @@ export function Uninstall({ component, onBack }: UninstallProps) {
               variant="danger"
               size="md"
               onClick={handleUninstall}
-              // テキスト確認が未完了か実行中の場合は無効にする
-              disabled={!isConfirmed || running}
+              // テキスト確認が未完了・設定未ロード・実行中の場合は無効にする
+              disabled={!isConfirmed || running || config === null}
             >
               <Icon icon={Trash2} size={14} />
               {running ? 'アンインストール中…' : `${displayName} を削除する`}

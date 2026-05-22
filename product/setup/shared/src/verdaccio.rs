@@ -419,16 +419,22 @@ impl SetupEngine for VerdaccioEngine {
 
         // ポート番号を取得する
         let port = config.verdaccio.port;
-        // TCP 接続でエンドポイントの生死確認を行う
-        let endpoint_reachable = TcpStream::connect_timeout(
-            // 接続先アドレスを構築する
-            &format!("127.0.0.1:{}", port)
-                .parse()
-                .unwrap_or_else(|_| "127.0.0.1:0".parse().unwrap()),
-            // タイムアウトを 2 秒に設定する
-            Duration::from_secs(2),
-        )
-        .is_ok();
+        // 未インストール時は TCP プローブをスキップする（最大 2 秒の無駄な待ちを防ぐ）
+        let endpoint_reachable = if service_status == crate::winsvc::ServiceStatus::NotInstalled {
+            // サービスが存在しない場合はエンドポイントに到達できないと確定する
+            false
+        } else {
+            // TCP 接続でエンドポイントの生死確認を行う
+            TcpStream::connect_timeout(
+                // 接続先アドレスを構築する
+                &format!("127.0.0.1:{}", port)
+                    .parse()
+                    .unwrap_or_else(|_| "127.0.0.1:0".parse().unwrap()),
+                // タイムアウトを 2 秒に設定する
+                Duration::from_secs(2),
+            )
+            .is_ok()
+        };
 
         // エンドポイント URL を構築する
         let endpoint_url = format!("http://127.0.0.1:{}/-/ping", port);

@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
 // TopBar と関数を共有するためのコンテキストフックをインポートする
 import { useAppActions } from '../shell/AppActionsContext';
 // 型定義をインポートする
-import type { ComponentStatus, ComponentKind, PrereqReport } from '../api/types';
+import type { ComponentKind, PrereqReport } from '../api/types';
 // Tauri API ラッパーをインポートする
 import { statusAll, prereqCheck, serviceAction, openLogs } from '../api/tauri';
 // 新しい ComponentCard をインポートする
@@ -55,8 +55,6 @@ function prereqBadgeVariant(allOk: boolean): BadgeVariant {
 
 // コンポーネント一覧と前提条件チェックを表示するページコンポーネント
 export function Overview({ onGoInstall, onGoUninstall, onGoDetail }: OverviewProps) {
-  // コンポーネントのステータスリスト
-  const [statuses, setStatuses] = useState<ComponentStatus[]>([]);
   // ステータス取得エラーメッセージ
   const [error, setError] = useState<string | null>(null);
   // 前提条件チェック結果
@@ -72,21 +70,26 @@ export function Overview({ onGoInstall, onGoUninstall, onGoDetail }: OverviewPro
   // 共有コンテキストからローディング状態と呼び出しラッパーを取得する
   const isRefreshing = appActions?.isRefreshing ?? false;
   const isPrereqChecking = appActions?.isPrereqChecking ?? false;
+  // コンテキストのステータスキャッシュから読み込む（null = 未ロード、stale-while-revalidate で随時更新）
+  const statuses = appActions?.statuses ?? null;
+  // ステータスキャッシュを更新するセッター（useState の setter 相当）
+  const setStatuses = appActions?.setStatuses;
 
   // ステータスを取得する内部コールバック（AppActionsContext の ref に登録して TopBar からも使われる）
+  // 取得結果はローカル state ではなくコンテキストの setStatuses に書き込むことで全ページから参照可能にする
   const loadStatuses = useCallback(async () => {
     // エラーをリセットする
     setError(null);
     try {
       // statusAll() で全コンポーネントのステータスを一括取得する
       const result = await statusAll();
-      // 取得したステータスを state に反映する
-      setStatuses(result);
+      // コンテキストのキャッシュを更新する（ページ遷移後も即時描画できるようにする）
+      setStatuses?.(result);
     } catch (e) {
       // 取得失敗時はエラーメッセージを state にセットする
       setError(`ステータス取得失敗: ${String(e)}`);
     }
-  }, []);
+  }, [setStatuses]);
 
   // 初回マウント時にステータスを取得する副作用
   useEffect(() => {
@@ -320,21 +323,21 @@ export function Overview({ onGoInstall, onGoUninstall, onGoDetail }: OverviewPro
           <span className={styles.sectionLabel}>COMPONENTS</span>
         </div>
 
-        {/* ローディング中かつステータスが空の場合はスケルトンを表示する */}
-        {isRefreshing && statuses.length === 0 && (
+        {/* 未ロード（null）または初回リフレッシュ中（キャッシュなし）はスケルトンを表示する */}
+        {(statuses === null || (isRefreshing && statuses.length === 0)) && (
           <div className={styles.componentGrid}>
             <Skeleton height={200} />
             <Skeleton height={200} />
           </div>
         )}
 
-        {/* ステータスが空でローディングもエラーもない場合の空状態メッセージ */}
-        {!isRefreshing && statuses.length === 0 && !error && (
+        {/* ロード済みでステータスが空かつエラーもない場合の空状態メッセージ */}
+        {statuses !== null && !isRefreshing && statuses.length === 0 && !error && (
           <p className={styles.empty}>コンポーネントが見つかりません</p>
         )}
 
-        {/* コンポーネントカードのグリッドを描画する */}
-        {statuses.length > 0 && (
+        {/* キャッシュがあればスケルトンを待たずにカードを表示する（stale-while-revalidate）*/}
+        {statuses !== null && statuses.length > 0 && (
           <div className={styles.componentGrid}>
             {/* 各コンポーネントのカードを描画する */}
             {statuses.map((s) => (

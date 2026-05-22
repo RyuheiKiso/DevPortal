@@ -14,6 +14,7 @@ import { Stepper } from '../features/stepper/Stepper';
 // UI プリミティブをインポートする
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
+import { Skeleton } from '../ui/Skeleton';
 // ページのアイコンをインポートする
 import { FolderOpen, RotateCcw, Play, ArrowLeft } from 'lucide-react';
 // CSS Modules のスタイルをインポートする
@@ -26,28 +27,6 @@ interface InstallProps {
   // 戻るボタンが押されたときに呼ぶコールバック
   onBack: () => void;
 }
-
-// フロントエンド側のデフォルト設定（loadConfig 完了前のフォールバック）
-const defaultConfig: SetupConfig = {
-  // Windows サービス名のプレフィックス
-  service_prefix: 'DevPortal',
-  // インストールルートは null（%ProgramData%\DevPortal を使用する）
-  install_root: null,
-  // Verdaccio のデフォルト設定
-  verdaccio: {
-    port: 4873,
-    version: '^5',
-    keep_data_on_uninstall: true,
-  },
-  // Backstage のデフォルト設定
-  backstage: {
-    app_name: 'devportal-backstage',
-    frontend_port: 3000,
-    backend_port: 7007,
-    keep_data_on_uninstall: true,
-    mode: 'dev',
-  },
-};
 
 // コンポーネント種別ごとの表示名マップ
 const DISPLAY_NAMES: Record<ComponentKind, string> = {
@@ -63,8 +42,8 @@ export function Install({ component, onBack }: InstallProps) {
   const [events, setEvents] = useState<SetupEvent[]>([]);
   // インストール実行中フラグ
   const [running, setRunning] = useState(false);
-  // 現在の設定（setup.toml から読み込む）
-  const [config, setConfig] = useState<SetupConfig>(defaultConfig);
+  // 現在の設定（null = loadConfig 完了前、デフォルト値が一瞬見えるフラッシュを防ぐ）
+  const [config, setConfig] = useState<SetupConfig | null>(null);
 
   // useStepState フックで SetupEvent 配列をステップ状態に変換する
   const stepState = useStepState(events);
@@ -89,18 +68,20 @@ export function Install({ component, onBack }: InstallProps) {
 
   // フォルダ選択ダイアログを開くコールバック
   const handlePickDir = useCallback(async () => {
+    // config 未ロードの場合は操作しない
+    if (!config) return;
     // ネイティブフォルダ選択ダイアログを表示する
     const picked = await pickDirectory(config.install_root ?? undefined);
     // フォルダが選択された場合のみ config を更新する
     if (picked) {
-      setConfig((c) => ({ ...c, install_root: picked }));
+      setConfig((c) => c ? { ...c, install_root: picked } : c);
     }
-  }, [config.install_root]);
+  }, [config]);
 
   // インストール先をデフォルトに戻すコールバック
   const handleResetDir = useCallback(() => {
     // install_root を null に戻す（%ProgramData%\DevPortal が使用される）
-    setConfig((c) => ({ ...c, install_root: null }));
+    setConfig((c) => c ? { ...c, install_root: null } : c);
   }, []);
 
   // インストールを実行するコールバック（再試行時にも使用する）
@@ -109,6 +90,9 @@ export function Install({ component, onBack }: InstallProps) {
     setEvents([]);
     // 実行中フラグを立てる
     setRunning(true);
+
+    // config が未ロードの場合は実行しない
+    if (!config) { setRunning(false); return; }
 
     // インストール開始前に設定を保存する（次回起動時に反映される）
     await saveConfig(config).catch(() => {
@@ -163,27 +147,32 @@ export function Install({ component, onBack }: InstallProps) {
           {/* セクションラベル */}
           <span className={styles.sectionLabel}>インストール先</span>
 
-          {/* パス表示 + 操作ボタンの行 */}
-          <div className={styles.dirRow}>
-            {/* 現在選択されているインストール先パスを読み取り専用で表示する */}
-            <span className={config.install_root ? styles.dirPath : styles.dirPlaceholder}>
-              {config.install_root ?? '%ProgramData%\\DevPortal（既定）'}
-            </span>
+          {/* config 未ロード中はスケルトンを表示してデフォルト値のフラッシュを防ぐ */}
+          {config === null ? (
+            <Skeleton height={32} />
+          ) : (
+            /* パス表示 + 操作ボタンの行 */
+            <div className={styles.dirRow}>
+              {/* 現在選択されているインストール先パスを読み取り専用で表示する */}
+              <span className={config.install_root ? styles.dirPath : styles.dirPlaceholder}>
+                {config.install_root ?? '%ProgramData%\\DevPortal（既定）'}
+              </span>
 
-            {/* フォルダ選択ボタン */}
-            <Button variant="secondary" size="sm" onClick={handlePickDir} disabled={running}>
-              <Icon icon={FolderOpen} size={14} />
-              選択…
-            </Button>
-
-            {/* install_root が設定されている場合のみ「既定に戻す」ボタンを表示する */}
-            {config.install_root && (
-              <Button variant="ghost" size="sm" onClick={handleResetDir} disabled={running}>
-                <Icon icon={RotateCcw} size={14} />
-                既定に戻す
+              {/* フォルダ選択ボタン */}
+              <Button variant="secondary" size="sm" onClick={handlePickDir} disabled={running}>
+                <Icon icon={FolderOpen} size={14} />
+                選択…
               </Button>
-            )}
-          </div>
+
+              {/* install_root が設定されている場合のみ「既定に戻す」ボタンを表示する */}
+              {config.install_root && (
+                <Button variant="ghost" size="sm" onClick={handleResetDir} disabled={running}>
+                  <Icon icon={RotateCcw} size={14} />
+                  既定に戻す
+                </Button>
+              )}
+            </div>
+          )}
         </section>
       )}
 
@@ -194,8 +183,8 @@ export function Install({ component, onBack }: InstallProps) {
             variant="primary"
             size="md"
             onClick={handleInstall}
-            // インストール実行中は無効にする
-            disabled={running}
+            // 設定未ロードまたはインストール実行中は無効にする
+            disabled={running || config === null}
           >
             <Icon icon={Play} size={14} />
             {running ? 'インストール中…' : 'インストール開始'}

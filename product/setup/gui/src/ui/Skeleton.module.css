@@ -5,28 +5,51 @@
 .skeleton {
   /* ブロック要素として扱う */
   display: block;
-  /* スケルトンの背景色（サブ面色を使用する） */
-  background-color: var(--surface-2);
+  /* グラデーション背景で横方向に光が流れるシマー効果を出す */
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--surface-3, color-mix(in srgb, var(--surface-2) 70%, var(--text) 30%)) 50%,
+    var(--surface-2) 75%
+  );
+  /* グラデーション幅を要素幅の 3 倍に広げてスライド代を確保する */
+  background-size: 200% 100%;
   /* 角丸を標準値に設定する */
   border-radius: var(--radius-md);
-  /* shimmer アニメーションを繰り返す */
+  /* shimmer キーフレームで背景を右にスライドさせる */
   animation: shimmer 1.5s ease-in-out infinite;
 }
 
-/* shimmer: 左から右に光が流れるようなアニメーション */
+/* shimmer: グラデーションを左から右にスライドさせて光が流れる効果を出す */
 @keyframes shimmer {
-  /* 開始: 通常の透過度 */
+  /* 開始: グラデーションを左端に配置する */
   0% {
-    opacity: 1;
+    background-position: 200% center;
   }
-  /* 中間: 少し透過させて点滅効果を出す */
-  50% {
-    opacity: 0.5;
-  }
-  /* 終了: 通常の透過度に戻す */
+  /* 終了: グラデーションを右端まで流す */
   100% {
-    opacity: 1;
+    background-position: -200% center;
   }
+}
+
+/* prefers-reduced-motion: アニメーションを無効化して単純な点滅に切り替える */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    /* シマーグラデーションをやめて単色に戻す */
+    background: var(--surface-2);
+    /* 静止した半透明フェードのみにする */
+    animation: shimmer-reduced 1.5s ease-in-out infinite;
+  }
+}
+
+/* prefers-reduced-motion 用の単純な opacity アニメーション */
+@keyframes shimmer-reduced {
+  /* 開始: 通常の不透明度 */
+  0% { opacity: 1; }
+  /* 中間: 少し透過させる */
+  50% { opacity: 0.5; }
+  /* 終了: 通常の不透明度に戻す */
+  100% { opacity: 1; }
 }
 
 /* ---- テキスト行スケルトン ---- */
