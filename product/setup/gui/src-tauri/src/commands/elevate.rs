@@ -13,8 +13,14 @@ pub fn cmd_open_logs(
     // 対象コンポーネントの名前文字列
     component: String,
 ) -> Result<(), String> {
-    // デフォルト設定を使用してログディレクトリパスを解決する
-    let config = SetupConfig::default();
+    // setup.toml から設定を読み込む（存在しない場合はデフォルトにフォールバックする）
+    // install_root を反映しないと、カスタムインストール先のログではなく既定パスを開いてしまう
+    let config_path = paths::config_file();
+    let config = if config_path.exists() {
+        SetupConfig::from_file(&config_path).unwrap_or_default()
+    } else {
+        SetupConfig::default()
+    };
 
     // コンポーネント名に対応するログディレクトリを取得する
     let log_dir = match component.as_str() {
