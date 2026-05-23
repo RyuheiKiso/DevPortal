@@ -2,7 +2,7 @@
 // NSSM を使って Windows サービスの操作を行う（SQL Server のみ sc.exe を直接使用する）
 
 // 外部コマンド実行（sc.exe）に必要な型をインポートする
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 // shared クレートの NSSM ラッパをインポートする
 use shared::nssm::Nssm;
@@ -110,30 +110,42 @@ pub fn cmd_service_action(
 // op_label: 日本語のエラーメッセージで使用する操作名（例: "起動" / "停止" / "再起動"）
 fn sc_invoke(service_name: &str, action: &str, op_label: &str) -> Result<(), String> {
     // sc.exe を起動する
-    let status = Command::new("sc.exe")
+    let output = Command::new("sc.exe")
         // start / stop などのサブコマンドを指定する
         .arg(action)
         // 対象サービス名を指定する
         .arg(service_name)
-        // 標準出力を捨てる
-        .stdout(Stdio::null())
-        // 標準エラーも捨てる
-        .stderr(Stdio::null())
         // 実行する
-        .status()
+        .output()
         .map_err(|e| format!("sc.exe の実行に失敗しました: {}", e))?;
 
-    // 終了コードが 0 でなくても「既に起動中」「既に停止」などの正常状態の場合があるため
-    // ユーザー向け UI には警告ではなく成功として扱う（最終的な状態は status で確認できる）
-    if !status.success() {
-        // 詳細は標準エラーに残す（フロント側ステータスでカバーする）
-        eprintln!(
-            "警告: サービスの{}で sc.exe の終了コードが 0 ではありません（既にその状態の可能性があります）: {:?}",
+    // 終了コードが 0 でない場合は操作失敗として UI に返す。
+    if !output.status.success() {
+        let details = format_sc_output(&output);
+        return Err(format!(
+            "サービスの{}に失敗しました（sc.exe 終了コード: {:?}）{}",
             op_label,
-            status.code()
-        );
+            output.status.code(),
+            details
+        ));
     }
 
     // 正常終了として扱う
     Ok(())
+}
+
+fn format_sc_output(output: &std::process::Output) -> String {
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let combined = [stdout, stderr]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if combined.is_empty() {
+        String::new()
+    } else {
+        format!(": {}", combined)
+    }
 }

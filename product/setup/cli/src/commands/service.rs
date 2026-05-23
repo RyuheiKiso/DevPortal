@@ -8,7 +8,7 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 
 // 外部コマンド実行（sc.exe による SQL Server サービス制御）に必要な型をインポートする
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 // ServiceArgs と ServiceAction 型を参照するために使用する
 use crate::args::{ServiceAction, ServiceArgs};
@@ -272,26 +272,23 @@ pub fn run(
 // sc.exe start <service_name> を実行するヘルパー関数（SQL Server 用）
 fn sc_start(service_name: &str) -> anyhow::Result<()> {
     // sc.exe start を起動する
-    let status = Command::new("sc.exe")
+    let output = Command::new("sc.exe")
         // start サブコマンドを指定する
         .arg("start")
         // 対象サービス名を指定する
         .arg(service_name)
-        // 標準出力を捨てる
-        .stdout(Stdio::null())
-        // 標準エラーも捨てる
-        .stderr(Stdio::null())
         // 実行する
-        .status()
+        .output()
         .map_err(|e| anyhow::anyhow!("sc.exe start の実行に失敗しました: {}", e))?;
 
-    // 終了コードが 0 でなくても「既に起動中」など正常状態の場合があるため警告レベルに留める
-    if !status.success() {
-        // 詳細なステータスはログに残すだけにする
-        eprintln!(
-            "警告: sc.exe start の終了コードが 0 ではありません（既に起動中の可能性があります）: {:?}",
-            status.code()
-        );
+    // 終了コードが 0 でない場合は起動失敗として呼び出し元に返す
+    if !output.status.success() {
+        let details = format_sc_output(&output);
+        return Err(anyhow::anyhow!(
+            "sc.exe start が失敗しました（終了コード: {:?}）{}",
+            output.status.code(),
+            details
+        ));
     }
 
     // 正常終了として扱う
@@ -301,28 +298,41 @@ fn sc_start(service_name: &str) -> anyhow::Result<()> {
 // sc.exe stop <service_name> を実行するヘルパー関数（SQL Server 用）
 fn sc_stop(service_name: &str) -> anyhow::Result<()> {
     // sc.exe stop を起動する
-    let status = Command::new("sc.exe")
+    let output = Command::new("sc.exe")
         // stop サブコマンドを指定する
         .arg("stop")
         // 対象サービス名を指定する
         .arg(service_name)
-        // 標準出力を捨てる
-        .stdout(Stdio::null())
-        // 標準エラーも捨てる
-        .stderr(Stdio::null())
         // 実行する
-        .status()
+        .output()
         .map_err(|e| anyhow::anyhow!("sc.exe stop の実行に失敗しました: {}", e))?;
 
-    // 終了コードが 0 でなくても「既に停止中」など正常状態の場合があるため警告レベルに留める
-    if !status.success() {
-        // 詳細なステータスはログに残すだけにする
-        eprintln!(
-            "警告: sc.exe stop の終了コードが 0 ではありません（既に停止済みの可能性があります）: {:?}",
-            status.code()
-        );
+    // 終了コードが 0 でない場合は停止失敗として呼び出し元に返す
+    if !output.status.success() {
+        let details = format_sc_output(&output);
+        return Err(anyhow::anyhow!(
+            "sc.exe stop が失敗しました（終了コード: {:?}）{}",
+            output.status.code(),
+            details
+        ));
     }
 
     // 正常終了として扱う
     Ok(())
+}
+
+fn format_sc_output(output: &std::process::Output) -> String {
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let combined = [stdout, stderr]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if combined.is_empty() {
+        String::new()
+    } else {
+        format!(": {}", combined)
+    }
 }
