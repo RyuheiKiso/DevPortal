@@ -25,7 +25,7 @@
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-    "prepublishOnly": "node -e \"const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.dependencies['@k1s0-ts-config/core']=p.version;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\\n');\"",
+    "prepublishOnly": "npm run clean && npm run build && node -e \"const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.dependencies['@k1s0-ts-config/core']=p.version;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\\n');\"",
     "postpublish": "node -e \"const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.dependencies['@k1s0-ts-config/core']='file:../core';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\\n');\""
   },
   "dependencies": {
@@ -33,7 +33,13 @@
   },
   "peerDependencies": {
     "react": ">=18.0.0",
-    "react-native": ">=0.73.0"
+    "react-native": ">=0.73.0",
+    "@types/react": "*"
+  },
+  "peerDependenciesMeta": {
+    "@types/react": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
