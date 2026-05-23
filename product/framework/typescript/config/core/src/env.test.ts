@@ -86,4 +86,43 @@ describe("mergeEnvConfig", () => {
     // しかし参照は異なる（イミュータブル保証）
     expect(result).not.toBe(dev);
   });
+
+  // staging 空との対称ケース: prod 差分が空でも dev のコピーが返ることを保証
+  it("prod 差分が空でも dev のコピーが返る", () => {
+    // dev 完全、prod は空
+    const map = {
+      // dev のベース
+      dev: { a: 1, b: 2 },
+      // staging は参照しない
+      staging: {},
+      // prod は空（差分なし）
+      prod: {},
+    };
+    // prod を指定
+    const result = mergeEnvConfig(map, "prod");
+    // dev と等価な中身が返る
+    expect(result).toEqual({ a: 1, b: 2 });
+  });
+
+  // 浅いマージである保証: ネストオブジェクトは深くマージされず差分側で完全置換される
+  it("ネストオブジェクトは深くマージされず差分で完全置換される（浅いマージ）", () => {
+    // dev はネストオブジェクトを含む
+    const map = {
+      // ネストされた api 設定をベースに持つ dev
+      dev: { api: { url: "http://localhost", timeout: 3000 }, logLevel: "debug" },
+      // staging は api の url だけを上書きするつもりで部分指定
+      staging: { api: { url: "https://stg.example.com" } },
+      // prod は参照しない
+      prod: {},
+    };
+    // staging を指定
+    const result = mergeEnvConfig(map, "staging");
+    // api は浅いマージのため timeout が消え、url のみのオブジェクトに置換される
+    expect(result).toEqual({
+      // api は staging の中身でまるごと置換
+      api: { url: "https://stg.example.com" },
+      // logLevel は dev から継承
+      logLevel: "debug",
+    });
+  });
 });

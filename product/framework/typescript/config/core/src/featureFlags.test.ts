@@ -20,6 +20,29 @@ describe("isFeatureEnabled", () => {
     // 無効フラグを判定
     expect(isFeatureEnabled(flags, "betaSearch")).toBe(false);
   });
+
+  // 仕様コメントの「未定義キーは false 扱い」を直接保証する
+  it("flags に存在しないキーを引いた場合は false を返す", () => {
+    // 既知キーのみのフラグマップ（newUi のみ）
+    const flags = { newUi: true };
+    // 型システムを通すために unknown 経由のキャストでテスト用の追加キーを引く
+    const result = isFeatureEnabled(
+      // 未定義キー名 unknownFlag を許容するキャスト
+      flags as unknown as Record<"newUi" | "unknownFlag", boolean>,
+      // 実体には存在しないキーを指定
+      "unknownFlag",
+    );
+    // undefined === true は false なので false を返す
+    expect(result).toBe(false);
+  });
+
+  // === true 比較で truthy 値（1 や "yes"）が誤って有効と判定されないことを保証
+  it("値が true 以外の truthy 値（数値の 1）でも false を返す", () => {
+    // boolean に整数 1 を強制的に格納したフラグマップ
+    const flags = { newUi: 1 as unknown as boolean };
+    // === true 比較が効いて false に倒れることを期待
+    expect(isFeatureEnabled(flags, "newUi")).toBe(false);
+  });
 });
 
 // withOverrides の挙動をテスト
