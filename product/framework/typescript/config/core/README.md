@@ -79,6 +79,25 @@ npm run build
 
 出力は `dist/`（ESM + `.d.ts`）。コメントは `removeComments: true` で除去されます。
 
+## テスト・カバレッジ
+
+vitest で単体テストを実行できます。
+
+```bash
+npm test              # 1 回だけ走らせる
+npm run test:watch    # ファイル変更を監視
+npm run test:coverage # カバレッジ計測（@vitest/coverage-v8）
+```
+
+カバレッジ計測の方針は `vitest.config.ts` に定義しています。
+
+- provider: `v8`（istanbul より低オーバーヘッド）
+- 計測対象: `src/**/*.ts`
+- 除外: `*.test.ts` / `src/types.ts`（型のみ）/ `src/index.ts`（re-export のみ）
+- 閾値: `statements` / `branches` / `functions` / `lines` を **すべて 100%** に設定（後退検知のため）
+
+`prepublishOnly` は `clean → build → test:coverage` の順で動くため、カバレッジ閾値を割ると publish できません。閾値を満たせない変更を入れる場合は、不足ケースのテスト追加で対応してください。
+
 ## Verdaccio publish の順序
 
 3 パッケージは内部依存があるため **以下の順序で publish** する必要があります。
