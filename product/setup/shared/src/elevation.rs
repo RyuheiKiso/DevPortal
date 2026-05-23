@@ -122,6 +122,48 @@ mod windows_impl {
         info_result != 0 && elevation.token_is_elevated != 0
     }
 
+    fn quote_arg(arg: &str) -> String {
+        if !arg.is_empty()
+            && !arg
+                .chars()
+                .any(|ch| matches!(ch, ' ' | '\t' | '\n' | '\r' | '"'))
+        {
+            return arg.to_string();
+        }
+
+        let mut quoted = String::from("\"");
+        let mut backslashes = 0usize;
+
+        for ch in arg.chars() {
+            match ch {
+                '\\' => {
+                    backslashes += 1;
+                }
+                '"' => {
+                    quoted.push_str(&"\\".repeat(backslashes * 2 + 1));
+                    quoted.push('"');
+                    backslashes = 0;
+                }
+                _ => {
+                    quoted.push_str(&"\\".repeat(backslashes));
+                    backslashes = 0;
+                    quoted.push(ch);
+                }
+            }
+        }
+
+        quoted.push_str(&"\\".repeat(backslashes * 2));
+        quoted.push('"');
+        quoted
+    }
+
+    fn join_args(args: &[&str]) -> String {
+        args.iter()
+            .map(|arg| quote_arg(arg))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     // 自身のプロセスを runas（管理者権限）で再起動する Windows 実装
     pub fn run_self_elevated_impl(args: &[&str]) -> Result<(), crate::error::SetupError> {
         // ShellExecuteW を使うために必要な型を定義する
@@ -168,8 +210,8 @@ mod windows_impl {
             // ベクタに収集する
             .collect();
 
-        // 追加引数を 1 つのコマンドライン文字列に結合する
-        let params_str = args.join(" ");
+        // 追加引数を Windows のコマンドライン規則に従って結合する
+        let params_str = join_args(args);
         // params_str を UTF-16 の null 終端文字列に変換する
         let params_wide: Vec<u16> = params_str
             // OsStr 経由でエンコードする
@@ -224,6 +266,26 @@ mod windows_impl {
 
         // 昇格プロセスの起動に成功した場合は Ok(()) を返す
         Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::join_args;
+
+        #[test]
+        fn join_args_quotes_paths_with_spaces() {
+            let args = ["--config", r"C:\ProgramData\Dev Portal\setup.toml"];
+            assert_eq!(
+                join_args(&args),
+                r#"--config "C:\ProgramData\Dev Portal\setup.toml""#
+            );
+        }
+
+        #[test]
+        fn join_args_escapes_quotes_and_trailing_slashes() {
+            let args = [r#"C:\Temp\quoted "name"\"#];
+            assert_eq!(join_args(&args), r#""C:\Temp\quoted \"name\"\\""#);
+        }
     }
 }
 

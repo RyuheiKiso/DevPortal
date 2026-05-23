@@ -20,7 +20,7 @@ use shared::engine::engine_for;
 use shared::event::{Component, Reporter, SetupEvent};
 
 // 管理者権限確認と昇格再起動の関数を参照するために使用する
-use shared::elevation::{is_elevated, run_self_elevated};
+use shared::elevation::is_elevated;
 
 // 1 つのコンポーネントをアンインストールするヘルパー関数
 // component: アンインストール対象のコンポーネント種別
@@ -97,39 +97,38 @@ pub fn run(
     config: &SetupConfig,
     renderer: &Renderer,
     no_elevate: bool,
+    json: bool,
+    config_path: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
     // 管理者権限を確認し、未昇格かつ --no-elevate 未指定の場合は昇格して再起動する
     if !is_elevated() && !no_elevate {
         // 昇格して再起動する際に渡す引数リストを構築する
-        let mut elevated_args = vec![
-            // uninstall サブコマンドを指定する
-            "uninstall",
-            // ターゲットを指定する
-            args.target.as_str(),
-            // 昇格ループ防止フラグを付与する
-            "--no-elevate",
-        ];
+        let mut command_args = vec!["uninstall".to_string(), args.target.clone()];
 
         // --keep-data フラグが指定されている場合は昇格後のコマンドにも追加する
         if args.keep_data {
             // データ保持フラグを追加する
-            elevated_args.push("--keep-data");
+            command_args.push("--keep-data".to_string());
         }
 
         // --force フラグが指定されている場合は昇格後のコマンドにも追加する
         if args.force {
             // 強制終了フラグを追加する
-            elevated_args.push("--force");
+            command_args.push("--force".to_string());
         }
 
         // --yes フラグが指定されている場合は昇格後のコマンドにも追加する
         if args.yes {
             // 確認スキップフラグを追加する
-            elevated_args.push("--yes");
+            command_args.push("--yes".to_string());
         }
 
         // 管理者権限で自身を再起動する
-        run_self_elevated(&elevated_args)?;
+        crate::commands::run_self_elevated_owned(crate::commands::elevated_args(
+            json,
+            config_path,
+            &command_args,
+        ))?;
         // 昇格再起動が成功したら現在のプロセスは終了する
         return Ok(());
     }

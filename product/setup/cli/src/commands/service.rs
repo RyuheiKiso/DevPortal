@@ -35,7 +35,7 @@ use shared::nssm::Nssm;
 use shared::paths;
 
 // 管理者権限確認と昇格再起動の関数を参照するために使用する
-use shared::elevation::{is_elevated, run_self_elevated};
+use shared::elevation::is_elevated;
 
 // target 文字列を Component に変換するヘルパー関数
 // "verdaccio" → Component::Verdaccio、"backstage" → Component::Backstage、"baget" → Component::BaGet、
@@ -71,6 +71,8 @@ pub fn run(
     config: &SetupConfig,
     _renderer: &Renderer,
     no_elevate: bool,
+    json: bool,
+    config_path: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
     // logs コマンドのみ管理者権限不要のため、操作種別を先に確認する
     if let ServiceAction::Logs { target, tail } = &args.action {
@@ -151,19 +153,18 @@ pub fn run(
         };
 
         // 昇格引数リストを構築する
-        let elevated_args = vec![
-            // service サブコマンドを指定する
-            "service",
-            // 操作種別（start/stop/restart）を指定する
-            action_name,
-            // ターゲット（verdaccio/backstage）を指定する
-            target_name,
-            // 昇格ループ防止フラグを付与する
-            "--no-elevate",
+        let command_args = vec![
+            "service".to_string(),
+            action_name.to_string(),
+            target_name.to_string(),
         ];
 
         // 管理者権限で自身を再起動する
-        run_self_elevated(&elevated_args)?;
+        crate::commands::run_self_elevated_owned(crate::commands::elevated_args(
+            json,
+            config_path,
+            &command_args,
+        ))?;
         // 昇格再起動が成功したら現在のプロセスは終了する
         return Ok(());
     }
