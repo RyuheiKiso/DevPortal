@@ -169,32 +169,6 @@ pub fn run(
         return Ok(());
     }
 
-    // NSSM を確保するための一時チャネルを作成する
-    // service コマンドには Reporter が渡されないため、ここでダミーチャネルを作成する
-    let (tx, rx) = std::sync::mpsc::channel::<SetupEvent>();
-    // Reporter インスタンスを作成する
-    let reporter = Reporter::new(tx);
-
-    // NSSM インスタンスを確保する（キャッシュがあれば即時、なければ HTTP 動的取得）
-    // NSSM ダウンロード進捗を受信スレッドで Renderer に渡す
-    let nssm_result = {
-        // NSSM 取得を別スレッドで実行する（reporter と同じスレッドでは recv できないため）
-        let reporter_ref = reporter;
-        // メインスレッドで NSSM を確保する
-        Nssm::ensure(&reporter_ref)
-            .map_err(|e| anyhow::anyhow!("NSSM の初期化に失敗しました: {}", e))?
-    };
-
-    // 受信チャネルのイベントを Renderer で表示する（既に受信可能なイベントがあれば処理）
-    // try_recv でノンブロッキングに受信する
-    while let Ok(event) = rx.try_recv() {
-        // Renderer でイベントを表示する
-        _renderer.render(&event);
-    }
-
-    // 確保した NSSM インスタンスを使用する
-    let nssm = nssm_result;
-
     // 操作種別に応じて対応するサービス制御コマンドを実行する
     // SQL Server は NSSM 管理下にないため sc.exe を直接呼び出す
     match &args.action {
@@ -211,6 +185,7 @@ pub fn run(
                 // sc.exe start でサービスを起動する
                 sc_start(&service_name)?;
             } else {
+                let nssm = ensure_nssm_for_service(_renderer)?;
                 // それ以外は NSSM でサービスを起動する
                 nssm.start(&service_name)
                     .map_err(|e| anyhow::anyhow!("サービス起動に失敗しました: {}", e))?;
@@ -231,6 +206,7 @@ pub fn run(
                 // sc.exe stop でサービスを停止する
                 sc_stop(&service_name)?;
             } else {
+                let nssm = ensure_nssm_for_service(_renderer)?;
                 // それ以外は NSSM でサービスを停止する
                 nssm.stop(&service_name)
                     .map_err(|e| anyhow::anyhow!("サービス停止に失敗しました: {}", e))?;
@@ -253,6 +229,7 @@ pub fn run(
                 // 停止後に sc.exe start でサービスを起動する
                 sc_start(&service_name)?;
             } else {
+                let nssm = ensure_nssm_for_service(_renderer)?;
                 // それ以外は NSSM で停止 → 起動する
                 let _ = nssm.stop(&service_name);
                 // 次に NSSM でサービスを起動する
@@ -268,6 +245,20 @@ pub fn run(
 
     // 正常終了を示す Ok(()) を返す
     Ok(())
+}
+
+fn ensure_nssm_for_service(renderer: &Renderer) -> anyhow::Result<Nssm> {
+    let (tx, rx) = std::sync::mpsc::channel::<SetupEvent>();
+    let reporter = Reporter::new(tx);
+    let result =
+        Nssm::ensure(&reporter).map_err(|e| anyhow::anyhow!("NSSM の初期化に失敗しました: {}", e));
+    drop(reporter);
+
+    while let Ok(event) = rx.try_recv() {
+        renderer.render(&event);
+    }
+
+    result
 }
 
 // sc.exe start <service_name> を実行するヘルパー関数（SQL Server 用）
