@@ -37,6 +37,8 @@ const VERDACCIO_CONFIG_TEMPLATE: &str = r#"storage: {storage_dir}
 auth:
   htpasswd:
     file: {storage_dir}/htpasswd
+    # max_users: -1 はユーザー数を無制限にする設定であり、npm adduser で誰でも追加登録できる
+    # 新規登録を完全に禁止したい場合は -1 を 0 に変更する (既存ユーザーのログインには影響しない)
     max_users: -1
 security:
   api:
@@ -73,6 +75,12 @@ log:
   format: pretty
   level: http
 "#;
+
+// Verdaccio に初期ユーザー (admin/admin) を投入するための htpasswd シード
+// bcrypt ハッシュは infra/Verdaccio/storage/htpasswd に格納し、ビルド時に同梱する
+// 社内閉鎖環境向けの仮パスワードであり、運用前にユーザー側で変更する前提
+const VERDACCIO_HTPASSWD_SEED: &str =
+    include_str!("../../../../infra/Verdaccio/storage/htpasswd");
 
 // VerdaccioEngine: Verdaccio npm レジストリの SetupEngine 実装構造体
 // フィールドを持たないユニット構造体として定義する
@@ -168,6 +176,29 @@ impl SetupEngine for VerdaccioEngine {
         fs::create_dir_all(&logs_dir)?;
         // storage ディレクトリを再帰的に作成する
         fs::create_dir_all(&storage_dir)?;
+
+        // ステップ 1.5: htpasswd の初期シード (admin/admin) を配置する
+        // 既存ファイルが存在する場合は運用者の追加ユーザー・パスワード変更を尊重して触らない
+        reporter.info("htpasswd の初期ユーザーを確認しています...");
+        // storage_dir 内の htpasswd ファイルパスを構築する
+        let htpasswd_path = storage_dir.join("htpasswd");
+        // ファイルが存在しない、またはインストール中断により 0 バイトになっている場合はシードを書き出す
+        // fs::write は非アトミック (truncate → write) のため中断で空ファイルが残ることがある
+        // その場合も exists() が true を返すため、サイズも合わせて確認する
+        let htpasswd_is_empty = htpasswd_path
+            .metadata()
+            .map(|m| m.len() == 0)
+            .unwrap_or(false);
+        // 存在しない場合と 0 バイトの場合の両方でシードを書き出す
+        if !htpasswd_path.exists() || htpasswd_is_empty {
+            // バイナリに埋め込んだ bcrypt 済みエントリを書き出す
+            fs::write(&htpasswd_path, VERDACCIO_HTPASSWD_SEED)?;
+            // 書き出し完了をログに記録する (パスワードはログに残さない)
+            reporter.info("htpasswd に初期ユーザー 'admin' を作成しました");
+        } else {
+            // 既存 htpasswd を尊重しシードをスキップしたことを記録する
+            reporter.info("htpasswd が既に存在するためシードをスキップしました");
+        }
 
         // ステップ 2: package.json を app_dir に生成する
         reporter.info("package.json を生成しています...");
