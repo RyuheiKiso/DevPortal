@@ -38,6 +38,8 @@ zip = "0.6"
 sha2 = "0.10"
 # ハッシュ計算用の Digest トレイトを提供する（sha2 の依存）
 digest = "0.10"
+# ランダムなパスワード生成（PostgreSQL スーパーユーザー初期パスワード）
+rand = "0.8"
 
 # Windows 専用の依存クレート
 [target.'cfg(windows)'.dependencies]

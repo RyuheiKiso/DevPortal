@@ -119,6 +119,84 @@ impl Default for BaGetConfig {
     }
 }
 
+// PostgresConfig: PostgreSQL 固有の設定をまとめた構造体
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PostgresConfig {
+    // PostgreSQL が待ち受けるポート番号（デフォルト 5432）
+    pub port: u16,
+    // EDB のバージョン文字列（"<major>.<minor>-<patch>" 形式、例: "16.4-1"）
+    pub version: String,
+    // listen_addresses 設定値（デフォルト "localhost"）
+    pub listen_addresses: String,
+    // アンインストール時にデータディレクトリを残すか（デフォルト true）
+    pub keep_data_on_uninstall: bool,
+    // postgres スーパーユーザーのパスワード（config.toml に平文保存）
+    pub superuser_password: String,
+}
+
+// PostgresConfig のデフォルト値を定義する
+impl Default for PostgresConfig {
+    // デフォルト値を持つ PostgresConfig を返す
+    fn default() -> Self {
+        // ランダムな初期パスワードを生成する（24 文字の英数記号文字列）
+        let password = crate::postgres::PostgresEngine::generate_password();
+        // 各フィールドに仕様書で指定されたデフォルト値を設定する
+        Self {
+            // PostgreSQL 標準のデフォルトポート
+            port: 5432,
+            // インストールするデフォルトバージョン（EDB 16 系の安定版）
+            version: "16.4-1".to_string(),
+            // ローカルホストのみ受け付けるデフォルト設定
+            listen_addresses: "localhost".to_string(),
+            // データは保持する（誤削除防止のため true がデフォルト）
+            keep_data_on_uninstall: true,
+            // ランダム生成したパスワードを設定する
+            superuser_password: password,
+        }
+    }
+}
+
+// SqlServerConfig: Microsoft SQL Server 固有の設定をまとめた構造体
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SqlServerConfig {
+    // SQL Server が待ち受ける TCP ポート番号（デフォルト 1433）
+    pub port: u16,
+    // SQL Server インスタンス名（デフォルト "DEVPORTAL"、サービス名 MSSQL$<instance_name> として使用）
+    pub instance_name: String,
+    // ダウンロードする ISO の URL（既定は Microsoft 公式の Developer Edition 直リンク）
+    pub iso_url: String,
+    // インストールするエディション識別子（"Developer" / "Express" 等、ConfigurationFile.ini の参考表示用）
+    pub edition: String,
+    // SA（システム管理者）の初期パスワード（config.toml に平文保存）
+    pub sa_password: String,
+    // アンインストール時にデータディレクトリを残すか（デフォルト true）
+    pub keep_data_on_uninstall: bool,
+}
+
+// SqlServerConfig のデフォルト値を定義する
+impl Default for SqlServerConfig {
+    // デフォルト値を持つ SqlServerConfig を返す
+    fn default() -> Self {
+        // SA パスワードはランダム 24 文字で初期化する（postgres と同じ生成関数を流用）
+        let password = crate::postgres::PostgresEngine::generate_password();
+        // 各フィールドにデフォルト値を設定する
+        Self {
+            // SQL Server 標準の TCP ポート番号
+            port: 1433,
+            // DevPortal 専用のインスタンス名（他の SQL Server インスタンスと衝突しないように固有名を使う）
+            instance_name: "DEVPORTAL".to_string(),
+            // SQL Server 2022 Developer Edition ISO の Microsoft 公式直リンク
+            iso_url: "https://go.microsoft.com/fwlink/?linkid=2215158".to_string(),
+            // 既定エディションは Developer（無料・本番不可・全機能利用可）
+            edition: "Developer".to_string(),
+            // ランダム生成したパスワードを設定する
+            sa_password: password,
+            // データは保持する（誤削除防止のため true がデフォルト）
+            keep_data_on_uninstall: true,
+        }
+    }
+}
+
 // SetupConfig: セットアップ全体の設定をまとめたルート構造体
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SetupConfig {
@@ -133,6 +211,12 @@ pub struct SetupConfig {
     // BaGet 固有の設定（[baget] セクションがない既存 TOML からの読み込み時にデフォルト値を使う）
     #[serde(default)]
     pub baget: BaGetConfig,
+    // PostgreSQL 固有の設定（[postgres] セクションがない既存 TOML からの読み込み時にデフォルト値を使う）
+    #[serde(default)]
+    pub postgres: PostgresConfig,
+    // SQL Server 固有の設定（[sqlserver] セクションがない既存 TOML からの読み込み時にデフォルト値を使う）
+    #[serde(default)]
+    pub sqlserver: SqlServerConfig,
 }
 
 // SetupConfig のデフォルト値を定義する
@@ -151,6 +235,10 @@ impl Default for SetupConfig {
             backstage: BackstageConfig::default(),
             // BaGet のデフォルト設定を使用する
             baget: BaGetConfig::default(),
+            // PostgreSQL のデフォルト設定を使用する
+            postgres: PostgresConfig::default(),
+            // SQL Server のデフォルト設定を使用する
+            sqlserver: SqlServerConfig::default(),
         }
     }
 }

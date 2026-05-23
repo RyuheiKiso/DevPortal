@@ -17,6 +17,12 @@ pub enum Component {
     // snake_case 変換では "ba_get" になるため "baget" に明示的にリネームする
     #[serde(rename = "baget")]
     BaGet,
+    // リレーショナルデータベースの PostgreSQL コンポーネント
+    Postgres,
+    // Microsoft SQL Server リレーショナルデータベースコンポーネント
+    // snake_case 変換では "sql_server" になるため "sqlserver" に明示的にリネームする
+    #[serde(rename = "sqlserver")]
+    SqlServer,
 }
 
 // ActionKind: セットアップ操作の種別を表す列挙型

@@ -36,6 +36,10 @@ const DISPLAY_NAMES: Record<ComponentKind, string> = {
   backstage: 'Backstage',
   // BaGet の表示名
   baget: 'BaGet',
+  // PostgreSQL の表示名
+  postgres: 'PostgreSQL',
+  // SQL Server の表示名
+  sqlserver: 'SQL Server',
 };
 
 // インストール画面コンポーネント

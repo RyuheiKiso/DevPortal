@@ -25,6 +25,10 @@ import {
   Building2,
   // BaGet ページのアイコン（NuGet パッケージ）
   PackageOpen,
+  // PostgreSQL ページのアイコン（データベース）
+  Database,
+  // SQL Server ページのアイコン（サーバー）
+  Server,
   // Settings ページのアイコン
   Settings,
   // Plugins ページのアイコン（パズルピース）
@@ -67,6 +71,10 @@ const NAV_ITEMS: NavItemDef[] = [
   { label: 'Backstage', page: 'detail', component: 'backstage', icon: Building2 },
   // BaGet コンポーネント詳細ページへのリンク
   { label: 'BaGet', page: 'detail', component: 'baget', icon: PackageOpen },
+  // PostgreSQL コンポーネント詳細ページへのリンク
+  { label: 'PostgreSQL', page: 'detail', component: 'postgres', icon: Database },
+  // SQL Server コンポーネント詳細ページへのリンク
+  { label: 'SQL Server', page: 'detail', component: 'sqlserver', icon: Server },
   // Backstage プラグイン管理ページへのリンク
   { label: 'Plugins', page: 'plugins', icon: Puzzle },
   // 設定ページへのリンク

@@ -45,6 +45,16 @@ interface ValidationErrors {
   baget_port?: string;
   // BaGet バージョンのエラー（空文字の場合）
   baget_version?: string;
+  // PostgreSQL ポートのエラー（範囲外・非整数の場合）
+  postgres_port?: string;
+  // PostgreSQL バージョンのエラー（空文字の場合）
+  postgres_version?: string;
+  // SQL Server ポートのエラー（範囲外・非整数の場合）
+  sqlserver_port?: string;
+  // SQL Server インスタンス名のエラー（空文字または不正文字の場合）
+  sqlserver_instance_name?: string;
+  // SQL Server ISO URL のエラー（空文字の場合）
+  sqlserver_iso_url?: string;
 }
 
 // ポート番号の有効範囲（OS が割り当てる動的ポート範囲を避けるため 1024 以上）
@@ -105,12 +115,40 @@ function validate(draft: SetupConfig): ValidationErrors {
     errors.baget_version = 'バージョンを入力してください';
   }
 
-  // Verdaccio・Backstage・BaGet 全 4 ポートの組合せ重複チェック（バリデーションエラーのないもの同士）
+  // PostgreSQL ポートのバリデーション
+  const postgresPortErr = validatePort(draft.postgres.port, 'PostgreSQL ポート');
+  if (postgresPortErr) errors.postgres_port = postgresPortErr;
+
+  // PostgreSQL バージョンの空文字チェック
+  if (!draft.postgres.version.trim()) {
+    errors.postgres_version = 'バージョンを入力してください';
+  }
+
+  // SQL Server ポートのバリデーション
+  const sqlserverPortErr = validatePort(draft.sqlserver.port, 'SQL Server ポート');
+  if (sqlserverPortErr) errors.sqlserver_port = sqlserverPortErr;
+
+  // SQL Server インスタンス名のバリデーション（空文字・先頭が数字・特殊文字含むものは不可）
+  const sqlInstance = draft.sqlserver.instance_name.trim();
+  if (!sqlInstance) {
+    errors.sqlserver_instance_name = 'インスタンス名を入力してください';
+  } else if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(sqlInstance)) {
+    errors.sqlserver_instance_name = 'インスタンス名は英字で始まり英数字・アンダースコアのみ使用できます';
+  }
+
+  // SQL Server ISO URL の空文字チェック
+  if (!draft.sqlserver.iso_url.trim()) {
+    errors.sqlserver_iso_url = 'ISO URL を入力してください';
+  }
+
+  // Verdaccio・Backstage・BaGet・PostgreSQL・SQL Server 全 6 ポートの組合せ重複チェック（バリデーションエラーのないもの同士）
   const portFields: Array<{ key: keyof ValidationErrors; val: number; name: string }> = [
     { key: 'verdaccio_port',           val: draft.verdaccio.port,          name: 'Verdaccio ポート' },
     { key: 'backstage_frontend_port',  val: draft.backstage.frontend_port,  name: 'フロントエンドポート' },
     { key: 'backstage_backend_port',   val: draft.backstage.backend_port,   name: 'バックエンドポート' },
     { key: 'baget_port',               val: draft.baget.port,               name: 'BaGet ポート' },
+    { key: 'postgres_port',            val: draft.postgres.port,            name: 'PostgreSQL ポート' },
+    { key: 'sqlserver_port',           val: draft.sqlserver.port,           name: 'SQL Server ポート' },
   ];
   // バリデーション済みのポートフィールドだけを抽出して全組合せで重複を検出する
   const validPorts = portFields.filter((p) => !errors[p.key]);
@@ -239,6 +277,28 @@ export function Settings() {
     // 既存のドラフトをスプレッドして baget フィールドを部分更新する
     setDraft((prev) =>
       prev ? { ...prev, baget: { ...prev.baget, [key]: value } } : prev
+    );
+  }, []);
+
+  // PostgreSQL 設定のフィールドを更新するヘルパー関数
+  const updatePostgres = useCallback(<K extends keyof SetupConfig['postgres']>(
+    key: K,
+    value: SetupConfig['postgres'][K],
+  ) => {
+    // 既存のドラフトをスプレッドして postgres フィールドを部分更新する
+    setDraft((prev) =>
+      prev ? { ...prev, postgres: { ...prev.postgres, [key]: value } } : prev
+    );
+  }, []);
+
+  // SQL Server 設定のフィールドを更新するヘルパー関数
+  const updateSqlServer = useCallback(<K extends keyof SetupConfig['sqlserver']>(
+    key: K,
+    value: SetupConfig['sqlserver'][K],
+  ) => {
+    // 既存のドラフトをスプレッドして sqlserver フィールドを部分更新する
+    setDraft((prev) =>
+      prev ? { ...prev, sqlserver: { ...prev.sqlserver, [key]: value } } : prev
     );
   }, []);
 
@@ -700,6 +760,274 @@ export function Settings() {
                 checked={draft.baget.keep_data_on_uninstall}
                 // 変更時にドラフトを更新する
                 onChange={(e) => updateBaget('keep_data_on_uninstall', e.target.checked)}
+                // チェックボックスのスタイルクラスを適用する
+                className={styles.checkbox}
+              />
+              {/* チェックボックスのラベルテキスト */}
+              <span>アンインストール時にデータを保持する</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── PostgreSQL セクション ─── */}
+      <section className={styles.section}>
+        {/* セクションラベル */}
+        <span className={styles.sectionLabel}>PostgreSQL</span>
+
+        {/* PostgreSQL ポートの設定行 */}
+        <div className={styles.formRow}>
+          <label className={styles.formLabel} htmlFor="postgres-port">
+            ポート
+          </label>
+          <div className={styles.formControl}>
+            {/* ポート番号の数値入力 */}
+            <input
+              id="postgres-port"
+              type="number"
+              // ポートの有効範囲を指定する
+              min={PORT_MIN}
+              max={PORT_MAX}
+              // ドラフトの値を表示する
+              value={draft.postgres.port}
+              // 変更時に数値に変換してドラフトを更新する
+              onChange={(e) => updatePostgres('port', Number(e.target.value))}
+              // バリデーションエラーがある場合はエラースタイルを適用する
+              className={[styles.input, styles.inputNarrow, errors.postgres_port ? styles.inputError : ''].join(' ')}
+            />
+            {/* バリデーションエラーメッセージを表示する */}
+            {errors.postgres_port && (
+              <span className={styles.errorMsg}>{errors.postgres_port}</span>
+            )}
+          </div>
+        </div>
+
+        {/* PostgreSQL バージョンの設定行 */}
+        <div className={styles.formRow}>
+          <label className={styles.formLabel} htmlFor="postgres-version">
+            バージョン指定
+          </label>
+          <div className={styles.formControl}>
+            {/* バージョン指定のテキスト入力（例: 16.4-1） */}
+            <input
+              id="postgres-version"
+              type="text"
+              // ドラフトの値を表示する
+              value={draft.postgres.version}
+              // 変更時にドラフトを更新する
+              onChange={(e) => updatePostgres('version', e.target.value)}
+              // バリデーションエラーがある場合はエラースタイルを適用する
+              className={[styles.input, styles.inputNarrow, errors.postgres_version ? styles.inputError : ''].join(' ')}
+            />
+            {/* バリデーションエラーメッセージを表示する */}
+            {errors.postgres_version && (
+              <span className={styles.errorMsg}>{errors.postgres_version}</span>
+            )}
+          </div>
+        </div>
+
+        {/* スーパーユーザーパスワードの設定行 */}
+        <div className={styles.formRow}>
+          <label className={styles.formLabel} htmlFor="postgres-password">
+            スーパーユーザーパスワード
+          </label>
+          <div className={styles.formControl}>
+            {/* パスワードのテキスト入力（type="text" で確認しやすくする）*/}
+            <input
+              id="postgres-password"
+              type="text"
+              // ドラフトの値を表示する
+              value={draft.postgres.superuser_password}
+              // 変更時にドラフトを更新する
+              onChange={(e) => updatePostgres('superuser_password', e.target.value)}
+              // パスワード表示のための横幅を確保する
+              className={[styles.input].join(' ')}
+            />
+            {/* パスワードに関する補足説明 */}
+            <span className={styles.helpText}>
+              initdb 実行時に使用します。config.toml に平文で保存されます。
+            </span>
+          </div>
+        </div>
+
+        {/* データ保持オプションの設定行 */}
+        <div className={styles.formRow}>
+          <label className={styles.formLabel} htmlFor="postgres-keep-data">
+            データを保持
+          </label>
+          <div className={styles.formControl}>
+            {/* チェックボックスとラベルを横並びにする行 */}
+            <label className={styles.checkboxRow}>
+              {/* データ保持チェックボックス */}
+              <input
+                id="postgres-keep-data"
+                type="checkbox"
+                // ドラフトの値でチェック状態を制御する
+                checked={draft.postgres.keep_data_on_uninstall}
+                // 変更時にドラフトを更新する
+                onChange={(e) => updatePostgres('keep_data_on_uninstall', e.target.checked)}
+                // チェックボックスのスタイルクラスを適用する
+                className={styles.checkbox}
+              />
+              {/* チェックボックスのラベルテキスト */}
+              <span>アンインストール時にデータを保持する</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── SQL Server セクション ─── */}
+      <section className={styles.section}>
+        {/* セクションラベル */}
+        <span className={styles.sectionLabel}>SQL Server</span>
+
+        {/* SQL Server ポートの設定行 */}
+        <div className={styles.formRow}>
+          <label className={styles.formLabel} htmlFor="sqlserver-port">
+            ポート
+          </label>
+          <div className={styles.formControl}>
+            {/* ポート番号の数値入力 */}
+            <input
+              id="sqlserver-port"
+              type="number"
+              // ポートの有効範囲を指定する
+              min={PORT_MIN}
+              max={PORT_MAX}
+              // ドラフトの値を表示する
+              value={draft.sqlserver.port}
+              // 変更時に数値に変換してドラフトを更新する
+              onChange={(e) => updateSqlServer('port', Number(e.target.value))}
+              // バリデーションエラーがある場合はエラースタイルを適用する
+              className={[styles.input, styles.inputNarrow, errors.sqlserver_port ? styles.inputError : ''].join(' ')}
+            />
+            {/* バリデーションエラーメッセージを表示する */}
+            {errors.sqlserver_port && (
+              <span className={styles.errorMsg}>{errors.sqlserver_port}</span>
+            )}
+          </div>
+        </div>
+
+        {/* SQL Server インスタンス名の設定行 */}
+        <div className={styles.formRow}>
+          <label className={styles.formLabel} htmlFor="sqlserver-instance-name">
+            インスタンス名
+          </label>
+          <div className={styles.formControl}>
+            {/* インスタンス名のテキスト入力（例: DEVPORTAL） */}
+            <input
+              id="sqlserver-instance-name"
+              type="text"
+              // ドラフトの値を表示する
+              value={draft.sqlserver.instance_name}
+              // 変更時にドラフトを更新する
+              onChange={(e) => updateSqlServer('instance_name', e.target.value)}
+              // バリデーションエラーがある場合はエラースタイルを適用する
+              className={[styles.input, styles.inputNarrow, errors.sqlserver_instance_name ? styles.inputError : ''].join(' ')}
+            />
+            {/* バリデーションエラーメッセージを表示する */}
+            {errors.sqlserver_instance_name && (
+              <span className={styles.errorMsg}>{errors.sqlserver_instance_name}</span>
+            )}
+            {/* インスタンス名に関する補足説明 */}
+            <span className={styles.helpText}>
+              Windows サービス名は MSSQL$&lt;インスタンス名&gt; 形式になります
+            </span>
+          </div>
+        </div>
+
+        {/* SQL Server ISO URL の設定行 */}
+        <div className={styles.formRow}>
+          <label className={styles.formLabel} htmlFor="sqlserver-iso-url">
+            ISO URL
+          </label>
+          <div className={styles.formControl}>
+            {/* ISO URL のテキスト入力（既定は Microsoft 公式 Developer Edition 直リンク） */}
+            <input
+              id="sqlserver-iso-url"
+              type="text"
+              // ドラフトの値を表示する
+              value={draft.sqlserver.iso_url}
+              // 変更時にドラフトを更新する
+              onChange={(e) => updateSqlServer('iso_url', e.target.value)}
+              // バリデーションエラーがある場合はエラースタイルを適用する
+              className={[styles.input, errors.sqlserver_iso_url ? styles.inputError : ''].join(' ')}
+            />
+            {/* バリデーションエラーメッセージを表示する */}
+            {errors.sqlserver_iso_url && (
+              <span className={styles.errorMsg}>{errors.sqlserver_iso_url}</span>
+            )}
+            {/* ISO URL に関する補足説明 */}
+            <span className={styles.helpText}>
+              DEVPORTAL_SQLSERVER_PATH 環境変数を指定すると ISO ダウンロードをスキップしてローカルファイルを使えます
+            </span>
+          </div>
+        </div>
+
+        {/* SQL Server エディションの設定行 */}
+        <div className={styles.formRow}>
+          <label className={styles.formLabel} htmlFor="sqlserver-edition">
+            エディション
+          </label>
+          <div className={styles.formControl}>
+            {/* エディション識別子のテキスト入力（表示用、setup.exe には影響しない） */}
+            <input
+              id="sqlserver-edition"
+              type="text"
+              // ドラフトの値を表示する
+              value={draft.sqlserver.edition}
+              // 変更時にドラフトを更新する
+              onChange={(e) => updateSqlServer('edition', e.target.value)}
+              // 入力スタイルを適用する
+              className={[styles.input, styles.inputNarrow].join(' ')}
+            />
+            {/* エディションに関する補足説明 */}
+            <span className={styles.helpText}>
+              表示用の識別子です（実際のインストールは iso_url が指す ISO に従います）
+            </span>
+          </div>
+        </div>
+
+        {/* SQL Server SA パスワードの設定行 */}
+        <div className={styles.formRow}>
+          <label className={styles.formLabel} htmlFor="sqlserver-sa-password">
+            SA パスワード
+          </label>
+          <div className={styles.formControl}>
+            {/* SA パスワードのテキスト入力（確認しやすさのため平文表示） */}
+            <input
+              id="sqlserver-sa-password"
+              type="text"
+              // ドラフトの値を表示する
+              value={draft.sqlserver.sa_password}
+              // 変更時にドラフトを更新する
+              onChange={(e) => updateSqlServer('sa_password', e.target.value)}
+              // パスワード表示のための横幅を確保する
+              className={[styles.input].join(' ')}
+            />
+            {/* パスワードに関する補足説明 */}
+            <span className={styles.helpText}>
+              setup.exe 実行時に /SAPWD 引数で渡します。config.toml に平文で保存されます。
+            </span>
+          </div>
+        </div>
+
+        {/* データ保持オプションの設定行 */}
+        <div className={styles.formRow}>
+          <label className={styles.formLabel} htmlFor="sqlserver-keep-data">
+            データを保持
+          </label>
+          <div className={styles.formControl}>
+            {/* チェックボックスとラベルを横並びにする行 */}
+            <label className={styles.checkboxRow}>
+              {/* データ保持チェックボックス */}
+              <input
+                id="sqlserver-keep-data"
+                type="checkbox"
+                // ドラフトの値でチェック状態を制御する
+                checked={draft.sqlserver.keep_data_on_uninstall}
+                // 変更時にドラフトを更新する
+                onChange={(e) => updateSqlServer('keep_data_on_uninstall', e.target.checked)}
                 // チェックボックスのスタイルクラスを適用する
                 className={styles.checkbox}
               />

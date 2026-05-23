@@ -22,6 +22,13 @@ pub fn cmd_open_logs(
         "verdaccio" => paths::verdaccio_logs_dir(&config),
         // "backstage" の場合は Backstage のログディレクトリを返す
         "backstage" => paths::backstage_logs_dir(&config),
+        // "baget" の場合は BaGet のログディレクトリを返す
+        "baget" => paths::baget_logs_dir(&config),
+        // "postgres" の場合は PostgreSQL のログディレクトリを返す
+        "postgres" => paths::postgres_logs_dir(&config),
+        // "sqlserver" の場合は SQL Server の ERRORLOG が格納される data_dir/Log を返す
+        // （SQL Server は標準で data_dir/Log/ERRORLOG にログを書き出す）
+        "sqlserver" => paths::sqlserver_data_dir(&config).join("Log"),
         // 未知のコンポーネント名の場合はエラーを返す
         other => return Err(format!("未知のコンポーネント: {}", other)),
     };

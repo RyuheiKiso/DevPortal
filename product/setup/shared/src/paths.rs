@@ -133,6 +133,83 @@ pub fn baget_logs_dir(config: &SetupConfig) -> PathBuf {
     baget_dir(config).join("logs")
 }
 
+// PostgreSQL のルートディレクトリを返す関数
+// devportal_root/postgres に対応する
+pub fn postgres_dir(config: &SetupConfig) -> PathBuf {
+    // devportal_root に postgres サブディレクトリを追加する
+    devportal_root(config).join("postgres")
+}
+
+// PostgreSQL バイナリ展開先ディレクトリを返す関数
+// postgres_dir/app に対応する（EDB ZIP を展開してバイナリを配置する場所）
+pub fn postgres_app_dir(config: &SetupConfig) -> PathBuf {
+    // postgres_dir に app サブディレクトリを追加する
+    postgres_dir(config).join("app")
+}
+
+// PostgreSQL データディレクトリを返す関数
+// postgres_dir/data に対応する（initdb で初期化するクラスターデータの格納先）
+pub fn postgres_data_dir(config: &SetupConfig) -> PathBuf {
+    // postgres_dir に data サブディレクトリを追加する
+    postgres_dir(config).join("data")
+}
+
+// PostgreSQL ログ出力ディレクトリを返す関数
+// postgres_dir/logs に対応する
+pub fn postgres_logs_dir(config: &SetupConfig) -> PathBuf {
+    // postgres_dir に logs サブディレクトリを追加する
+    postgres_dir(config).join("logs")
+}
+
+// postgresql.conf ファイルのパスを返す関数
+// postgres_data_dir/postgresql.conf に対応する
+pub fn postgres_conf_file(config: &SetupConfig) -> PathBuf {
+    // postgres_data_dir に postgresql.conf ファイル名を追加する
+    postgres_data_dir(config).join("postgresql.conf")
+}
+
+// SQL Server のルートディレクトリを返す関数
+// devportal_root/sqlserver に対応する
+pub fn sqlserver_dir(config: &SetupConfig) -> PathBuf {
+    // devportal_root に sqlserver サブディレクトリを追加する
+    devportal_root(config).join("sqlserver")
+}
+
+// SQL Server のインスタンスインストール先ディレクトリを返す関数
+// sqlserver_dir/app に対応する（setup.exe の INSTANCEDIR に渡す）
+pub fn sqlserver_app_dir(config: &SetupConfig) -> PathBuf {
+    // sqlserver_dir に app サブディレクトリを追加する
+    sqlserver_dir(config).join("app")
+}
+
+// SQL Server のデータディレクトリを返す関数
+// sqlserver_dir/data に対応する（INSTALLSQLDATADIR に渡す）
+pub fn sqlserver_data_dir(config: &SetupConfig) -> PathBuf {
+    // sqlserver_dir に data サブディレクトリを追加する
+    sqlserver_dir(config).join("data")
+}
+
+// SQL Server のログ出力ディレクトリを返す関数
+// sqlserver_dir/logs に対応する（setup.exe のセットアップログ転送先）
+pub fn sqlserver_logs_dir(config: &SetupConfig) -> PathBuf {
+    // sqlserver_dir に logs サブディレクトリを追加する
+    sqlserver_dir(config).join("logs")
+}
+
+// SQL Server インストーラ ISO のキャッシュパスを返す関数
+// sqlserver_dir/cache/SQLServer.iso に対応する（再インストール時に同じ ISO を使い回せるよう永続キャッシュする）
+pub fn sqlserver_iso_cache(config: &SetupConfig) -> PathBuf {
+    // sqlserver_dir に cache/SQLServer.iso パスを追加する
+    sqlserver_dir(config).join("cache").join("SQLServer.iso")
+}
+
+// SQL Server セットアップ用 ConfigurationFile.ini のパスを返す関数
+// sqlserver_dir/ConfigurationFile.ini に対応する
+pub fn sqlserver_config_ini(config: &SetupConfig) -> PathBuf {
+    // sqlserver_dir に ConfigurationFile.ini ファイル名を追加する
+    sqlserver_dir(config).join("ConfigurationFile.ini")
+}
+
 // セットアップ設定ファイル（setup.toml）のパスを返す関数
 // %ProgramData%\DevPortal\config\setup.toml に対応する
 pub fn config_file() -> PathBuf {

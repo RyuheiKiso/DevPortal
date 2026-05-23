@@ -36,6 +36,10 @@ pub async fn cmd_uninstall(
         "backstage" => Component::Backstage,
         // "baget" を Component::BaGet に変換する
         "baget" => Component::BaGet,
+        // "postgres" を Component::Postgres に変換する
+        "postgres" => Component::Postgres,
+        // "sqlserver" を Component::SqlServer に変換する
+        "sqlserver" => Component::SqlServer,
         // 未知のコンポーネント名の場合はエラーを返す
         other => return Err(format!("未知のコンポーネント: {}", other)),
     };

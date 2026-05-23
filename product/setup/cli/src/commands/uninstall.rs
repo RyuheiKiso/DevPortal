@@ -172,17 +172,50 @@ pub fn run(
             // 失敗フラグを更新する
             any_failed = any_failed || failed;
         }
-        // target が "all" の場合は Verdaccio → Backstage → BaGet の順でアンインストールする
-        "all" => {
-            // Verdaccio を先にアンインストールする（config のクローンをスレッドに渡す）
-            let verdaccio_config = effective_config.clone();
-            // Verdaccio のアンインストールを実行する
-            let failed_v =
-                uninstall_component(Component::Verdaccio, verdaccio_config, renderer, keep_data)?;
+        // target が "postgres" の場合は PostgreSQL のみアンインストールする
+        "postgres" => {
+            // PostgreSQL をアンインストールしてフラグを更新する
+            let failed =
+                uninstall_component(Component::Postgres, effective_config, renderer, keep_data)?;
             // 失敗フラグを更新する
-            any_failed = any_failed || failed_v;
+            any_failed = any_failed || failed;
+        }
+        // target が "sqlserver" の場合は SQL Server のみアンインストールする
+        "sqlserver" => {
+            // SQL Server をアンインストールしてフラグを更新する
+            let failed =
+                uninstall_component(Component::SqlServer, effective_config, renderer, keep_data)?;
+            // 失敗フラグを更新する
+            any_failed = any_failed || failed;
+        }
+        // target が "all" の場合は SqlServer → Postgres → BaGet → Backstage → Verdaccio の順でアンインストールする
+        // （データベースを先に止めてから上位コンポーネントを止める）
+        "all" => {
+            // SQL Server を先にアンインストールする
+            let sqlserver_config = effective_config.clone();
+            // SQL Server のアンインストールを実行する
+            let failed_sql =
+                uninstall_component(Component::SqlServer, sqlserver_config, renderer, keep_data)?;
+            // 失敗フラグを更新する
+            any_failed = any_failed || failed_sql;
 
-            // Backstage をその後にアンインストールする
+            // PostgreSQL をその後にアンインストールする
+            let postgres_config = effective_config.clone();
+            // PostgreSQL のアンインストールを実行する
+            let failed_pg =
+                uninstall_component(Component::Postgres, postgres_config, renderer, keep_data)?;
+            // 失敗フラグを更新する
+            any_failed = any_failed || failed_pg;
+
+            // BaGet をその次にアンインストールする
+            let baget_config = effective_config.clone();
+            // BaGet のアンインストールを実行する
+            let failed_bg =
+                uninstall_component(Component::BaGet, baget_config, renderer, keep_data)?;
+            // 失敗フラグを更新する
+            any_failed = any_failed || failed_bg;
+
+            // Backstage をその次にアンインストールする
             let backstage_config = effective_config.clone();
             // Backstage のアンインストールを実行する
             let failed_b =
@@ -190,19 +223,19 @@ pub fn run(
             // 失敗フラグを更新する
             any_failed = any_failed || failed_b;
 
-            // BaGet を最後にアンインストールする
-            let baget_config = effective_config;
-            // BaGet のアンインストールを実行する
-            let failed_bg =
-                uninstall_component(Component::BaGet, baget_config, renderer, keep_data)?;
+            // Verdaccio を最後にアンインストールする
+            let verdaccio_config = effective_config;
+            // Verdaccio のアンインストールを実行する
+            let failed_v =
+                uninstall_component(Component::Verdaccio, verdaccio_config, renderer, keep_data)?;
             // 失敗フラグを更新する
-            any_failed = any_failed || failed_bg;
+            any_failed = any_failed || failed_v;
         }
         // 未知の target が指定された場合はエラーを返す
         unknown => {
             // 不明なターゲット名を含むエラーメッセージを返す
             return Err(anyhow::anyhow!(
-                "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / baget / all",
+                "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / baget / postgres / sqlserver / all",
                 unknown
             ));
         }

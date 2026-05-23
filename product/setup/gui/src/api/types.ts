@@ -11,7 +11,7 @@ export type ServiceStatus =
   | 'unknown';
 
 // セットアップ対象コンポーネントの種別を表す文字列ユニオン型
-export type ComponentKind = 'verdaccio' | 'backstage' | 'baget';
+export type ComponentKind = 'verdaccio' | 'backstage' | 'baget' | 'postgres' | 'sqlserver';
 
 // ComponentStatus: 1 コンポーネントのステータス情報を表すインターフェース
 // Rust 側の ComponentStatus 構造体と対応する
@@ -93,6 +93,38 @@ export interface BaGetConfig {
   keep_data_on_uninstall: boolean;
 }
 
+// PostgresConfig: PostgreSQL 固有の設定インターフェース
+// Rust 側の PostgresConfig 構造体と対応する
+export interface PostgresConfig {
+  // PostgreSQL が待ち受けるポート番号
+  port: number;
+  // EDB のバージョン文字列（"<major>.<minor>-<patch>" 形式、例: "16.4-1"）
+  version: string;
+  // listen_addresses 設定値（デフォルト "localhost"）
+  listen_addresses: string;
+  // アンインストール時にデータを保持するかどうか
+  keep_data_on_uninstall: boolean;
+  // postgres スーパーユーザーのパスワード（config.toml に平文保存）
+  superuser_password: string;
+}
+
+// SqlServerConfig: Microsoft SQL Server 固有の設定インターフェース
+// Rust 側の SqlServerConfig 構造体と対応する
+export interface SqlServerConfig {
+  // SQL Server が待ち受ける TCP ポート番号
+  port: number;
+  // SQL Server インスタンス名（サービス名 MSSQL$<instance_name> として使用）
+  instance_name: string;
+  // ダウンロードする ISO の URL（既定は Microsoft 公式 Developer Edition 直リンク）
+  iso_url: string;
+  // インストールするエディション識別子（"Developer" / "Express" 等）
+  edition: string;
+  // SA（システム管理者）の初期パスワード（config.toml に平文保存）
+  sa_password: string;
+  // アンインストール時にデータディレクトリを残すかどうか
+  keep_data_on_uninstall: boolean;
+}
+
 // SetupConfig: セットアップ全体の設定をまとめたインターフェース
 // Rust 側の SetupConfig 構造体と対応する
 export interface SetupConfig {
@@ -106,6 +138,10 @@ export interface SetupConfig {
   backstage: BackstageConfig;
   // BaGet 固有の設定
   baget: BaGetConfig;
+  // PostgreSQL 固有の設定
+  postgres: PostgresConfig;
+  // SQL Server 固有の設定
+  sqlserver: SqlServerConfig;
 }
 
 // PluginKind: プラグインの適用対象種別を表す文字列ユニオン型

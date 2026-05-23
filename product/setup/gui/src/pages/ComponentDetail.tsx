@@ -69,6 +69,10 @@ const DISPLAY_NAMES: Record<ComponentKind, string> = {
   backstage: 'Backstage',
   // BaGet の表示名
   baget: 'BaGet',
+  // PostgreSQL の表示名
+  postgres: 'PostgreSQL',
+  // SQL Server の表示名
+  sqlserver: 'SQL Server',
 };
 
 // コンポーネント種別ごとの説明文マップ
@@ -79,6 +83,10 @@ const DESCRIPTIONS: Record<ComponentKind, string> = {
   backstage: '開発者ポータル',
   // BaGet の説明文
   baget: 'プライベート NuGet レジストリ',
+  // PostgreSQL の説明文
+  postgres: 'リレーショナルデータベース',
+  // SQL Server の説明文
+  sqlserver: 'Microsoft SQL Server データベース',
 };
 
 // ServiceStatus を Badge の variant とラベルテキストにマッピングするオブジェクト
@@ -302,12 +310,21 @@ export function ComponentDetail({
   const isRunning = status?.service_status === 'running';
 
   // このコンポーネントの設定値を取得する（コンポーネント種別ごとに異なる）
-  const componentConfig =
-    component === 'verdaccio'
-      ? config?.verdaccio
-      : component === 'backstage'
-        ? config?.backstage
-        : config?.baget;
+  // lookup マップ形式にすることで、新規コンポーネント追加時に分岐ミスが起きないようにする
+  const componentConfig = config
+    ? {
+        // Verdaccio の設定オブジェクト
+        verdaccio: config.verdaccio,
+        // Backstage の設定オブジェクト
+        backstage: config.backstage,
+        // BaGet の設定オブジェクト
+        baget: config.baget,
+        // PostgreSQL の設定オブジェクト
+        postgres: config.postgres,
+        // SQL Server の設定オブジェクト
+        sqlserver: config.sqlserver,
+      }[component]
+    : undefined;
 
   // コンポーネント詳細ページを描画する
   return (
@@ -513,6 +530,48 @@ export function ComponentDetail({
                 {/* アンインストール時のデータ保持設定の行 */}
                 <span className={styles.configLabel}>データ保持</span>
                 <span>{config.baget.keep_data_on_uninstall ? '保持する' : '削除する'}</span>
+              </>
+            )}
+
+            {/* PostgreSQL 固有の設定値を表示する */}
+            {component === 'postgres' && config?.postgres && (
+              <>
+                {/* ポート番号の行 */}
+                <span className={styles.configLabel}>ポート</span>
+                <span className={styles.configMono}>{config.postgres.port}</span>
+
+                {/* バージョン指定の行 */}
+                <span className={styles.configLabel}>バージョン</span>
+                <span className={styles.configMono}>{config.postgres.version}</span>
+
+                {/* listen_addresses の行 */}
+                <span className={styles.configLabel}>listen_addresses</span>
+                <span className={styles.configMono}>{config.postgres.listen_addresses}</span>
+
+                {/* アンインストール時のデータ保持設定の行 */}
+                <span className={styles.configLabel}>データ保持</span>
+                <span>{config.postgres.keep_data_on_uninstall ? '保持する' : '削除する'}</span>
+              </>
+            )}
+
+            {/* SQL Server 固有の設定値を表示する */}
+            {component === 'sqlserver' && config?.sqlserver && (
+              <>
+                {/* ポート番号の行 */}
+                <span className={styles.configLabel}>ポート</span>
+                <span className={styles.configMono}>{config.sqlserver.port}</span>
+
+                {/* インスタンス名の行 */}
+                <span className={styles.configLabel}>インスタンス名</span>
+                <span className={styles.configMono}>{config.sqlserver.instance_name}</span>
+
+                {/* エディション識別子の行 */}
+                <span className={styles.configLabel}>エディション</span>
+                <span className={styles.configMono}>{config.sqlserver.edition}</span>
+
+                {/* アンインストール時のデータ保持設定の行 */}
+                <span className={styles.configLabel}>データ保持</span>
+                <span>{config.sqlserver.keep_data_on_uninstall ? '保持する' : '削除する'}</span>
               </>
             )}
 

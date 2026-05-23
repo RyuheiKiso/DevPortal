@@ -141,6 +141,27 @@ pub fn run(
             baget_port_arg = port.to_string();
             elevated_args.push(baget_port_arg.as_str());
         }
+        // --postgres-port が指定されている場合は昇格後のコマンドにも追加する
+        let postgres_port_arg;
+        if let Some(port) = args.postgres_port {
+            elevated_args.push("--postgres-port");
+            postgres_port_arg = port.to_string();
+            elevated_args.push(postgres_port_arg.as_str());
+        }
+        // --sqlserver-port が指定されている場合は昇格後のコマンドにも追加する
+        let sqlserver_port_arg;
+        if let Some(port) = args.sqlserver_port {
+            elevated_args.push("--sqlserver-port");
+            sqlserver_port_arg = port.to_string();
+            elevated_args.push(sqlserver_port_arg.as_str());
+        }
+        // --sqlserver-instance が指定されている場合は昇格後のコマンドにも追加する
+        let sqlserver_instance_arg;
+        if let Some(name) = &args.sqlserver_instance {
+            elevated_args.push("--sqlserver-instance");
+            sqlserver_instance_arg = name.clone();
+            elevated_args.push(sqlserver_instance_arg.as_str());
+        }
         // --install-dir が指定されている場合は昇格後のコマンドにも追加する
         let install_dir_arg;
         if let Some(dir) = &args.install_dir {
@@ -191,6 +212,24 @@ pub fn run(
         effective_config.baget.port = port;
     }
 
+    // --postgres-port が指定されている場合は設定を上書きする
+    if let Some(port) = args.postgres_port {
+        // PostgreSQL のポート番号を上書きする
+        effective_config.postgres.port = port;
+    }
+
+    // --sqlserver-port が指定されている場合は設定を上書きする
+    if let Some(port) = args.sqlserver_port {
+        // SQL Server のポート番号を上書きする
+        effective_config.sqlserver.port = port;
+    }
+
+    // --sqlserver-instance が指定されている場合は設定を上書きする
+    if let Some(name) = &args.sqlserver_instance {
+        // SQL Server インスタンス名を上書きする
+        effective_config.sqlserver.instance_name = name.clone();
+    }
+
     // --install-dir が指定されている場合は設定を上書きする
     if let Some(dir) = &args.install_dir {
         // インストール先のベースディレクトリを上書きする
@@ -226,7 +265,21 @@ pub fn run(
             // 失敗フラグを更新する
             any_failed = any_failed || failed;
         }
-        // target が "all" の場合は Verdaccio → Backstage → BaGet の順でインストールする
+        // target が "postgres" の場合は PostgreSQL のみインストールする
+        "postgres" => {
+            // PostgreSQL をインストールしてフラグを更新する
+            let failed = install_component(Component::Postgres, effective_config, renderer)?;
+            // 失敗フラグを更新する
+            any_failed = any_failed || failed;
+        }
+        // target が "sqlserver" の場合は SQL Server のみインストールする
+        "sqlserver" => {
+            // SQL Server をインストールしてフラグを更新する
+            let failed = install_component(Component::SqlServer, effective_config, renderer)?;
+            // 失敗フラグを更新する
+            any_failed = any_failed || failed;
+        }
+        // target が "all" の場合は Verdaccio → Backstage → BaGet → Postgres → SqlServer の順でインストールする
         "all" => {
             // Verdaccio を先にインストールする（config のクローンをスレッドに渡す）
             let verdaccio_config = effective_config.clone();
@@ -242,18 +295,32 @@ pub fn run(
             // 失敗フラグを更新する
             any_failed = any_failed || failed_b;
 
-            // BaGet を最後にインストールする
-            let baget_config = effective_config;
+            // BaGet をその次にインストールする
+            let baget_config = effective_config.clone();
             // BaGet のインストールを実行する
             let failed_bg = install_component(Component::BaGet, baget_config, renderer)?;
             // 失敗フラグを更新する
             any_failed = any_failed || failed_bg;
+
+            // PostgreSQL をその次にインストールする
+            let postgres_config = effective_config.clone();
+            // PostgreSQL のインストールを実行する
+            let failed_pg = install_component(Component::Postgres, postgres_config, renderer)?;
+            // 失敗フラグを更新する
+            any_failed = any_failed || failed_pg;
+
+            // SQL Server を最後にインストールする
+            let sqlserver_config = effective_config;
+            // SQL Server のインストールを実行する
+            let failed_sql = install_component(Component::SqlServer, sqlserver_config, renderer)?;
+            // 失敗フラグを更新する
+            any_failed = any_failed || failed_sql;
         }
         // 未知の target が指定された場合はエラーを返す
         unknown => {
             // 不明なターゲット名を含むエラーメッセージを返す
             return Err(anyhow::anyhow!(
-                "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / baget / all",
+                "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / baget / postgres / sqlserver / all",
                 unknown
             ));
         }

@@ -57,6 +57,24 @@ pub fn run(args: &StatusArgs, config: &SetupConfig, renderer: &Renderer) -> anyh
             // 取得した状態を renderer で表示する
             renderer.render_component_status(&status);
         }
+        // target が "postgres" の場合は PostgreSQL のみ確認する
+        Some("postgres") => {
+            // PostgresEngine を使って PostgreSQL の状態を取得する
+            let engine = engine_for(Component::Postgres);
+            // status メソッドを呼び出して ComponentStatus を取得する
+            let status = engine.status(config)?;
+            // 取得した状態を renderer で表示する
+            renderer.render_component_status(&status);
+        }
+        // target が "sqlserver" の場合は SQL Server のみ確認する
+        Some("sqlserver") => {
+            // SqlServerEngine を使って SQL Server の状態を取得する
+            let engine = engine_for(Component::SqlServer);
+            // status メソッドを呼び出して ComponentStatus を取得する
+            let status = engine.status(config)?;
+            // 取得した状態を renderer で表示する
+            renderer.render_component_status(&status);
+        }
         // target が None（省略）または "all" の場合は全コンポーネントを確認する
         None | Some("all") => {
             // VerdaccioEngine を使って Verdaccio の状態を取得する
@@ -79,12 +97,26 @@ pub fn run(args: &StatusArgs, config: &SetupConfig, renderer: &Renderer) -> anyh
             let baget_status = baget_engine.status(config)?;
             // BaGet の状態を renderer で表示する
             renderer.render_component_status(&baget_status);
+
+            // PostgresEngine を使って PostgreSQL の状態を取得する
+            let postgres_engine = engine_for(Component::Postgres);
+            // PostgreSQL の status を取得する
+            let postgres_status = postgres_engine.status(config)?;
+            // PostgreSQL の状態を renderer で表示する
+            renderer.render_component_status(&postgres_status);
+
+            // SqlServerEngine を使って SQL Server の状態を取得する
+            let sqlserver_engine = engine_for(Component::SqlServer);
+            // SQL Server の status を取得する
+            let sqlserver_status = sqlserver_engine.status(config)?;
+            // SQL Server の状態を renderer で表示する
+            renderer.render_component_status(&sqlserver_status);
         }
         // 未知の target が指定された場合はエラーを返す
         Some(unknown) => {
             // 不明なターゲット名を含むエラーメッセージを返す
             return Err(anyhow::anyhow!(
-                "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / baget / all",
+                "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / baget / postgres / sqlserver / all",
                 unknown
             ));
         }

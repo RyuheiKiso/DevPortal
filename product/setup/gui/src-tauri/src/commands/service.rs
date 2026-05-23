@@ -1,5 +1,8 @@
 // このファイルはサービスの start/stop/restart を制御する Tauri コマンドを定義する
-// NSSM を使って Windows サービスの操作を行う
+// NSSM を使って Windows サービスの操作を行う（SQL Server のみ sc.exe を直接使用する）
+
+// 外部コマンド実行（sc.exe）に必要な型をインポートする
+use std::process::{Command, Stdio};
 
 // shared クレートの NSSM ラッパをインポートする
 use shared::nssm::Nssm;
@@ -31,6 +34,10 @@ pub fn cmd_service_action(
         "backstage" => Component::Backstage,
         // "baget" を Component::BaGet に変換する
         "baget" => Component::BaGet,
+        // "postgres" を Component::Postgres に変換する
+        "postgres" => Component::Postgres,
+        // "sqlserver" を Component::SqlServer に変換する
+        "sqlserver" => Component::SqlServer,
         // 未知のコンポーネント名の場合はエラーを返す
         other => return Err(format!("未知のコンポーネント: {}", other)),
     };
@@ -43,10 +50,30 @@ pub fn cmd_service_action(
     } else {
         SetupConfig::default()
     };
-    // コンポーネントに対応するエンジンを取得する
-    let engine = engine_for(comp);
+    // コンポーネントに対応するエンジンを取得する（後で matches! で比較するため clone する）
+    let engine = engine_for(comp.clone());
     // エンジンからサービス名を取得する
     let service_name = engine.service_name(&config);
+
+    // SQL Server は NSSM 管理下にないため sc.exe で直接操作する
+    if matches!(comp, Component::SqlServer) {
+        // action に応じて sc.exe を呼び出す
+        return match action.as_str() {
+            // "start" の場合は sc.exe start でサービスを起動する
+            "start" => sc_invoke(&service_name, "start", "起動"),
+            // "stop" の場合は sc.exe stop でサービスを停止する
+            "stop" => sc_invoke(&service_name, "stop", "停止"),
+            // "restart" の場合は sc.exe stop → start でサービスを再起動する
+            "restart" => {
+                // 停止失敗は無視する（既に停止中の可能性があるため）
+                let _ = sc_invoke(&service_name, "stop", "停止");
+                // 再度起動する
+                sc_invoke(&service_name, "start", "再起動")
+            }
+            // 未知のアクション名の場合はエラーを返す
+            other => Err(format!("未知のアクション: {}", other)),
+        };
+    }
 
     // NSSM インスタンスを環境変数から自動解決して作成する
     let nssm = Nssm::from_env()
@@ -77,4 +104,36 @@ pub fn cmd_service_action(
         // 未知のアクション名の場合はエラーを返す
         other => Err(format!("未知のアクション: {}", other)),
     }
+}
+
+// sc.exe <action> <service_name> を実行するヘルパー関数（SQL Server 用）
+// op_label: 日本語のエラーメッセージで使用する操作名（例: "起動" / "停止" / "再起動"）
+fn sc_invoke(service_name: &str, action: &str, op_label: &str) -> Result<(), String> {
+    // sc.exe を起動する
+    let status = Command::new("sc.exe")
+        // start / stop などのサブコマンドを指定する
+        .arg(action)
+        // 対象サービス名を指定する
+        .arg(service_name)
+        // 標準出力を捨てる
+        .stdout(Stdio::null())
+        // 標準エラーも捨てる
+        .stderr(Stdio::null())
+        // 実行する
+        .status()
+        .map_err(|e| format!("sc.exe の実行に失敗しました: {}", e))?;
+
+    // 終了コードが 0 でなくても「既に起動中」「既に停止」などの正常状態の場合があるため
+    // ユーザー向け UI には警告ではなく成功として扱う（最終的な状態は status で確認できる）
+    if !status.success() {
+        // 詳細は標準エラーに残す（フロント側ステータスでカバーする）
+        eprintln!(
+            "警告: サービスの{}で sc.exe の終了コードが 0 ではありません（既にその状態の可能性があります）: {:?}",
+            op_label,
+            status.code()
+        );
+    }
+
+    // 正常終了として扱う
+    Ok(())
 }

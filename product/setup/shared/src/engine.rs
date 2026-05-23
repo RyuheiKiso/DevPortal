@@ -70,5 +70,9 @@ pub fn engine_for(component: Component) -> Box<dyn SetupEngine> {
         Component::Backstage => Box::new(crate::backstage::BackstageEngine),
         // BaGet コンポーネントには BaGetEngine を返す
         Component::BaGet => Box::new(crate::baget::BaGetEngine),
+        // Postgres コンポーネントには PostgresEngine を返す
+        Component::Postgres => Box::new(crate::postgres::PostgresEngine),
+        // SqlServer コンポーネントには SqlServerEngine を返す
+        Component::SqlServer => Box::new(crate::sqlserver::SqlServerEngine),
     }
 }

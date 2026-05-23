@@ -7,6 +7,9 @@ use std::fs;
 // ファイル読み込みに必要なトレイトをインポートする
 use std::io::{BufRead, BufReader};
 
+// 外部コマンド実行（sc.exe による SQL Server サービス制御）に必要な型をインポートする
+use std::process::{Command, Stdio};
+
 // ServiceArgs と ServiceAction 型を参照するために使用する
 use crate::args::{ServiceAction, ServiceArgs};
 
@@ -35,7 +38,8 @@ use shared::paths;
 use shared::elevation::{is_elevated, run_self_elevated};
 
 // target 文字列を Component に変換するヘルパー関数
-// "verdaccio" → Component::Verdaccio、"backstage" → Component::Backstage、"baget" → Component::BaGet
+// "verdaccio" → Component::Verdaccio、"backstage" → Component::Backstage、"baget" → Component::BaGet、
+// "postgres" → Component::Postgres、"sqlserver" → Component::SqlServer
 fn parse_component(target: &str) -> anyhow::Result<Component> {
     // target を小文字に正規化してマッチングする
     match target.to_lowercase().as_str() {
@@ -45,9 +49,13 @@ fn parse_component(target: &str) -> anyhow::Result<Component> {
         "backstage" => Ok(Component::Backstage),
         // "baget" の場合は BaGet コンポーネントを返す
         "baget" => Ok(Component::BaGet),
+        // "postgres" の場合は Postgres コンポーネントを返す
+        "postgres" => Ok(Component::Postgres),
+        // "sqlserver" の場合は SqlServer コンポーネントを返す
+        "sqlserver" => Ok(Component::SqlServer),
         // 未知の値の場合はエラーを返す
         _ => Err(anyhow::anyhow!(
-            "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / baget",
+            "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / baget / postgres / sqlserver",
             target
         )),
     }
@@ -71,18 +79,19 @@ pub fn run(
             // target を Component に変換する
             let component = parse_component(target)?;
 
-            // コンポーネントに応じてログディレクトリを決定する
-            let logs_dir = match component {
-                // Verdaccio の場合は verdaccio のログディレクトリを取得する
-                Component::Verdaccio => paths::verdaccio_logs_dir(config),
-                // Backstage の場合は backstage のログディレクトリを取得する
-                Component::Backstage => paths::backstage_logs_dir(config),
-                // BaGet の場合は baget のログディレクトリを取得する
-                Component::BaGet => paths::baget_logs_dir(config),
+            // コンポーネントに応じてログファイルのパスを決定する
+            let log_file = match component {
+                // Verdaccio の場合は verdaccio の logs/stdout.log を参照する
+                Component::Verdaccio => paths::verdaccio_logs_dir(config).join("stdout.log"),
+                // Backstage の場合は backstage の logs/stdout.log を参照する
+                Component::Backstage => paths::backstage_logs_dir(config).join("stdout.log"),
+                // BaGet の場合は baget の logs/stdout.log を参照する
+                Component::BaGet => paths::baget_logs_dir(config).join("stdout.log"),
+                // PostgreSQL は postgres-stdout.log にリダイレクトしている
+                Component::Postgres => paths::postgres_logs_dir(config).join("postgres-stdout.log"),
+                // SQL Server は ERRORLOG（拡張子なし）を SQL Server 自身が data_dir/Log に出力する
+                Component::SqlServer => paths::sqlserver_data_dir(config).join("Log").join("ERRORLOG"),
             };
-
-            // stdout.log ファイルのパスを構築する
-            let log_file = logs_dir.join("stdout.log");
 
             // ログファイルが存在するか確認する
             if !log_file.exists() {
@@ -187,19 +196,26 @@ pub fn run(
     // 確保した NSSM インスタンスを使用する
     let nssm = nssm_result;
 
-    // 操作種別に応じて対応する NSSM コマンドを実行する
+    // 操作種別に応じて対応するサービス制御コマンドを実行する
+    // SQL Server は NSSM 管理下にないため sc.exe を直接呼び出す
     match &args.action {
         // start コマンドの処理
         ServiceAction::Start { target } => {
             // target を Component に変換する
             let component = parse_component(target)?;
-            // エンジンを生成してサービス名を取得する
-            let engine = engine_for(component);
+            // エンジンを生成してサービス名を取得する（component は後で matches! で比較するため clone する）
+            let engine = engine_for(component.clone());
             // サービス名を取得する
             let service_name = engine.service_name(config);
-            // NSSM でサービスを起動する
-            nssm.start(&service_name)
-                .map_err(|e| anyhow::anyhow!("サービス起動に失敗しました: {}", e))?;
+            // SQL Server の場合は sc.exe で操作する
+            if matches!(component, Component::SqlServer) {
+                // sc.exe start でサービスを起動する
+                sc_start(&service_name)?;
+            } else {
+                // それ以外は NSSM でサービスを起動する
+                nssm.start(&service_name)
+                    .map_err(|e| anyhow::anyhow!("サービス起動に失敗しました: {}", e))?;
+            }
             // 起動成功メッセージを表示する
             println!("サービス '{}' を起動しました", service_name);
         }
@@ -207,13 +223,19 @@ pub fn run(
         ServiceAction::Stop { target } => {
             // target を Component に変換する
             let component = parse_component(target)?;
-            // エンジンを生成してサービス名を取得する
-            let engine = engine_for(component);
+            // エンジンを生成してサービス名を取得する（component は後で matches! で比較するため clone する）
+            let engine = engine_for(component.clone());
             // サービス名を取得する
             let service_name = engine.service_name(config);
-            // NSSM でサービスを停止する
-            nssm.stop(&service_name)
-                .map_err(|e| anyhow::anyhow!("サービス停止に失敗しました: {}", e))?;
+            // SQL Server の場合は sc.exe で停止する
+            if matches!(component, Component::SqlServer) {
+                // sc.exe stop でサービスを停止する
+                sc_stop(&service_name)?;
+            } else {
+                // それ以外は NSSM でサービスを停止する
+                nssm.stop(&service_name)
+                    .map_err(|e| anyhow::anyhow!("サービス停止に失敗しました: {}", e))?;
+            }
             // 停止成功メッセージを表示する
             println!("サービス '{}' を停止しました", service_name);
         }
@@ -221,15 +243,23 @@ pub fn run(
         ServiceAction::Restart { target } => {
             // target を Component に変換する
             let component = parse_component(target)?;
-            // エンジンを生成してサービス名を取得する
-            let engine = engine_for(component);
+            // エンジンを生成してサービス名を取得する（component は後で matches! で比較するため clone する）
+            let engine = engine_for(component.clone());
             // サービス名を取得する
             let service_name = engine.service_name(config);
-            // まず NSSM でサービスを停止する（失敗しても続行する）
-            let _ = nssm.stop(&service_name);
-            // 次に NSSM でサービスを起動する
-            nssm.start(&service_name)
-                .map_err(|e| anyhow::anyhow!("サービス再起動に失敗しました: {}", e))?;
+            // SQL Server の場合は sc.exe で停止 → 起動する
+            if matches!(component, Component::SqlServer) {
+                // 停止失敗は無視する（既に停止していることがある）
+                let _ = sc_stop(&service_name);
+                // 停止後に sc.exe start でサービスを起動する
+                sc_start(&service_name)?;
+            } else {
+                // それ以外は NSSM で停止 → 起動する
+                let _ = nssm.stop(&service_name);
+                // 次に NSSM でサービスを起動する
+                nssm.start(&service_name)
+                    .map_err(|e| anyhow::anyhow!("サービス再起動に失敗しました: {}", e))?;
+            }
             // 再起動成功メッセージを表示する
             println!("サービス '{}' を再起動しました", service_name);
         }
@@ -238,5 +268,63 @@ pub fn run(
     }
 
     // 正常終了を示す Ok(()) を返す
+    Ok(())
+}
+
+// sc.exe start <service_name> を実行するヘルパー関数（SQL Server 用）
+fn sc_start(service_name: &str) -> anyhow::Result<()> {
+    // sc.exe start を起動する
+    let status = Command::new("sc.exe")
+        // start サブコマンドを指定する
+        .arg("start")
+        // 対象サービス名を指定する
+        .arg(service_name)
+        // 標準出力を捨てる
+        .stdout(Stdio::null())
+        // 標準エラーも捨てる
+        .stderr(Stdio::null())
+        // 実行する
+        .status()
+        .map_err(|e| anyhow::anyhow!("sc.exe start の実行に失敗しました: {}", e))?;
+
+    // 終了コードが 0 でなくても「既に起動中」など正常状態の場合があるため警告レベルに留める
+    if !status.success() {
+        // 詳細なステータスはログに残すだけにする
+        eprintln!(
+            "警告: sc.exe start の終了コードが 0 ではありません（既に起動中の可能性があります）: {:?}",
+            status.code()
+        );
+    }
+
+    // 正常終了として扱う
+    Ok(())
+}
+
+// sc.exe stop <service_name> を実行するヘルパー関数（SQL Server 用）
+fn sc_stop(service_name: &str) -> anyhow::Result<()> {
+    // sc.exe stop を起動する
+    let status = Command::new("sc.exe")
+        // stop サブコマンドを指定する
+        .arg("stop")
+        // 対象サービス名を指定する
+        .arg(service_name)
+        // 標準出力を捨てる
+        .stdout(Stdio::null())
+        // 標準エラーも捨てる
+        .stderr(Stdio::null())
+        // 実行する
+        .status()
+        .map_err(|e| anyhow::anyhow!("sc.exe stop の実行に失敗しました: {}", e))?;
+
+    // 終了コードが 0 でなくても「既に停止中」など正常状態の場合があるため警告レベルに留める
+    if !status.success() {
+        // 詳細なステータスはログに残すだけにする
+        eprintln!(
+            "警告: sc.exe stop の終了コードが 0 ではありません（既に停止済みの可能性があります）: {:?}",
+            status.code()
+        );
+    }
+
+    // 正常終了として扱う
     Ok(())
 }

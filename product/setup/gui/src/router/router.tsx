@@ -38,7 +38,13 @@ export type Route =
    ============================================================ */
 
 function isComponentKind(value: string | undefined): value is ComponentKind {
-  return value === 'verdaccio' || value === 'backstage' || value === 'baget';
+  return (
+    value === 'verdaccio' ||
+    value === 'backstage' ||
+    value === 'baget' ||
+    value === 'postgres' ||
+    value === 'sqlserver'
+  );
 }
 
 // ハッシュ文字列（例: "#/install/verdaccio"）から Route オブジェクトへ変換する

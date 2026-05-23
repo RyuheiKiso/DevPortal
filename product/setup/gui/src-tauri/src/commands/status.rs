@@ -37,9 +37,19 @@ pub fn cmd_status_all() -> serde_json::Value {
     let handle_b = std::thread::spawn(move || engine_for(Component::Backstage).status(&cfg_b));
 
     // BaGet のステータスを別スレッドで取得する（他のスレッドと並行して実行される）
-    let cfg_bg = config;
+    let cfg_bg = config.clone();
     // BaGet のステータス取得スレッドを起動する
     let handle_bg = std::thread::spawn(move || engine_for(Component::BaGet).status(&cfg_bg));
+
+    // PostgreSQL のステータスを別スレッドで取得する（他のスレッドと並行して実行される）
+    let cfg_pg = config.clone();
+    // PostgreSQL のステータス取得スレッドを起動する
+    let handle_pg = std::thread::spawn(move || engine_for(Component::Postgres).status(&cfg_pg));
+
+    // SQL Server のステータスを別スレッドで取得する（他のスレッドと並行して実行される）
+    let cfg_sql = config;
+    // SQL Server のステータス取得スレッドを起動する
+    let handle_sql = std::thread::spawn(move || engine_for(Component::SqlServer).status(&cfg_sql));
 
     // 全スレッドの完了を待ち、結果を回収する
     // join() のパニック（thread panic）は Err として扱い、エラー JSON を返す
@@ -57,6 +67,18 @@ pub fn cmd_status_all() -> serde_json::Value {
     let result_bg = handle_bg.join().unwrap_or_else(|_| {
         Err(shared::error::SetupError::Other(
             "BaGet スレッドがパニックしました".into(),
+        ))
+    });
+    // PostgreSQL スレッドの結果を回収する
+    let result_pg = handle_pg.join().unwrap_or_else(|_| {
+        Err(shared::error::SetupError::Other(
+            "PostgreSQL スレッドがパニックしました".into(),
+        ))
+    });
+    // SQL Server スレッドの結果を回収する
+    let result_sql = handle_sql.join().unwrap_or_else(|_| {
+        Err(shared::error::SetupError::Other(
+            "SQL Server スレッドがパニックしました".into(),
         ))
     });
 
@@ -89,6 +111,22 @@ pub fn cmd_status_all() -> serde_json::Value {
         Ok(s) => statuses.push(s),
         // 取得失敗の場合はエラー JSON を返す
         Err(e) => return serde_json::json!({ "error": format!("BaGet ステータス取得失敗: {}", e) }),
+    }
+
+    // PostgreSQL の結果を処理する
+    match result_pg {
+        // 取得成功の場合はベクタに追加する
+        Ok(s) => statuses.push(s),
+        // 取得失敗の場合はエラー JSON を返す
+        Err(e) => return serde_json::json!({ "error": format!("PostgreSQL ステータス取得失敗: {}", e) }),
+    }
+
+    // SQL Server の結果を処理する
+    match result_sql {
+        // 取得成功の場合はベクタに追加する
+        Ok(s) => statuses.push(s),
+        // 取得失敗の場合はエラー JSON を返す
+        Err(e) => return serde_json::json!({ "error": format!("SQL Server ステータス取得失敗: {}", e) }),
     }
 
     // 全コンポーネントのステータスを JSON 配列に変換して返す
