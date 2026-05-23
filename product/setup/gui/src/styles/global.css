@@ -1,0 +1,179 @@
+/* DevPortal Setup GUI — グローバルスタイル */
+/* tokens.css で定義した CSS 変数を使って、アプリ全体の基礎スタイルを定義する */
+
+/* ============================================================
+   CSS リセット
+   ============================================================ */
+
+/* 全要素のボックスサイズをボーダーボックスに統一する */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+/* HTML・body・root 要素のデフォルトマージン・パディングを除去する */
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  /* ウィンドウ全体の高さを占有させる */
+  height: 100%;
+}
+
+/* ============================================================
+   ベーススタイル
+   ============================================================ */
+
+/* 本文全体のフォント・背景色・テキスト色・行高を設定する */
+body {
+  /* トークンで定義したサンセリフフォントファミリーを適用する */
+  font-family: var(--font-sans);
+  /* トークンのベース背景色（ライト/ダーク自動適用）を適用する */
+  background-color: var(--bg);
+  /* トークンの主要テキスト色を適用する */
+  color: var(--text);
+  /* ベースフォントサイズ */
+  font-size: var(--fs-body);
+  /* 読みやすい行高に設定する */
+  line-height: 1.6;
+  /* macOS/Retina 環境で文字を滑らかに表示するアンチエイリアスを有効化する */
+  -webkit-font-smoothing: antialiased;
+  /* テーマ切り替え時に背景色とテキスト色を滑らかにトランジションさせる */
+  transition:
+    background-color var(--duration-normal) var(--easing-out),
+    color var(--duration-normal) var(--easing-out);
+}
+
+/* ボタンのフォントを親要素から継承させる（ブラウザのデフォルト上書きを防ぐ） */
+button {
+  font-family: inherit;
+}
+
+/* フォーム要素のフォントを親要素から継承させる */
+input, select, textarea {
+  font-family: inherit;
+}
+
+/* テーブルのセル間に二重罫線が生じないよう折りたたむ */
+table {
+  border-collapse: collapse;
+  /* テーブル幅をコンテナ幅に合わせる */
+  width: 100%;
+}
+
+/* code・pre 要素に等幅フォントを適用する */
+code, pre {
+  /* トークンで定義した等幅フォントファミリーを適用する */
+  font-family: var(--font-mono);
+  /* 等幅テキストのフォントサイズ */
+  font-size: var(--fs-mono);
+}
+
+/* ============================================================
+   フォーカスリング（アクセシビリティ）
+   ============================================================ */
+
+/* Tab キーや keyboard ナビゲーションでフォーカスした要素にのみアウトラインを表示する */
+:focus-visible {
+  /* アクセントカラーで 2px の視認しやすいアウトラインを表示する */
+  outline: 2px solid var(--accent);
+  /* アウトラインと要素の間に隙間を設けて重ならないようにする */
+  outline-offset: 2px;
+}
+
+/* マウスクリックによるフォーカスではアウトラインを非表示にする */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ============================================================
+   スクロールバー（WebKit / Blink ブラウザ用カスタマイズ）
+   ============================================================ */
+
+/* スクロールバー本体の幅を目立たない細さに設定する */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+/* スクロールバーのトラック（溝）は透明にして邪魔にならないようにする */
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* スクロールバーのサム（ハンドル）にトークンの罫線色を適用する */
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  /* 丸みを付けて視覚的に柔らかく見せる */
+  border-radius: var(--radius-full);
+}
+
+/* ホバー時にサムを少し濃くして操作感を高める */
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-subtle);
+}
+
+/* ============================================================
+   キーフレームアニメーション
+   ============================================================ */
+
+/* Stepper のスピナーや Loader アイコンに使う無限回転アニメーション */
+@keyframes spin {
+  /* 開始時点: 回転角 0 度 */
+  from { transform: rotate(0deg); }
+  /* 終了時点: 1 回転（360 度）完了 */
+  to   { transform: rotate(360deg); }
+}
+
+/* 要素を透明から不透明にフェードインするアニメーション */
+@keyframes fadeIn {
+  /* 開始時点: 完全に透明 */
+  from { opacity: 0; }
+  /* 終了時点: 完全に不透明 */
+  to   { opacity: 1; }
+}
+
+/* 要素を上から下にスライドしながら表示するアニメーション */
+@keyframes slideDown {
+  /* 開始時点: 上方向に 4px ずれた透明状態 */
+  from { opacity: 0; transform: translateY(-4px); }
+  /* 終了時点: 元の位置で不透明 */
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================
+   グローバルユーティリティクラス
+   ============================================================ */
+
+/* 大文字ラベル（CAPS スタイル）の基底スタイル（セクションヘッダー等に使用） */
+.label-caps {
+  /* 小さなフォントサイズ */
+  font-size: var(--fs-label);
+  /* 太字で視認性を高める */
+  font-weight: 600;
+  /* 文字間隔を広げてキャップス感を出す */
+  letter-spacing: 0.06em;
+  /* 大文字に変換する */
+  text-transform: uppercase;
+  /* 補助的なテキスト色で控えめに表示する */
+  color: var(--text-subtle);
+}
+
+/* スクリーンリーダー専用テキスト（視覚的には非表示、支援技術には見える） */
+.sr-only {
+  /* 絶対配置でレイアウトに影響させない */
+  position: absolute;
+  /* 1px × 1px で実質非表示にする */
+  width: 1px;
+  height: 1px;
+  /* パディングを除去する */
+  padding: 0;
+  /* マイナスマージンで完全に画面外へ出す */
+  margin: -1px;
+  /* はみ出しを隠す */
+  overflow: hidden;
+  /* クリッピング領域を点にする */
+  clip: rect(0, 0, 0, 0);
+  /* テキストの折り返しを防ぐ */
+  white-space: nowrap;
+  /* 枠線を消す */
+  border-width: 0;
+}

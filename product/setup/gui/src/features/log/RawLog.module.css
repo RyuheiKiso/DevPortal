@@ -1,0 +1,83 @@
+/* RawLog コンポーネントの CSS Modules スタイル定義 */
+/* SetupEvent を等幅フォントで時系列表示するログビューアのスタイルを定義する */
+
+/* ログ全体のコンテナ */
+.log {
+  /* 罫線で輪郭を囲む */
+  border: 1px solid var(--border);
+  /* 角丸を設定する */
+  border-radius: var(--radius-md);
+  /* 内側の余白を設ける */
+  padding: var(--space-2);
+  /* 最大高さを設けて長いログをスクロール可能にする */
+  max-height: 240px;
+  /* 縦スクロールを有効にする */
+  overflow-y: auto;
+  /* 面色 2 の背景色を使用する */
+  background: var(--surface-2);
+  /* 等幅フォントを使用する */
+  font-family: var(--font-mono);
+  /* 等幅フォントサイズを使用する */
+  font-size: var(--fs-mono);
+}
+
+/* ログが空の場合に表示するプレースホルダーテキスト */
+.empty {
+  /* 弱いテキスト色で控えめに表示する */
+  color: var(--text-subtle);
+}
+
+/* ログの 1 行のスタイル */
+.line {
+  /* 上下に少し余白を設ける */
+  padding: 2px 0;
+  /* 行間に薄い罫線を引く */
+  border-bottom: 1px solid var(--border);
+  /* 補助テキスト色をデフォルトにする */
+  color: var(--text-muted);
+  /* 長い行は折り返す */
+  word-break: break-all;
+}
+
+/* 最後の行は罫線を除去する */
+.line:last-child {
+  border-bottom: none;
+}
+
+/* ステップ開始行（アクセントカラー + 太字） */
+.lineAccent {
+  /* アクセントカラーを適用する */
+  color: var(--accent);
+  /* 太字でセクション区切りを強調する */
+  font-weight: 600;
+}
+
+/* 正常完了行（成功色 + 太字） */
+.lineSuccess {
+  /* 成功色を適用する */
+  color: var(--success);
+  /* 太字で成功を強調する */
+  font-weight: 600;
+}
+
+/* 失敗行（危険色 + 太字） */
+.lineDanger {
+  /* 危険色を適用する */
+  color: var(--danger);
+  /* 太字でエラーを強調する */
+  font-weight: 600;
+}
+
+/* 警告行（警告色） */
+.lineWarn {
+  /* 警告色を適用する */
+  color: var(--warning);
+}
+
+/* stdout/stderr 行（控えめな表示） */
+.lineMuted {
+  /* 弱いテキスト色で出力を控えめに表示する */
+  color: var(--text-subtle);
+  /* 少し小さいフォントサイズにする */
+  font-size: 11px;
+}

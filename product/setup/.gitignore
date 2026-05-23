@@ -1,0 +1,6 @@
+# Cargo / Rust のビルド成果物
+target/
+
+# OS のメタデータ
+.DS_Store
+Thumbs.db

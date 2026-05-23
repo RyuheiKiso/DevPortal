@@ -1,0 +1,271 @@
+/* Settings ページの CSS Modules スタイル定義 */
+/* General / Verdaccio / Backstage / BaGet / Appearance セクションのレイアウトを定義する */
+
+/* ページ全体のコンテナ */
+.page {
+  /* 内側余白を設ける */
+  padding: var(--space-7);
+  /* 縦方向フレックスで各セクションを並べる */
+  display: flex;
+  flex-direction: column;
+  /* セクション間の間隔 */
+  gap: var(--space-7);
+  /* 最大幅を制限してコンテンツを読みやすくする */
+  max-width: 640px;
+  /* 最小高さをビューポートいっぱいにする */
+  min-height: 100%;
+}
+
+/* ページヘッダー（タイトル + 保存/破棄ボタン）*/
+.pageHeader {
+  /* 水平フレックスでタイトルとボタン群を両端に配置する */
+  display: flex;
+  /* 縦方向の下端揃え */
+  align-items: flex-end;
+  /* 両端に配置する */
+  justify-content: space-between;
+  /* 間隔 */
+  gap: var(--space-4);
+}
+
+/* ページタイトルの見出し */
+.pageTitle {
+  /* 表示用フォントサイズを使用する */
+  font-size: var(--fs-display);
+  /* 太字 */
+  font-weight: 700;
+  /* 主要テキスト色 */
+  color: var(--text);
+  /* デフォルトのマージンを除去する */
+  margin: 0 0 var(--space-1);
+  /* 文字間を少し詰める */
+  letter-spacing: -0.02em;
+}
+
+/* ページ説明文 */
+.pageDesc {
+  /* 本文フォントサイズを使用する */
+  font-size: var(--fs-body);
+  /* 補助テキスト色 */
+  color: var(--text-muted);
+  /* デフォルトのマージンを除去する */
+  margin: 0;
+}
+
+/* ヘッダー右側のアクションボタン群 */
+.headerActions {
+  /* 水平フレックスでボタンを横並びにする */
+  display: flex;
+  /* ボタン間の間隔 */
+  gap: var(--space-2);
+  /* 縮小されないようにする */
+  flex-shrink: 0;
+}
+
+/* ─── セクション共通スタイル ─── */
+
+/* 各設定セクションのコンテナ */
+.section {
+  /* 縦方向フレックスでフォーム行を並べる */
+  display: flex;
+  flex-direction: column;
+  /* セクション内要素の間隔 */
+  gap: var(--space-4);
+  /* 罫線でセクションを区切る */
+  border-top: 1px solid var(--border);
+  /* セクションの上の余白（罫線とコンテンツの間）*/
+  padding-top: var(--space-5);
+}
+
+/* セクションの CAPS ラベル */
+.sectionLabel {
+  /* ラベルフォントサイズを使用する */
+  font-size: var(--fs-label);
+  /* 大文字で表示する */
+  text-transform: uppercase;
+  /* 文字間隔を広げてキャップス感を出す */
+  letter-spacing: 0.06em;
+  /* 太字 */
+  font-weight: 600;
+  /* 弱いテキスト色で控えめに表示する */
+  color: var(--text-subtle);
+}
+
+/* ─── フォーム行レイアウト ─── */
+
+/* 1 つの設定項目の行（ラベル + コントロール）*/
+.formRow {
+  /* CSS Grid で 2 列レイアウトにする（ラベル | コントロール）*/
+  display: grid;
+  /* ラベル列は固定幅、コントロール列は残りを使う */
+  grid-template-columns: 160px 1fr;
+  /* 縦方向の開始揃え */
+  align-items: start;
+  /* ラベルとコントロールの間隔 */
+  gap: var(--space-4);
+}
+
+/* フォームラベルのスタイル */
+.formLabel {
+  /* 小さいフォントサイズを使用する */
+  font-size: var(--fs-body);
+  /* やや太めにして視認性を高める */
+  font-weight: 500;
+  /* 主要テキスト色を使用する */
+  color: var(--text);
+  /* 上に少し余白を設けてテキスト入力の高さに合わせる */
+  padding-top: var(--space-2);
+}
+
+/* フォームコントロール列のコンテナ */
+.formControl {
+  /* 縦方向フレックスでコントロールとエラーを並べる */
+  display: flex;
+  flex-direction: column;
+  /* コントロールとエラーの間隔 */
+  gap: var(--space-1);
+}
+
+/* ─── 入力フィールド ─── */
+
+/* テキスト・数値入力フィールドの基本スタイル */
+.input {
+  /* 幅をコントロール列全体に広げる */
+  width: 100%;
+  /* 等幅フォントを使用する */
+  font-family: var(--font-mono);
+  /* 等幅フォントサイズ */
+  font-size: var(--fs-mono);
+  /* 主要テキスト色 */
+  color: var(--text);
+  /* 面色の背景 */
+  background: var(--surface);
+  /* 罫線で輪郭を付ける */
+  border: 1px solid var(--border);
+  /* 角丸を設定する */
+  border-radius: var(--radius-md);
+  /* 内側余白を設ける */
+  padding: var(--space-2) var(--space-3);
+  /* ボックスサイズを border-box にする */
+  box-sizing: border-box;
+  /* フォーカス時のトランジション */
+  transition: border-color var(--duration-fast) var(--easing-out);
+}
+
+/* 入力フィールドのフォーカス時スタイル */
+.input:focus {
+  /* フォーカスリングは global.css の :focus-visible で管理する */
+  /* 罫線を強調する */
+  border-color: var(--border-strong);
+  /* アウトラインはブラウザのデフォルトを使用する */
+  outline: none;
+}
+
+/* バリデーションエラーがある入力フィールドのスタイル */
+.inputError {
+  /* 危険色の罫線でエラーを示す */
+  border-color: var(--danger);
+}
+
+/* 幅を狭くした入力フィールド（ポート・バージョン等の短い値用）*/
+.inputNarrow {
+  /* 固定幅に制限する */
+  max-width: 160px;
+}
+
+/* バリデーションエラーメッセージのスタイル */
+.errorMsg {
+  /* 小さいフォントサイズを使用する */
+  font-size: var(--fs-small);
+  /* 危険色でエラーを強調する */
+  color: var(--danger);
+}
+
+/* ─── チェックボックス ─── */
+
+/* チェックボックスとラベルを横並びにする行 */
+.checkboxRow {
+  /* 水平フレックスでチェックボックスとラベルを横並びにする */
+  display: flex;
+  /* 縦方向の中央揃え */
+  align-items: center;
+  /* チェックボックスとラベルの間隔 */
+  gap: var(--space-2);
+  /* カーソルをポインターにする */
+  cursor: pointer;
+  /* 本文フォントサイズを使用する */
+  font-size: var(--fs-body);
+  /* 補助テキスト色 */
+  color: var(--text-muted);
+}
+
+/* チェックボックス本体のスタイル */
+.checkbox {
+  /* チェックボックスのサイズを設定する */
+  width: 16px;
+  height: 16px;
+  /* アクセントカラーを適用する */
+  accent-color: var(--accent);
+  /* カーソルをポインターにする */
+  cursor: pointer;
+  /* 縮小されないようにする */
+  flex-shrink: 0;
+}
+
+/* ─── パス表示 ─── */
+
+/* インストール先パスとボタンを横並びにする行 */
+.pathRow {
+  /* 水平フレックスでパスとボタンを横並びにする */
+  display: flex;
+  /* 縦方向の中央揃え */
+  align-items: center;
+  /* パスとボタンの間隔 */
+  gap: var(--space-2);
+  /* 罫線でカード風に囲む */
+  border: 1px solid var(--border);
+  /* 角丸を設定する */
+  border-radius: var(--radius-md);
+  /* 内側余白を設ける */
+  padding: var(--space-2) var(--space-3);
+  /* 面色の背景 */
+  background: var(--surface);
+}
+
+/* パスが設定されている場合のテキストスタイル */
+.pathText {
+  /* 残りの幅を全て使う */
+  flex: 1;
+  /* 等幅フォントでパスを表示する */
+  font-family: var(--font-mono);
+  /* 等幅フォントサイズ */
+  font-size: var(--fs-mono);
+  /* 主要テキスト色 */
+  color: var(--text);
+  /* 長いパスは切り詰める */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* パスが未設定の場合のプレースホルダーテキスト */
+.pathPlaceholder {
+  /* 残りの幅を全て使う */
+  flex: 1;
+  /* 等幅フォントでパスを表示する */
+  font-family: var(--font-mono);
+  /* 等幅フォントサイズ */
+  font-size: var(--fs-mono);
+  /* 弱いテキスト色で控えめに表示する */
+  color: var(--text-subtle);
+}
+
+/* ─── ヘルプテキスト ─── */
+
+/* 設定項目の補足説明テキスト */
+.helpText {
+  /* 小さいフォントサイズを使用する */
+  font-size: var(--fs-small);
+  /* 弱いテキスト色で控えめに表示する */
+  color: var(--text-subtle);
+}
