@@ -104,7 +104,7 @@ fn ensure_markers_frontend(source: &str) -> Result<String, MarkerError> {
             .enumerate()
             .filter(|(_, l)| l.trim_start().starts_with("import "))
             .map(|(i, _)| i)
-            .last();
+            .next_back();
 
         // import 文が1行も見つからない場合はエラーを返す
         let insert_after = last_import_idx.ok_or_else(|| {

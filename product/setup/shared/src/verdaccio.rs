@@ -79,8 +79,7 @@ log:
 // Verdaccio に初期ユーザー (admin/admin) を投入するための htpasswd シード
 // bcrypt ハッシュは infra/Verdaccio/storage/htpasswd に格納し、ビルド時に同梱する
 // 社内閉鎖環境向けの仮パスワードであり、運用前にユーザー側で変更する前提
-const VERDACCIO_HTPASSWD_SEED: &str =
-    include_str!("../../../../infra/Verdaccio/storage/htpasswd");
+const VERDACCIO_HTPASSWD_SEED: &str = include_str!("../../../../infra/Verdaccio/storage/htpasswd");
 
 // VerdaccioEngine: Verdaccio npm レジストリの SetupEngine 実装構造体
 // フィールドを持たないユニット構造体として定義する

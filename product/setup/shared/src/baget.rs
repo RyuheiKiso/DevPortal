@@ -20,7 +20,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 // ファイルシステムパスを扱うために PathBuf を使用する
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // 独自エラー型を参照するために使用する
 use crate::error::SetupError;
@@ -120,7 +120,7 @@ impl BaGetEngine {
     // BaGet.runtimeconfig.json に rollForward: Major を追記するヘルパーメソッド
     // BaGet 0.4.0-preview2 は .NET Core 3.1 ターゲットだが、
     // 実環境では .NET 8 以降のみが利用可能な場合があるため Major ロールフォワードを有効にする
-    fn patch_runtimeconfig(baget_app_dir: &PathBuf) -> Result<(), SetupError> {
+    fn patch_runtimeconfig(baget_app_dir: &Path) -> Result<(), SetupError> {
         // runtimeconfig.json のパスを構築する
         let config_path = baget_app_dir.join("BaGet.runtimeconfig.json");
         // ファイルが存在しない場合はスキップする（旧バージョンとの互換性）
@@ -131,7 +131,9 @@ impl BaGetEngine {
         let content = fs::read_to_string(&config_path).map_err(SetupError::Io)?;
         // JSON としてパースする
         let mut json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
-            SetupError::Other(format!("BaGet.runtimeconfig.json のパースに失敗しました: {e}"))
+            SetupError::Other(format!(
+                "BaGet.runtimeconfig.json のパースに失敗しました: {e}"
+            ))
         })?;
         // runtimeOptions.rollForward = "Major" を追加する（既存値は上書きする）
         if let Some(opts) = json
@@ -302,7 +304,7 @@ impl BaGetEngine {
                 // 0〜90% の範囲でダウンロード進捗を表示する
                 let dl_percent = (downloaded_bytes as f64 / total as f64 * 90.0) as u8;
                 // 定期的に進捗を通知する（全バイト更新より間引く）
-                if downloaded_bytes % (DOWNLOAD_BUF_SIZE as u64 * 32) == 0 {
+                if downloaded_bytes.is_multiple_of(DOWNLOAD_BUF_SIZE as u64 * 32) {
                     // 進捗パーセントを通知する
                     reporter.progress("baget_fetch", dl_percent, None);
                 }
@@ -319,7 +321,7 @@ impl BaGetEngine {
     // ZIP ファイルを展開して全エントリを dest_dir に書き出すヘルパーメソッド
     // zip_path: 展開元の ZIP ファイルパス
     // dest_dir: 展開先ディレクトリ
-    fn extract_zip(zip_path: &PathBuf, dest_dir: &PathBuf) -> Result<(), SetupError> {
+    fn extract_zip(zip_path: &Path, dest_dir: &Path) -> Result<(), SetupError> {
         // zip クレートで ZIP アーカイブを開く
         let zip_file = std::fs::File::open(zip_path).map_err(SetupError::Io)?;
 

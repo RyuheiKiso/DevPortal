@@ -73,69 +73,67 @@ pub fn run(
     no_elevate: bool,
 ) -> anyhow::Result<()> {
     // logs コマンドのみ管理者権限不要のため、操作種別を先に確認する
-    match &args.action {
+    if let ServiceAction::Logs { target, tail } = &args.action {
         // logs コマンドの場合はログファイルを読み込んで表示する
-        ServiceAction::Logs { target, tail } => {
-            // target を Component に変換する
-            let component = parse_component(target)?;
+        // target を Component に変換する
+        let component = parse_component(target)?;
 
-            // コンポーネントに応じてログファイルのパスを決定する
-            let log_file = match component {
-                // Verdaccio の場合は verdaccio の logs/stdout.log を参照する
-                Component::Verdaccio => paths::verdaccio_logs_dir(config).join("stdout.log"),
-                // Backstage の場合は backstage の logs/stdout.log を参照する
-                Component::Backstage => paths::backstage_logs_dir(config).join("stdout.log"),
-                // BaGet の場合は baget の logs/stdout.log を参照する
-                Component::BaGet => paths::baget_logs_dir(config).join("stdout.log"),
-                // PostgreSQL は postgres-stdout.log にリダイレクトしている
-                Component::Postgres => paths::postgres_logs_dir(config).join("postgres-stdout.log"),
-                // SQL Server は ERRORLOG（拡張子なし）を SQL Server 自身が data_dir/Log に出力する
-                Component::SqlServer => paths::sqlserver_data_dir(config).join("Log").join("ERRORLOG"),
-            };
+        // コンポーネントに応じてログファイルのパスを決定する
+        let log_file = match component {
+            // Verdaccio の場合は verdaccio の logs/stdout.log を参照する
+            Component::Verdaccio => paths::verdaccio_logs_dir(config).join("stdout.log"),
+            // Backstage の場合は backstage の logs/stdout.log を参照する
+            Component::Backstage => paths::backstage_logs_dir(config).join("stdout.log"),
+            // BaGet の場合は baget の logs/stdout.log を参照する
+            Component::BaGet => paths::baget_logs_dir(config).join("stdout.log"),
+            // PostgreSQL は postgres-stdout.log にリダイレクトしている
+            Component::Postgres => paths::postgres_logs_dir(config).join("postgres-stdout.log"),
+            // SQL Server は ERRORLOG（拡張子なし）を SQL Server 自身が data_dir/Log に出力する
+            Component::SqlServer => paths::sqlserver_data_dir(config)
+                .join("Log")
+                .join("ERRORLOG"),
+        };
 
-            // ログファイルが存在するか確認する
-            if !log_file.exists() {
-                // ログファイルが存在しない場合はエラーメッセージを表示して終了する
-                println!("ログファイルが見つかりません: {}", log_file.display());
-                // 正常終了する（ログがないのはエラーではない）
-                return Ok(());
-            }
-
-            // ログファイルを開く
-            let file = fs::File::open(&log_file)
-                .map_err(|e| anyhow::anyhow!("ログファイルを開けませんでした: {}", e))?;
-
-            // バッファリングしてファイルを行単位で読み込む
-            let reader = BufReader::new(file);
-
-            // 全行をベクタに収集する
-            let lines: Vec<String> = reader
-                .lines()
-                // 読み込みエラーをスキップする
-                .filter_map(|l| l.ok())
-                // 全行をベクタに収集する
-                .collect();
-
-            // 末尾から tail 行分を取得する
-            let start = if lines.len() > *tail {
-                // tail 行より多い場合は末尾 tail 行のみ表示する
-                lines.len() - tail
-            } else {
-                // tail 行以下の場合は全行表示する
-                0
-            };
-
-            // 対象行を標準出力に表示する
-            for line in &lines[start..] {
-                // 各行を表示する
-                println!("{}", line);
-            }
-
-            // logs コマンドは管理者権限不要のため昇格チェックをスキップして終了する
+        // ログファイルが存在するか確認する
+        if !log_file.exists() {
+            // ログファイルが存在しない場合はエラーメッセージを表示して終了する
+            println!("ログファイルが見つかりません: {}", log_file.display());
+            // 正常終了する（ログがないのはエラーではない）
             return Ok(());
         }
-        // その他のコマンド（start/stop/restart）は管理者権限チェックを行う
-        _ => {}
+
+        // ログファイルを開く
+        let file = fs::File::open(&log_file)
+            .map_err(|e| anyhow::anyhow!("ログファイルを開けませんでした: {}", e))?;
+
+        // バッファリングしてファイルを行単位で読み込む
+        let reader = BufReader::new(file);
+
+        // 全行をベクタに収集する
+        let lines: Vec<String> = reader
+            .lines()
+            // 読み込みエラーをスキップする
+            .map_while(Result::ok)
+            // 全行をベクタに収集する
+            .collect();
+
+        // 末尾から tail 行分を取得する
+        let start = if lines.len() > *tail {
+            // tail 行より多い場合は末尾 tail 行のみ表示する
+            lines.len() - tail
+        } else {
+            // tail 行以下の場合は全行表示する
+            0
+        };
+
+        // 対象行を標準出力に表示する
+        for line in &lines[start..] {
+            // 各行を表示する
+            println!("{}", line);
+        }
+
+        // logs コマンドは管理者権限不要のため昇格チェックをスキップして終了する
+        return Ok(());
     }
 
     // start/stop/restart コマンドは管理者権限が必要なため確認する

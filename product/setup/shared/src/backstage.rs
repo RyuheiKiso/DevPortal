@@ -329,7 +329,7 @@ impl SetupEngine for BackstageEngine {
                 // 各行を収集するベクタ
                 let mut lines = Vec::new();
                 // 各行を読み取って収集する
-                for line in reader.lines().flatten() {
+                for line in reader.lines().map_while(Result::ok) {
                     // 行をベクタに追加する
                     lines.push(line);
                 }
@@ -350,7 +350,7 @@ impl SetupEngine for BackstageEngine {
             // stdout のリーダーを作成する
             let reader = std::io::BufReader::new(stdout);
             // 各行を読み取って reporter に送信する
-            for line in reader.lines().flatten() {
+            for line in reader.lines().map_while(Result::ok) {
                 // stdout の行を reporter に送信する
                 reporter.stdout_line("create_app", &line);
             }

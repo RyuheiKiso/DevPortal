@@ -11,23 +11,15 @@ use std::io::{Read, Write};
 use crate::error::SetupError;
 
 // BackstageMode: Backstage の起動モードを表す列挙型
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 // JSON/TOML シリアライズ時に snake_case のキーを使用する
 #[serde(rename_all = "snake_case")]
 pub enum BackstageMode {
     // `yarn start` で起動するホットリロード開発モード
+    #[default]
     Dev,
     // `yarn build && yarn start` で起動するプロダクションビルドモード
     Build,
-}
-
-// BackstageMode のデフォルト値を Dev に設定する
-impl Default for BackstageMode {
-    // デフォルト値として Dev バリアントを返す
-    fn default() -> Self {
-        // 開発モードをデフォルトとして使用する
-        BackstageMode::Dev
-    }
 }
 
 // VerdaccioConfig: Verdaccio 固有の設定をまとめた構造体

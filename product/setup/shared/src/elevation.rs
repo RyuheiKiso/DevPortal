@@ -14,59 +14,59 @@ mod windows_impl {
     use std::os::windows::ffi::OsStrExt;
 
     // Windows の BOOL 型（i32）を使用する
-    type BOOL = i32;
+    type Bool = i32;
     // Windows の HANDLE 型（void ポインタ）を使用する
-    type HANDLE = *mut std::ffi::c_void;
+    type Handle = *mut std::ffi::c_void;
     // Windows の DWORD 型（u32）を使用する
-    type DWORD = u32;
+    type Dword = u32;
 
     // TOKEN_ELEVATION 構造体（TokenIsElevated フィールドを持つ）
     #[repr(C)]
     struct TokenElevation {
         // 0 以外のとき昇格済みであることを示す
-        token_is_elevated: DWORD,
+        token_is_elevated: Dword,
     }
 
     // TOKEN_INFORMATION_CLASS の TokenElevation 値（定数として定義）
     const TOKEN_ELEVATION_CLASS: u32 = 20;
 
     // TOKEN_QUERY アクセス権（GetTokenInformation に必要）
-    const TOKEN_QUERY: DWORD = 0x0008;
+    const TOKEN_QUERY: Dword = 0x0008;
 
     // GetCurrentProcess を外部関数として宣言する
     extern "system" {
         // 現在のプロセスの疑似ハンドルを返す関数
-        fn GetCurrentProcess() -> HANDLE;
+        fn GetCurrentProcess() -> Handle;
         // プロセスのアクセストークンを開く関数
         fn OpenProcessToken(
             // 対象プロセスのハンドル
-            process_handle: HANDLE,
+            process_handle: Handle,
             // 要求するアクセス権
-            desired_access: DWORD,
+            desired_access: Dword,
             // トークンハンドルの出力先ポインタ
-            token_handle: *mut HANDLE,
-        ) -> BOOL;
+            token_handle: *mut Handle,
+        ) -> Bool;
         // トークンの情報を取得する関数
         fn GetTokenInformation(
             // トークンハンドル
-            token_handle: HANDLE,
+            token_handle: Handle,
             // 取得する情報のクラス
             token_information_class: u32,
             // 情報を受け取るバッファ
             token_information: *mut std::ffi::c_void,
             // バッファのサイズ（バイト）
-            token_information_length: DWORD,
+            token_information_length: Dword,
             // 実際に書き込まれたバイト数の出力先
-            return_length: *mut DWORD,
-        ) -> BOOL;
+            return_length: *mut Dword,
+        ) -> Bool;
         // ハンドルを閉じる関数
-        fn CloseHandle(object: HANDLE) -> BOOL;
+        fn CloseHandle(object: Handle) -> Bool;
     }
 
     // 現在のプロセスが管理者権限（Elevated）で動作しているかを返す Windows 実装
     pub fn is_elevated_impl() -> bool {
         // トークンハンドルを格納する変数（null で初期化）
-        let mut token_handle: HANDLE = null_mut();
+        let mut token_handle: Handle = null_mut();
 
         // 現在のプロセスのトークンを TOKEN_QUERY 権限で開く
         let open_result = unsafe {
@@ -93,7 +93,7 @@ mod windows_impl {
             token_is_elevated: 0,
         };
         // GetTokenInformation が実際に書き込んだバイト数を格納する変数
-        let mut return_length: DWORD = 0;
+        let mut return_length: Dword = 0;
 
         // GetTokenInformation で昇格情報を取得する
         let info_result = unsafe {
@@ -106,7 +106,7 @@ mod windows_impl {
                 // elevation 構造体のポインタをキャストして渡す
                 &mut elevation as *mut TokenElevation as *mut std::ffi::c_void,
                 // 構造体のサイズを渡す
-                std::mem::size_of::<TokenElevation>() as DWORD,
+                std::mem::size_of::<TokenElevation>() as Dword,
                 // 実際の書き込みサイズの出力先を渡す
                 &mut return_length,
             )
@@ -125,9 +125,9 @@ mod windows_impl {
     // 自身のプロセスを runas（管理者権限）で再起動する Windows 実装
     pub fn run_self_elevated_impl(args: &[&str]) -> Result<(), crate::error::SetupError> {
         // ShellExecuteW を使うために必要な型を定義する
-        type HWND = *mut std::ffi::c_void;
+        type Hwnd = *mut std::ffi::c_void;
         // HINSTANCE は void ポインタとして扱う
-        type HINSTANCE = *mut std::ffi::c_void;
+        type Hinstance = *mut std::ffi::c_void;
         // SW_SHOWDEFAULT ウィンドウ表示フラグの定数値
         const SW_SHOWDEFAULT: i32 = 10;
 
@@ -136,7 +136,7 @@ mod windows_impl {
             // ShellExecuteW: 指定した動詞でファイルを実行する関数
             fn ShellExecuteW(
                 // 親ウィンドウハンドル（NULL で可）
-                hwnd: HWND,
+                hwnd: Hwnd,
                 // 操作動詞の Unicode 文字列ポインタ
                 lp_operation: *const u16,
                 // 実行ファイルの Unicode 文字列ポインタ
@@ -147,7 +147,7 @@ mod windows_impl {
                 lp_directory: *const u16,
                 // ウィンドウ表示フラグ
                 n_show_cmd: i32,
-            ) -> HINSTANCE;
+            ) -> Hinstance;
         }
 
         // 現在の実行ファイルのパスを取得する

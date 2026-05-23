@@ -2,7 +2,7 @@
 // SetupEvent と Reporter を使って進捗を GUI/CLI に通知する
 
 // ファイルシステムパスを扱うために PathBuf を使用する
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // セットアップエラー型を参照するために使用する
 use crate::error::SetupError;
@@ -216,7 +216,7 @@ pub fn install(
     // ステップ 2: yarn workspace add でパッケージを追加する
     reporter.step_start(
         "yarn_add",
-        &format!(
+        format!(
             "yarn workspace {} add {} を実行しています",
             workspace_target, request.package_name
         ),
@@ -474,7 +474,7 @@ pub fn remove(
     // ステップ 2: yarn workspace remove でパッケージを削除する
     reporter.step_start(
         "yarn_remove",
-        &format!(
+        format!(
             "yarn workspace {} remove {} を実行しています",
             workspace_target, request.package_name
         ),
@@ -572,7 +572,7 @@ pub fn remove(
 }
 
 // プラグイン種別に応じてマーカー操作対象のファイルパスを返すヘルパー関数
-fn get_target_file(app_dir: &PathBuf, kind: &PluginKind) -> PathBuf {
+fn get_target_file(app_dir: &Path, kind: &PluginKind) -> PathBuf {
     // プラグイン種別ごとに対象ファイルのパスを返す
     match kind {
         // フロントエンドプラグインは packages/app/src/App.tsx を対象とする
@@ -671,7 +671,7 @@ fn extract_plugin_basename(package_name: &str) -> String {
     // スコープ部分（@backstage/plugin-等）を取り除く
     let without_scope = if package_name.contains('/') {
         // スラッシュの後の部分を取得する
-        package_name.split('/').last().unwrap_or(package_name)
+        package_name.split('/').next_back().unwrap_or(package_name)
     } else {
         // スコープなしの場合はそのまま使用する
         package_name

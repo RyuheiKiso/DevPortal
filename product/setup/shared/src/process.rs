@@ -72,7 +72,7 @@ pub fn run_streaming(
     }
 
     // コマンドを起動して子プロセスのハンドルを取得する
-    let mut child = cmd.spawn().map_err(|e| SetupError::Io(e))?;
+    let mut child = cmd.spawn().map_err(SetupError::Io)?;
 
     // 子プロセスの stdout を取得する（spawn 後は Some になる）
     let stdout_handle = child.stdout.take();
@@ -82,7 +82,6 @@ pub fn run_streaming(
     // stderr を別スレッドで読み取るためのスレッドを起動する
     let stderr_thread = if let Some(stderr) = stderr_handle {
         // step_id を別スレッドで使えるように String にクローンする
-        let step_id_clone = step_id.to_string();
         // Reporter をスレッドに移動するためにクローンするが Reporter は Clone 非対応のため
         // 代わりに stderr の各行をベクタに収集してメインスレッドで処理する設計にする
         // ここでは stderr を別スレッドで読んでキャッシュし、後でメインに返す
@@ -92,14 +91,9 @@ pub fn run_streaming(
             // stderr の全行を収集するベクタ
             let mut lines: Vec<String> = Vec::new();
             // 各行を順番に読み取る
-            for line_result in reader.lines() {
-                // 読み取り結果を確認する
-                if let Ok(line) = line_result {
-                    // step_id を含む情報として行を収集する
-                    lines.push(line);
-                }
-                // step_id_clone は参照のみで使用（将来の拡張用として保持）
-                let _ = &step_id_clone;
+            for line in reader.lines().map_while(Result::ok) {
+                // step_id を含む情報として行を収集する
+                lines.push(line);
             }
             // 収集した stderr の行リストを返す
             lines
@@ -116,12 +110,9 @@ pub fn run_streaming(
         // stdout のバッファリードを作成する
         let reader = std::io::BufReader::new(stdout);
         // 各行を順番に読み取る
-        for line_result in reader.lines() {
-            // 読み取り結果を確認する
-            if let Ok(line) = line_result {
-                // stdout の 1 行を Reporter 経由でイベントとして送信する
-                reporter.stdout_line(step_id, &line);
-            }
+        for line in reader.lines().map_while(Result::ok) {
+            // stdout の 1 行を Reporter 経由でイベントとして送信する
+            reporter.stdout_line(step_id, &line);
         }
     }
 
@@ -138,7 +129,7 @@ pub fn run_streaming(
     }
 
     // 子プロセスの終了を待って終了ステータスを取得する
-    let status = child.wait().map_err(|e| SetupError::Io(e))?;
+    let status = child.wait().map_err(SetupError::Io)?;
 
     // 終了コードが 0 以外の場合はエラーを返す
     if !status.success() {
@@ -175,7 +166,7 @@ pub fn run_output(mut cmd: Command) -> Result<String, SetupError> {
     }
 
     // コマンドを実行して全出力を一括取得する
-    let output = cmd.output().map_err(|e| SetupError::Io(e))?;
+    let output = cmd.output().map_err(SetupError::Io)?;
 
     // 終了コードが 0 以外の場合はエラーを返す
     if !output.status.success() {

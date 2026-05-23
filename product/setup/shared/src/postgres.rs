@@ -114,9 +114,7 @@ impl PostgresEngine {
         // タイムアウト設定付き AgentBuilder を構築する
         let mut builder = ureq::AgentBuilder::new()
             // DNS 解決を別スレッドで 10 秒以内に打ち切るカスタムリゾルバを設定する
-            .resolver(
-                Self::resolve_with_timeout as fn(&str) -> std::io::Result<Vec<SocketAddr>>,
-            )
+            .resolver(Self::resolve_with_timeout as fn(&str) -> std::io::Result<Vec<SocketAddr>>)
             // TCP 接続確立が 15 秒以内に完了しない場合にエラーとする
             .timeout_connect(Duration::from_secs(15))
             // 各 read 呼び出しが 60 秒以内に応答しない場合にエラーとする
@@ -192,7 +190,7 @@ impl PostgresEngine {
                 // 0〜90% の範囲でダウンロード進捗を表示する
                 let dl_percent = (downloaded_bytes as f64 / total as f64 * 90.0) as u8;
                 // 定期的に進捗を通知する（全バイト更新より間引く）
-                if downloaded_bytes % (DOWNLOAD_BUF_SIZE as u64 * 32) == 0 {
+                if downloaded_bytes.is_multiple_of(DOWNLOAD_BUF_SIZE as u64 * 32) {
                     // 進捗パーセントを通知する
                     reporter.progress("pg_fetch", dl_percent, None);
                 }
@@ -291,9 +289,7 @@ impl PostgresEngine {
 
         // パスワードを一時ファイルに書き込む（initdb は改行を含む pwfile を期待する）
         fs::write(&tmp_pwfile, format!("{}\n", password)).map_err(|e| {
-            SetupError::Other(format!(
-                "一時パスワードファイルの作成に失敗しました: {e}"
-            ))
+            SetupError::Other(format!("一時パスワードファイルの作成に失敗しました: {e}"))
         })?;
 
         // initdb を実行する（失敗しても必ず一時ファイルを削除する）
@@ -320,9 +316,7 @@ impl PostgresEngine {
                 .stderr(std::process::Stdio::piped())
                 // initdb を実行して完了を待つ
                 .output()
-                .map_err(|e| {
-                    SetupError::Other(format!("initdb の実行に失敗しました: {e}"))
-                })?;
+                .map_err(|e| SetupError::Other(format!("initdb の実行に失敗しました: {e}")))?;
 
             // initdb の標準出力を Reporter に転送する
             for line in String::from_utf8_lossy(&output.stdout).lines() {
@@ -358,7 +352,11 @@ impl PostgresEngine {
 
     // postgresql.conf の port と listen_addresses を書き換えるヘルパーメソッド
     // 既存の設定行をコメントアウトして新しい値を末尾に追記する方式を採用する
-    fn patch_postgresql_conf(conf: &Path, port: u16, listen_addresses: &str) -> Result<(), SetupError> {
+    fn patch_postgresql_conf(
+        conf: &Path,
+        port: u16,
+        listen_addresses: &str,
+    ) -> Result<(), SetupError> {
         // postgresql.conf をテキストとして読み込む
         let content = fs::read_to_string(conf).map_err(|e| {
             SetupError::Other(format!("postgresql.conf の読み込みに失敗しました: {e}"))
@@ -371,11 +369,9 @@ impl PostgresEngine {
                 // trimmed で先頭の空白・コメント記号を無視して比較する
                 let trimmed = line.trim_start_matches('#').trim();
                 // port の設定行を検出してコメントアウトする
-                if trimmed.starts_with("port") && trimmed.contains('=') {
-                    // 元の行をコメントアウトする
-                    format!("#{}", line)
-                // listen_addresses の設定行を検出してコメントアウトする
-                } else if trimmed.starts_with("listen_addresses") && trimmed.contains('=') {
+                if (trimmed.starts_with("port") || trimmed.starts_with("listen_addresses"))
+                    && trimmed.contains('=')
+                {
                     // 元の行をコメントアウトする
                     format!("#{}", line)
                 } else {
@@ -495,8 +491,7 @@ impl SetupEngine for PostgresEngine {
             Self::extract_and_flatten(&local_zip, &pg_app_dir)?;
         } else {
             // URL を組み立てる（{version} を設定値で置換する）
-            let url =
-                POSTGRES_DOWNLOAD_URL_TEMPLATE.replace("{version}", &config.postgres.version);
+            let url = POSTGRES_DOWNLOAD_URL_TEMPLATE.replace("{version}", &config.postgres.version);
 
             // 一時ファイルのパスを生成する（%TEMP%\devportal-postgres-<timestamp>.zip）
             let tmp_zip = std::env::temp_dir().join(format!(
@@ -537,15 +532,18 @@ impl SetupEngine for PostgresEngine {
 
         // ステップ 3: initdb でクラスターを初期化する
         let step_t = Instant::now();
-        reporter.step_start("pg_initdb", "データベースクラスターを初期化しています", 8, 3);
+        reporter.step_start(
+            "pg_initdb",
+            "データベースクラスターを初期化しています",
+            8,
+            3,
+        );
 
         // initdb を実行する前にデータディレクトリを一旦クリアして冪等性を保つ
         if pg_data_dir.exists() {
             // 既存のデータディレクトリを削除する（再初期化のため）
             fs::remove_dir_all(&pg_data_dir).map_err(|e| {
-                SetupError::Other(format!(
-                    "データディレクトリのクリアに失敗しました: {e}"
-                ))
+                SetupError::Other(format!("データディレクトリのクリアに失敗しました: {e}"))
             })?;
         }
         // データディレクトリを再作成する
@@ -583,7 +581,11 @@ impl SetupEngine for PostgresEngine {
         }
 
         // postgresql.conf に port と listen_addresses を設定する
-        Self::patch_postgresql_conf(&pg_conf, config.postgres.port, &config.postgres.listen_addresses)?;
+        Self::patch_postgresql_conf(
+            &pg_conf,
+            config.postgres.port,
+            &config.postgres.listen_addresses,
+        )?;
         // ステップ完了を通知する
         reporter.step_done("pg_config", step_t.elapsed().as_millis() as u64);
 

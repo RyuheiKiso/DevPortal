@@ -91,9 +91,7 @@ impl SqlServerEngine {
         // タイムアウト設定付き AgentBuilder を構築する
         let mut builder = ureq::AgentBuilder::new()
             // DNS 解決を別スレッドで 10 秒以内に打ち切るカスタムリゾルバを設定する
-            .resolver(
-                Self::resolve_with_timeout as fn(&str) -> std::io::Result<Vec<SocketAddr>>,
-            )
+            .resolver(Self::resolve_with_timeout as fn(&str) -> std::io::Result<Vec<SocketAddr>>)
             // TCP 接続確立が 15 秒以内に完了しない場合にエラーとする
             .timeout_connect(Duration::from_secs(15))
             // 各 read 呼び出しが 120 秒以内に応答しない場合にエラーとする（SQL Server ISO は大きいため余裕を持たせる）
@@ -174,7 +172,7 @@ impl SqlServerEngine {
                 // 0〜80% の範囲でダウンロード進捗を表示する（残り 20% は展開・インストールに割り当てる）
                 let dl_percent = (downloaded_bytes as f64 / total as f64 * 80.0) as u8;
                 // 定期的に進捗を通知する（全バイト更新より間引く）
-                if downloaded_bytes % (DOWNLOAD_BUF_SIZE as u64 * 64) == 0 {
+                if downloaded_bytes.is_multiple_of(DOWNLOAD_BUF_SIZE as u64 * 64) {
                     // 進捗パーセントを通知する
                     reporter.progress("mssql_fetch", dl_percent, None);
                 }
@@ -219,9 +217,7 @@ impl SqlServerEngine {
             .stderr(Stdio::piped())
             // コマンドを実行して完了を待つ
             .output()
-            .map_err(|e| {
-                SetupError::Other(format!("Mount-DiskImage の起動に失敗しました: {e}"))
-            })?;
+            .map_err(|e| SetupError::Other(format!("Mount-DiskImage の起動に失敗しました: {e}")))?;
 
         // 終了コードが 0 でなければエラーを返す
         if !output.status.success() {
@@ -234,9 +230,7 @@ impl SqlServerEngine {
         }
 
         // 標準出力からドライブレターを取得する（先頭末尾の空白・改行を除去する）
-        let drive_letter = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .to_string();
+        let drive_letter = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
         // 取得したドライブレターが 1 文字でない場合はエラーを返す
         if drive_letter.len() != 1 || !drive_letter.chars().all(|c| c.is_ascii_alphabetic()) {
@@ -342,7 +336,9 @@ impl SqlServerEngine {
         // ini ファイルとして書き出す
         fs::write(path, ini).map_err(|e| {
             // 書き込み失敗時はメッセージに変換する
-            SetupError::Other(format!("ConfigurationFile.ini の書き込みに失敗しました: {e}"))
+            SetupError::Other(format!(
+                "ConfigurationFile.ini の書き込みに失敗しました: {e}"
+            ))
         })?;
 
         // 正常終了を返す
@@ -379,9 +375,7 @@ impl SqlServerEngine {
             .stderr(Stdio::piped())
             // コマンドを実行して完了を待つ
             .output()
-            .map_err(|e| {
-                SetupError::Other(format!("setup.exe の起動に失敗しました: {e}"))
-            })?;
+            .map_err(|e| SetupError::Other(format!("setup.exe の起動に失敗しました: {e}")))?;
 
         // setup.exe の標準出力を Reporter に転送する
         for line in String::from_utf8_lossy(&output.stdout).lines() {
@@ -486,9 +480,7 @@ impl SqlServerEngine {
             .stderr(Stdio::null())
             // 実行する
             .status()
-            .map_err(|e| {
-                SetupError::Other(format!("sc.exe start の実行に失敗しました: {e}"))
-            })?;
+            .map_err(|e| SetupError::Other(format!("sc.exe start の実行に失敗しました: {e}")))?;
 
         // 終了コードが 0 でなくても、状態によっては「既に起動中」のことがあるため
         // ここでは終了コードのみログ的に確認し、最終的なヘルスチェックを後段で行う
@@ -568,7 +560,12 @@ impl SetupEngine for SqlServerEngine {
 
         // ステップ 0: 必要なディレクトリを作成する
         let step_t = Instant::now();
-        reporter.step_start("mssql_dirs", "SQL Server ディレクトリを作成しています", 7, 0);
+        reporter.step_start(
+            "mssql_dirs",
+            "SQL Server ディレクトリを作成しています",
+            7,
+            0,
+        );
 
         // SQL Server のインストール先ディレクトリ群を取得する
         let app_dir = paths::sqlserver_app_dir(config);
@@ -631,10 +628,7 @@ impl SetupEngine for SqlServerEngine {
         // ISO をマウントしてドライブレターを取得する
         let drive_letter = Self::mount_iso(&iso_path)?;
         // マウント結果をログに記録する
-        reporter.info(format!(
-            "ISO を {}:\\ にマウントしました",
-            drive_letter
-        ));
+        reporter.info(format!("ISO を {}:\\ にマウントしました", drive_letter));
         // ステップ完了を通知する
         reporter.step_done("mssql_mount", step_t.elapsed().as_millis() as u64);
 
@@ -793,7 +787,8 @@ impl SetupEngine for SqlServerEngine {
                     // setup.exe が見つかればアンインストールを実行する
                     if setup_exe.exists() {
                         // 無人アンインストールを実行する（出力は Reporter に転送する）
-                        reporter.info("SQL Server セットアップでアンインストールを実行しています...");
+                        reporter
+                            .info("SQL Server セットアップでアンインストールを実行しています...");
                         // setup.exe を Action=Uninstall で起動する
                         let output = Command::new(&setup_exe)
                             // QUIET モードで実行する
@@ -859,10 +854,7 @@ impl SetupEngine for SqlServerEngine {
                 }
                 Err(e) => {
                     // マウント失敗は警告として記録する（後続のファイル削除で残骸を回収する）
-                    reporter.warn(
-                        None,
-                        format!("ISO のマウントに失敗しました: {e}"),
-                    );
+                    reporter.warn(None, format!("ISO のマウントに失敗しました: {e}"));
                 }
             }
         } else {
