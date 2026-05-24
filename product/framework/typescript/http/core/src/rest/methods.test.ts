@@ -1,7 +1,17 @@
 // vitest DSL を取り込み
 import { describe, expect, it, vi } from "vitest";
 // テスト対象
-import { del, get, patch, post, put } from "./methods.js";
+import {
+  del,
+  get,
+  getArrayBuffer,
+  getBlob,
+  getJson,
+  getText,
+  patch,
+  post,
+  put,
+} from "./methods.js";
 // クライアント生成
 import { createHttpClient } from "../client.js";
 
@@ -114,5 +124,62 @@ describe("rest methods", () => {
     const client = createHttpClient({ fetchImpl });
     await post(client, "/x");
     expect(fetchImpl.mock.calls[0]?.[1]?.body).toBeUndefined();
+  });
+});
+
+describe("rest stream helpers (B-10)", () => {
+  // getText
+  it("getText は raw.text() で本文を取得", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response("hello world", { status: 200, headers: { "Content-Type": "text/plain" } }),
+    );
+    const client = createHttpClient({ fetchImpl });
+    const res = await getText(client, "/x");
+    expect(res.body).toBe("hello world");
+  });
+  // getBlob
+  it("getBlob は raw.blob() を返す", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(new Blob(["data"], { type: "application/octet-stream" }), {
+          status: 200,
+          headers: { "Content-Type": "application/octet-stream" },
+        }),
+    );
+    const client = createHttpClient({ fetchImpl });
+    const res = await getBlob(client, "/x");
+    expect(res.body).toBeInstanceOf(Blob);
+    expect(res.body.size).toBe(4);
+  });
+  // getArrayBuffer
+  it("getArrayBuffer は raw.arrayBuffer() を返す", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response(new Uint8Array([1, 2, 3, 4]).buffer, { status: 200 }),
+    );
+    const client = createHttpClient({ fetchImpl });
+    const res = await getArrayBuffer(client, "/x");
+    expect(res.body).toBeInstanceOf(ArrayBuffer);
+    expect(res.body.byteLength).toBe(4);
+  });
+  // getJson: Content-Type を見ず JSON parse を強制
+  it("getJson は Content-Type に関わらず JSON parse", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ x: 1 }), {
+          status: 200,
+          // text/plain でも parse する
+          headers: { "Content-Type": "text/plain" },
+        }),
+    );
+    const client = createHttpClient({ fetchImpl });
+    const res = await getJson<{ x: number }>(client, "/x");
+    expect(res.body).toEqual({ x: 1 });
+  });
+  // getJson の空ボディ
+  it("getJson の空ボディは undefined", async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 200 }));
+    const client = createHttpClient({ fetchImpl });
+    const res = await getJson(client, "/x");
+    expect(res.body).toBeUndefined();
   });
 });

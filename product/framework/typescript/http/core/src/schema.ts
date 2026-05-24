@@ -29,6 +29,8 @@ export const httpClientConfigSchema = z.object({
   baseUrl: z.string().url().optional(),
   // 既定ヘッダ（任意）
   defaultHeaders: z.record(z.string()).optional(),
+  // 相関 ID ヘッダ名（任意、空文字不可、C-A7）
+  requestIdHeader: z.string().min(1).optional(),
   // retry の部分指定（任意）
   retry: retryPolicySchema.partial().optional(),
   // timeout（任意）
@@ -40,4 +42,19 @@ export function validateHttpClientConfig(
   input: unknown,
 ): z.infer<typeof httpClientConfigSchema> {
   return httpClientConfigSchema.parse(input);
+}
+
+// GrpcClientConfig 検証用スキーマ（関数フィールドは対象外）
+// agent レビュー指摘により追加: createGrpcClient 冒頭で baseUrl を検証して空文字を弾く
+export const grpcClientConfigSchema = z.object({
+  baseUrl: z.string().url(),
+  timeoutMs: z.number().int().min(0).optional(),
+  retry: retryPolicySchema.partial().optional(),
+});
+
+// 検証ヘルパ
+export function validateGrpcClientConfig(
+  input: unknown,
+): z.infer<typeof grpcClientConfigSchema> {
+  return grpcClientConfigSchema.parse(input);
 }

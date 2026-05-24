@@ -16,7 +16,15 @@ export function useHttpClient(): HttpClient {
   return client;
 }
 
-// 1 オブジェクトの浅い等価判定（プリミティブ前提、ネストは Object.is で比較）
+// useScopedHttpClient の override で受け付けるフィールド（A11/A12 対応）
+// 関数フィールド (auth/logger/fetchImpl/interceptors) は構造比較できないため除外し、別 API で扱う
+// 利用者が auth/interceptor を切り替えたい場合は親クライアントを withConfig して Provider に渡すべき
+export type ScopedHttpOverride = Pick<
+  HttpClientConfig,
+  "baseUrl" | "defaultHeaders" | "retry" | "timeout"
+>;
+
+// 値の浅い等価判定（プリミティブ前提、ネストは Object.is で比較）
 function shallowEqual<T extends Record<string, unknown>>(
   a: T | undefined,
   b: T | undefined,
@@ -37,58 +45,74 @@ function shallowEqual<T extends Record<string, unknown>>(
   return true;
 }
 
-// override の値部分（参照同一性が壊れやすい defaultHeaders / retry / timeout / baseUrl）を構造比較するキャッシュ
+// number[] / string[] 等の配列要素比較
+function arrayEqual<T>(a: readonly T[] | undefined, b: readonly T[] | undefined): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!Object.is(a[i], b[i])) return false;
+  }
+  return true;
+}
+
+// RetryPolicy 部分指定の構造比較（関数フィールドは無視、配列は要素比較）
+function retryEqual(
+  a: HttpClientConfig["retry"] | undefined,
+  b: HttpClientConfig["retry"] | undefined,
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  if (a.maxRetries !== b.maxRetries) return false;
+  if (a.backoffBaseMs !== b.backoffBaseMs) return false;
+  if (a.backoffMaxMs !== b.backoffMaxMs) return false;
+  if (a.jitter !== b.jitter) return false;
+  if (!arrayEqual(a.retryableStatuses, b.retryableStatuses)) return false;
+  // shouldRetry / random は関数フィールドのため比較対象外（参照同一性を信頼）
+  return true;
+}
+
+// TimeoutPolicy の比較（プリミティブのみ）
+function timeoutEqual(
+  a: HttpClientConfig["timeout"] | undefined,
+  b: HttpClientConfig["timeout"] | undefined,
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  return a.totalMs === b.totalMs && a.perAttemptMs === b.perAttemptMs;
+}
+
+// override の値部分を構造比較するキャッシュ
 interface ScopedCache {
   // 親クライアント参照
   parent: HttpClient;
-  // 前回の baseUrl
-  baseUrl: string | undefined;
-  // 前回の defaultHeaders（参照比較ではなく内容比較）
-  defaultHeaders: Record<string, string> | undefined;
-  // 前回の retry
-  retry: Partial<HttpClientConfig["retry"]>;
-  // 前回の timeout
-  timeout: HttpClientConfig["timeout"];
+  // 前回の override 値
+  override: ScopedHttpOverride;
   // 派生クライアント
   child: HttpClient;
 }
 
 // 親 HttpClient に部分的な設定上書きを加えた派生クライアントを取得
 // 構造比較で安定化させ、毎レンダで新しいクライアントが作られないようにする
-export function useScopedHttpClient(
-  override: Partial<HttpClientConfig>,
-): HttpClient {
+// override は ScopedHttpOverride に限定（A11/A12: auth/logger/interceptors は受け付けない）
+export function useScopedHttpClient(override: ScopedHttpOverride): HttpClient {
   // 親クライアントを取得
   const parent = useHttpClient();
   // 前回のキャッシュを保持する ref
   const cacheRef = useRef<ScopedCache | null>(null);
-  // 比較対象の値を取り出し（関数フィールド等は参照同一性を信頼する）
-  const baseUrl = override.baseUrl;
-  const defaultHeaders = override.defaultHeaders;
-  const retry = override.retry;
-  const timeout = override.timeout;
   // 変化があれば withConfig 再生成
   if (
     cacheRef.current === null ||
     cacheRef.current.parent !== parent ||
-    cacheRef.current.baseUrl !== baseUrl ||
-    !shallowEqual(cacheRef.current.defaultHeaders, defaultHeaders) ||
-    !shallowEqual(
-      cacheRef.current.retry as Record<string, unknown> | undefined,
-      retry as Record<string, unknown> | undefined,
-    ) ||
-    !shallowEqual(
-      cacheRef.current.timeout as Record<string, unknown> | undefined,
-      timeout as Record<string, unknown> | undefined,
-    )
+    cacheRef.current.override.baseUrl !== override.baseUrl ||
+    !shallowEqual(cacheRef.current.override.defaultHeaders, override.defaultHeaders) ||
+    !retryEqual(cacheRef.current.override.retry, override.retry) ||
+    !timeoutEqual(cacheRef.current.override.timeout, override.timeout)
   ) {
     // 派生クライアントを生成してキャッシュに保存
     cacheRef.current = {
       parent,
-      baseUrl,
-      defaultHeaders,
-      retry,
-      timeout,
+      override,
       child: parent.withConfig(override),
     };
   }

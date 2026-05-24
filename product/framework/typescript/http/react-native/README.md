@@ -37,9 +37,13 @@ const baseClient = createHttpClient({
 });
 
 // NetInfo 連携（peerDep 未インストールでも no-op で動く）
-const client = await createNetInfoAware(baseClient, { rejectWhenOffline: true });
+// 戻り値は { client, dispose } で、unmount 時に dispose() を呼ぶ
+const { client, dispose } = await createNetInfoAware(baseClient, {
+  rejectWhenOffline: true,
+});
 
 export function App() {
+  useEffect(() => dispose, []);
   return (
     <HttpClientProvider client={client}>
       <UserList />
@@ -47,6 +51,8 @@ export function App() {
   );
 }
 ```
+
+`createNetInfoAware` は `@react-native-community/netinfo` を dynamic import で解決します。peerDep が未インストールなら no-op として親クライアントをそのまま返し、`dispose` も空関数になります。インストール済みなら起動時に `NetInfo.fetch()` で初期接続状態を解決した上で `addEventListener` で監視します。
 
 ## ビルド
 

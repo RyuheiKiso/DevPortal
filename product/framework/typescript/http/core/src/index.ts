@@ -21,10 +21,22 @@ export { HttpError, normalizeError, isRetryableError } from "./errors.js";
 export type { HttpErrorInit } from "./errors.js";
 
 // requestId
-export { REQUEST_ID_HEADER, createRequestId } from "./requestId.js";
+export {
+  REQUEST_ID_HEADER,
+  TRACEPARENT_HEADER,
+  createRequestId,
+  createTraceparent,
+} from "./requestId.js";
 
 // retry / timeout（外部からポリシー操作するための公開 API）
-export { DEFAULT_RETRYABLE_STATUSES, mergeRetryDefaults, sleep, withRetry } from "./retry.js";
+export {
+  DEFAULT_RETRYABLE_STATUSES,
+  IDEMPOTENCY_KEY_HEADER,
+  IDEMPOTENT_METHODS,
+  mergeRetryDefaults,
+  sleep,
+  withRetry,
+} from "./retry.js";
 export { withTimeout } from "./timeout.js";
 
 // auth ヘルパ
@@ -45,9 +57,11 @@ export { createHttpClient } from "./client.js";
 
 // schema
 export {
+  grpcClientConfigSchema,
   httpClientConfigSchema,
   retryPolicySchema,
   timeoutPolicySchema,
+  validateGrpcClientConfig,
   validateHttpClientConfig,
 } from "./schema.js";
 

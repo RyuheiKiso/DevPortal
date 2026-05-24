@@ -45,8 +45,11 @@ export interface HttpResponse<T = unknown> {
   status: number;
   // 2xx 判定（fetch の Response.ok と同義）
   ok: boolean;
-  // 平坦化されたレスポンスヘッダ（小文字キーで返す）
+  // 平坦化されたレスポンスヘッダ（小文字キーで返す、重複ヘッダは最後の値のみ）
   headers: Record<string, string>;
+  // 原本の Headers オブジェクト（Set-Cookie 等の multi-value 取得用、B-1）
+  // 例: res.rawHeaders.getSetCookie() で全 Set-Cookie 値の配列を取得
+  rawHeaders: Headers;
   // 利用側で型付け可能なボディ（低レベル client では undefined、rest ヘルパで JSON parse 済み）
   body: T;
   // 原本 Response（streaming / バイナリ等のため保持）
@@ -65,12 +68,15 @@ export interface RetryPolicy {
   backoffMaxMs?: number;
   // ジッタ戦略（"full" は 0〜expBackoff のランダム、"none" は決定的）
   jitter?: "full" | "none";
-  // 既定リトライ対象ステータス（既定 [408, 425, 429, 500, 502, 503, 504]）
+  // 既定リトライ対象ステータス（既定 [408, 429, 500, 502, 503, 504]、425 は除外）
   retryableStatuses?: readonly number[];
-  // 任意判定関数（指定時は retryableStatuses を上書き）
+  // 任意判定関数（指定時は retryableStatuses を上書き、ただし冪等性ガードは別途適用される）
   shouldRetry?: (error: unknown, attempt: number) => boolean;
   // 乱数源（テストで決定論化するために注入可能）
   random?: () => number;
+  // 非冪等メソッド（POST/PATCH 等）でも既定リトライを許可する明示オプトイン（既定 false、C-A2）
+  // true にすると IDEMPOTENT_METHODS / Idempotency-Key ガードがスキップされる
+  allowNonIdempotent?: boolean;
 }
 
 // タイムアウトポリシー（リクエスト全体 / 1 試行ごと）
@@ -122,7 +128,9 @@ export interface HttpClientConfig {
   timeout?: TimeoutPolicy;
   // 構造一致する Logger（任意、無指定なら noopLogger）
   logger?: Logger;
-  // X-Request-Id 生成関数（任意、無指定なら crypto.randomUUID フォールバック）
+  // 相関 ID を載せるヘッダ名（任意、無指定なら "X-Request-Id"、traceparent も可能、B-2）
+  requestIdHeader?: string;
+  // 相関 ID 生成関数（任意、無指定なら crypto.randomUUID フォールバック、traceparent を使うなら createTraceparent を渡す）
   generateRequestId?: RequestIdGenerator;
   // 実 fetch 実装（任意、テスト/環境差替用）
   fetchImpl?: typeof fetch;

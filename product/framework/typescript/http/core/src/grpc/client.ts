@@ -3,6 +3,7 @@ import { HttpError, normalizeError } from "../errors.js";
 import { noopLogger } from "../logging.js";
 import { REQUEST_ID_HEADER, createRequestId } from "../requestId.js";
 import { mergeRetryDefaults, withRetry } from "../retry.js";
+import { validateGrpcClientConfig } from "../schema.js";
 import { withTimeout } from "../timeout.js";
 import type {
   GrpcClient,
@@ -41,6 +42,30 @@ async function loadGrpcWeb(): Promise<GrpcWebModule> {
 export async function createGrpcClient(
   config: GrpcClientConfig,
 ): Promise<GrpcClient> {
+  // 設定値の早期 validate（baseUrl の空文字 / URL 不正を弾く、agent レビュー指摘）
+  validateGrpcClientConfig({
+    baseUrl: config.baseUrl,
+    timeoutMs: config.timeoutMs,
+    retry: config.retry,
+  });
+  // 関数フィールドの duck-typing チェック（zod は関数を validate しないため、ここで早期検出、C-A10）
+  if (config.auth !== undefined && typeof config.auth.getAuthHeaders !== "function") {
+    throw new HttpError({
+      message: "GrpcClientConfig.auth.getAuthHeaders must be a function",
+      code: "INVALID_CONFIG",
+      retryable: false,
+    });
+  }
+  if (
+    config.grpcClientFactory !== undefined &&
+    typeof config.grpcClientFactory !== "function"
+  ) {
+    throw new HttpError({
+      message: "GrpcClientConfig.grpcClientFactory must be a function",
+      code: "INVALID_CONFIG",
+      retryable: false,
+    });
+  }
   // logger 未指定時は no-op
   const logger = config.logger ?? noopLogger;
   // requestId 生成関数（未指定時は組み込み）
@@ -48,16 +73,20 @@ export async function createGrpcClient(
   // retry policy を既定値とマージ
   const retryPolicy = mergeRetryDefaults(config.retry);
 
-  // grpc-web Client のインスタンスを 1 つ作る（factory 注入 or dynamic import）
-  let underlying: GrpcWebLikeClient;
-  if (config.grpcClientFactory !== undefined) {
-    // テスト/差替用の factory（peerDep 不要、スタブ化可能）
-    underlying = config.grpcClientFactory(config.baseUrl);
-  } else {
-    // 動的 import で grpc-web を読み込み（未インストールなら throw）
-    const mod = await loadGrpcWeb();
-    underlying = new mod.GrpcWebClientBase();
-  }
+  // grpc-web Client の解決を遅延（unary 初回呼び出しまで dynamic import を走らせない、A13 対応）
+  // factory 未指定なら createGrpcClient 段階では peerDep に触らないため、grpc を使わないアプリで副作用なし
+  let underlying: GrpcWebLikeClient | undefined = undefined;
+  const resolveUnderlying = async (): Promise<GrpcWebLikeClient> => {
+    if (underlying !== undefined) return underlying;
+    if (config.grpcClientFactory !== undefined) {
+      underlying = config.grpcClientFactory(config.baseUrl);
+    } else {
+      // 動的 import で grpc-web を読み込み（未インストールなら明示エラー）
+      const mod = await loadGrpcWeb();
+      underlying = new mod.GrpcWebClientBase();
+    }
+    return underlying;
+  };
 
   // unary 呼び出しを Promise として返す実装
   async function unary<Req, Res>(
@@ -68,7 +97,11 @@ export async function createGrpcClient(
     // 相関 ID を 1 件生成
     const requestId = generateRequestId();
     // URL を組み立て（baseUrl + /package.Service/Method）
-    const url = `${config.baseUrl.endsWith("/") ? config.baseUrl.slice(0, -1) : config.baseUrl}/${desc.service}/${desc.method}`;
+    // service / method は encodeURIComponent でサニタイズ（agent レビュー指摘）
+    const baseRoot = config.baseUrl.endsWith("/")
+      ? config.baseUrl.slice(0, -1)
+      : config.baseUrl;
+    const url = `${baseRoot}/${encodeURIComponent(desc.service)}/${encodeURIComponent(desc.method)}`;
     // metadata を組み立て（auth ヘッダ → user metadata → X-Request-Id の順）
     let metadata: Record<string, string> = { ...(opts.metadata ?? {}) };
     if (config.auth !== undefined) {
@@ -93,9 +126,11 @@ export async function createGrpcClient(
         return await withTimeout(perAttemptMs, opts.signal, async (signal) => {
           // 試行ログ（attempt は 0 オリジン）
           logger.debug("grpc.attempt", { requestId, attempt });
+          // underlying クライアントを解決（初回のみ dynamic import / factory 実行）
+          const client = await resolveUnderlying();
           // 実 RPC 呼び出し
           return await invokeUnary(
-            underlying,
+            client,
             url,
             req,
             metadata,

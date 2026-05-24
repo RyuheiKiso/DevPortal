@@ -15,7 +15,12 @@ import {
 } from "./interceptors.js";
 import { noopLogger } from "./logging.js";
 import { REQUEST_ID_HEADER, createRequestId } from "./requestId.js";
-import { mergeRetryDefaults, withRetry } from "./retry.js";
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  IDEMPOTENT_METHODS,
+  mergeRetryDefaults,
+  withRetry,
+} from "./retry.js";
 import { withTimeout } from "./timeout.js";
 
 // 平坦化された Response.headers を Record<string,string> に変換
@@ -72,6 +77,66 @@ function encodeSearchParams(query: HttpRequestInit["query"]): string {
   return s.length > 0 ? `?${s}` : "";
 }
 
+// body が「1 度しか読めない」ものなら true（ReadableStream / consumed Body）
+// retry を無効化すべきかの判定に使う（A5 対応）
+function isConsumableBody(body: unknown): boolean {
+  // 未指定は consume 不可ではない
+  if (body === undefined || body === null) return false;
+  // 文字列・Blob・ArrayBuffer・FormData・URLSearchParams は何度でも送れる
+  if (typeof body === "string") return false;
+  if (typeof FormData !== "undefined" && body instanceof FormData) return false;
+  if (typeof Blob !== "undefined" && body instanceof Blob) return false;
+  if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) return false;
+  if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams) return false;
+  // ReadableStream は 1 度の読取で消費される → retry 不可
+  if (typeof ReadableStream !== "undefined" && body instanceof ReadableStream) return true;
+  // それ以外は安全側で false（実害が出るならテストで顕在化）
+  return false;
+}
+
+// リクエストが冪等的か（IDEMPOTENT_METHODS or Idempotency-Key ヘッダ付き、B-4）
+// Idempotency-Key は client が受け取った req.headers のみを確認（auth ヘッダや response ヘッダは見ない）
+// 大小無視（HTTP RFC 7230 §3.2）
+function isIdempotentRequest(req: HttpRequest): boolean {
+  if (IDEMPOTENT_METHODS.has(req.method)) return true;
+  const lowerKey = IDEMPOTENCY_KEY_HEADER.toLowerCase();
+  for (const k of Object.keys(req.headers)) {
+    if (k.toLowerCase() === lowerKey) return true;
+  }
+  return false;
+}
+
+// retry を無効化すべき理由（debug ログ用、C-A4）
+type RetryDisabledReason = "consumable-body" | "non-idempotent";
+
+// effective な retry policy と無効化理由を返すヘルパ
+// 優先順位: ReadableStream body > 冪等性ガード（allowNonIdempotent でオプトアウト可、C-A2）
+function resolveEffectiveRetryPolicy(
+  req: HttpRequest,
+  basePolicy: ReturnType<typeof mergeRetryDefaults>,
+): { policy: ReturnType<typeof mergeRetryDefaults>; disabledReason?: RetryDisabledReason } {
+  // consumable body（ReadableStream 等）は retry 不可
+  if (isConsumableBody(req.body)) {
+    return {
+      policy: { ...basePolicy, maxRetries: 0 },
+      disabledReason: "consumable-body",
+    };
+  }
+  // allowNonIdempotent: true なら冪等性ガードをスキップ（明示オプトイン、C-A2）
+  if (basePolicy.allowNonIdempotent === true) {
+    return { policy: basePolicy };
+  }
+  // 非冪等メソッド + Idempotency-Key 無し → retry 無効化（C-A2: shouldRetry 有無に関わらず常時適用）
+  if (!isIdempotentRequest(req)) {
+    return {
+      policy: { ...basePolicy, maxRetries: 0 },
+      disabledReason: "non-idempotent",
+    };
+  }
+  // 冪等条件を満たせば既定 policy
+  return { policy: basePolicy };
+}
+
 // 2 つの設定を浅マージするヘルパ（withConfig 用）
 function mergeConfig(
   base: HttpClientConfig,
@@ -112,6 +177,10 @@ function mergeConfig(
 
 // HTTP クライアントを生成するファクトリ
 export function createHttpClient(config: HttpClientConfig = {}): HttpClient {
+  // requestIdHeader の空文字 validation（C-A7、空キーヘッダの生成を防止）
+  if (config.requestIdHeader !== undefined && config.requestIdHeader.trim().length === 0) {
+    throw new Error("HttpClientConfig.requestIdHeader must be a non-empty string");
+  }
   // fetch 実装の解決（globalThis.fetch は環境差で undefined のことがあるので bind を行わず参照のみ）
   const fetchImpl: typeof fetch =
     config.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
@@ -119,6 +188,8 @@ export function createHttpClient(config: HttpClientConfig = {}): HttpClient {
   const logger = config.logger ?? noopLogger;
   // requestId 生成関数（未指定時は組み込みの createRequestId）
   const generateRequestId = config.generateRequestId ?? createRequestId;
+  // 相関 ID を載せるヘッダ名（B-2、既定 "X-Request-Id"、traceparent も可能）
+  const requestIdHeader = config.requestIdHeader ?? REQUEST_ID_HEADER;
   // retry policy（既定値とマージして完成形に）
   const retryPolicy = mergeRetryDefaults(config.retry);
   // timeout（未指定時は空オブジェクト）
@@ -151,46 +222,73 @@ export function createHttpClient(config: HttpClientConfig = {}): HttpClient {
       meta: init.meta,
     };
 
-    // [C] auth ヘッダを追加（指定があれば）
-    if (config.auth !== undefined) {
-      const authHeaders = await config.auth.getAuthHeaders();
-      req = { ...req, headers: { ...req.headers, ...authHeaders } };
-    }
-
-    // [D] X-Request-Id を必ず付与（auth より後）
-    req.headers[REQUEST_ID_HEADER] = req.requestId;
-
-    // [E] user の request interceptors を順次適用
+    // [C] user の request interceptors を先に適用（ユーザが url/headers を変更できる）
     req = await runRequestInterceptors(req, reqInts);
 
-    // [F] logger.debug でリクエスト開始を記録
+    // [D] logger.debug でリクエスト開始を記録
     logger.debug("http.request", {
       requestId: req.requestId,
       method: req.method,
       url: req.url,
     });
 
+    // effective な retry policy を解決（ReadableStream / 冪等性ガード、A5/B-4/C-A2/C-A4）
+    const resolved = resolveEffectiveRetryPolicy(req, retryPolicy);
+    const effectiveRetryPolicy = resolved.policy;
+    // 無効化された場合は理由を debug ログに（C-A4、本番調査支援）
+    if (resolved.disabledReason !== undefined) {
+      logger.debug("http.retry.disabled", {
+        requestId: req.requestId,
+        method: req.method,
+        reason: resolved.disabledReason,
+      });
+    }
+
     try {
-      // [G] withTimeout(total) で全体時間制限
+      // [E] withTimeout(total) で全体時間制限
       return await withTimeout(timeout.totalMs, req.signal, async (totalSignal) => {
-        // [H] withRetry で attempt 群を制御
-        return await withRetry(retryPolicy, totalSignal, async (attempt) => {
-          // [I] withTimeout(perAttempt) で 1 試行ごとの時間制限
+        // [F] withRetry で attempt 群を制御
+        return await withRetry(effectiveRetryPolicy, totalSignal, async (attempt) => {
+          // [G] withTimeout(perAttempt) で 1 試行ごとの時間制限
           return await withTimeout(timeout.perAttemptMs, totalSignal, async (signal) => {
+            // [H] attempt 毎に auth ヘッダを取得（token refresh 対応、A3）
+            let attemptHeaders: Record<string, string> = { ...req.headers };
+            if (config.auth !== undefined) {
+              const authHeaders = await config.auth.getAuthHeaders();
+              attemptHeaders = { ...attemptHeaders, ...authHeaders };
+            }
+            // [I] 相関 ID を最終的に付与（auth より後、interceptor の置換からも保護、A1）
+            // ヘッダ名は config.requestIdHeader でカスタマイズ可能（既定 "X-Request-Id"、B-2）
+            attemptHeaders[requestIdHeader] = req.requestId;
             // [J] fetch 本体を呼び出し
             const raw = await fetchImpl(req.url, {
               method: req.method,
-              headers: req.headers,
+              headers: attemptHeaders,
               body: req.body,
               signal,
             });
-            // [K] !ok なら HttpError を throw（retry 判定対象に）
+            // [K] !ok なら HttpError を throw（retry 判定対象に / response も保持、A2）
             if (!raw.ok) {
+              // エラーレスポンスを HttpResponse として保持（利用者が err.response.raw.text() 等で読める）
+              const errResponse: HttpResponse = {
+                status: raw.status,
+                ok: false,
+                headers: headersToObject(raw.headers),
+                rawHeaders: raw.headers,
+                body: undefined,
+                raw,
+                request: req,
+              };
+              // retryable は effectivePolicy ベースで判定（冪等性ガードで実際に retry されない場合は false に、C-A1）
+              const willActuallyRetry =
+                effectiveRetryPolicy.maxRetries > 0 &&
+                effectiveRetryPolicy.retryableStatuses.includes(raw.status);
               const httpErr = new HttpError({
                 message: `HTTP ${raw.status}`,
                 status: raw.status,
-                retryable: retryPolicy.retryableStatuses.includes(raw.status),
+                retryable: willActuallyRetry,
                 requestId: req.requestId,
+                response: errResponse,
               });
               logger.warn("http.response.error", {
                 requestId: req.requestId,
@@ -204,6 +302,7 @@ export function createHttpClient(config: HttpClientConfig = {}): HttpClient {
               status: raw.status,
               ok: true,
               headers: headersToObject(raw.headers),
+              rawHeaders: raw.headers,
               body: undefined as unknown as T,
               raw,
               request: req,

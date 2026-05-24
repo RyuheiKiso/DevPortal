@@ -36,16 +36,11 @@ export function invokeUnary<Req, Res>(
       reject(buildAbortError(signal.reason));
       return;
     }
-    // 解決済みフラグ（abort と通常完了が二重に走らないように）
+    // 解決済みフラグ（callback の二重発火を防ぐためにのみ使用、onAbort 側では不要）
     let settled = false;
-    // abort 購読ハンドラ
+    // abort 購読ハンドラ（once:true で 1 度のみ呼ばれる、callback 側で removeEventListener も行う）
+    // reject を 2 回呼んでも Promise は最初のものしか反映しないため settled チェックは省略
     const onAbort = (): void => {
-      // 二重解決防止（once:true で 1 度のみ呼ばれるが、callback が先に settled にした場合の安全網）
-      /* v8 ignore next 3 */
-      if (settled) {
-        return;
-      }
-      settled = true;
       reject(buildAbortError(signal?.reason));
     };
     // signal がある場合のみ購読

@@ -5,9 +5,11 @@ export { HttpClientProvider } from "./HttpClientProvider.js";
 export type { HttpClientProviderProps } from "./HttpClientProvider.js";
 // 基本 hooks
 export { useHttpClient, useScopedHttpClient } from "./hooks.js";
+export type { ScopedHttpOverride } from "./hooks.js";
 // クエリ hooks
 export { useHttpQuery, useHttpMutation } from "./queryHooks.js";
 export type {
-  HttpQueryState,
   HttpMutationState,
+  HttpQueryOptions,
+  HttpQueryState,
 } from "./queryHooks.js";

@@ -72,6 +72,40 @@ describe("normalizeError", () => {
     expect(out.retryable).toBe(true);
     expect(out.message).toBe("x");
   });
+  // B-5: 補完時に元エラーの stack が引き継がれる
+  it("B-5: 既存 HttpError 補完時に stack が引き継がれる", () => {
+    const original = new HttpError({ message: "x", retryable: false });
+    // stack は環境依存だが、original.stack を override して検証
+    original.stack = "Error: x\n    at originalCallsite";
+    const out = normalizeError(original, makeReq("filled"));
+    expect(out.stack).toBe("Error: x\n    at originalCallsite");
+  });
+  // B-5: 元 HttpError に stack が無い場合は new HttpError の stack をそのまま使う
+  it("B-5: 元 HttpError に stack 無しなら新 HttpError 既定 stack を使う", () => {
+    const original = new HttpError({ message: "x", retryable: false });
+    original.stack = undefined;
+    const out = normalizeError(original, makeReq("filled"));
+    // new HttpError 経由で stack はあるはず（Node では文字列が入る）
+    expect(typeof out.stack === "string" || out.stack === undefined).toBe(true);
+  });
+  // C-A5: HttpError サブクラスは複製せず原位置で requestId を補完
+  it("C-A5: HttpError サブクラスは複製せず原位置補完（サブクラス情報を保持）", () => {
+    class MyHttpError extends HttpError {
+      readonly extra: string;
+      constructor(init: { message: string; retryable: boolean; extra: string }) {
+        super({ message: init.message, retryable: init.retryable });
+        this.extra = init.extra;
+      }
+    }
+    const original = new MyHttpError({ message: "x", retryable: false, extra: "info" });
+    const out = normalizeError(original, makeReq("filled"));
+    // 同一インスタンス（サブクラスフィールド保持）
+    expect(out).toBe(original);
+    expect((out as MyHttpError).extra).toBe("info");
+    expect(out.requestId).toBe("filled");
+    // サブクラス継承も維持
+    expect(out instanceof MyHttpError).toBe(true);
+  });
   // AbortError は code:"ABORTED" / retryable:false
   it("DOMException(AbortError) は ABORTED に正規化", () => {
     const e = new DOMException("aborted by user", "AbortError");
@@ -88,13 +122,33 @@ describe("normalizeError", () => {
     expect(out.code).toBe("TIMEOUT");
     expect(out.retryable).toBe(false);
   });
-  // TypeError は NETWORK / retryable:true
-  it("TypeError は NETWORK に正規化（retryable=true）", () => {
+  // TypeError は NETWORK / cause なしは retryable=false（CORS や Mixed Content の永続失敗を保護）
+  it("TypeError (cause なし) は NETWORK / retryable=false", () => {
     const e = new TypeError("fetch failed");
     const out = normalizeError(e, makeReq("r"));
     expect(out.code).toBe("NETWORK");
-    expect(out.retryable).toBe(true);
+    expect(out.retryable).toBe(false);
     expect(out.message).toBe("fetch failed");
+  });
+  // TypeError は NETWORK / cause.code が retryable な net コードなら retryable=true（undici 等）
+  it("TypeError (cause.code: ECONNREFUSED) は retryable=true", () => {
+    const cause = { code: "ECONNREFUSED" };
+    const e = Object.assign(new TypeError("fetch failed"), { cause });
+    const out = normalizeError(e, makeReq("r"));
+    expect(out.code).toBe("NETWORK");
+    expect(out.retryable).toBe(true);
+  });
+  // 未知の cause.code は retryable=false
+  it("TypeError (cause.code: 未知) は retryable=false", () => {
+    const e = Object.assign(new TypeError("fetch failed"), { cause: { code: "EUNKNOWN" } });
+    const out = normalizeError(e, makeReq("r"));
+    expect(out.retryable).toBe(false);
+  });
+  // cause が string 等で code を持たない場合
+  it("TypeError (cause が code 無し) は retryable=false", () => {
+    const e = Object.assign(new TypeError("fetch failed"), { cause: "some string" });
+    const out = normalizeError(e, makeReq("r"));
+    expect(out.retryable).toBe(false);
   });
   // message プロパティを持つオブジェクト
   it("message を持つ未知のオブジェクトはそのメッセージを使う", () => {

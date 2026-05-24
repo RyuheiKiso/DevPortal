@@ -56,6 +56,14 @@ describe("sleep", () => {
     c.abort(reason);
     await expect(sleep(1000, c.signal)).rejects.toBe(reason);
   });
+  // A14: signal.reason が undefined（古いブラウザ/polyfill 想定）でも安全に reject される
+  it("signal.reason 未設定でも sleep がフォールバック AbortError で reject", async () => {
+    const c = new AbortController();
+    c.abort();
+    // reason を強制 undefined に上書き
+    Object.defineProperty(c.signal, "reason", { value: undefined, configurable: true });
+    await expect(sleep(1000, c.signal)).rejects.toMatchObject({ name: "AbortError" });
+  });
   // 通常の経過後 resolve
   it("通常は ms 経過後に resolve", async () => {
     vi.useFakeTimers();
@@ -75,6 +83,22 @@ describe("sleep", () => {
       const p = sleep(1000, c.signal);
       c.abort(new DOMException("x", "AbortError"));
       await expect(p).rejects.toMatchObject({ name: "AbortError" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  // A14: 待機中の abort + reason 未設定でもフォールバック AbortError で reject
+  it("待機中の abort + reason 未設定でフォールバック", async () => {
+    vi.useFakeTimers();
+    try {
+      const c = new AbortController();
+      const p = sleep(1000, c.signal);
+      const captured = p.catch((e: unknown) => e);
+      // abort 前に reason プロパティを undefined に固定
+      Object.defineProperty(c.signal, "reason", { value: undefined, configurable: true });
+      c.abort();
+      const err = (await captured) as { name: string };
+      expect(err.name).toBe("AbortError");
     } finally {
       vi.useRealTimers();
     }
@@ -202,6 +226,16 @@ describe("withRetry", () => {
     await expect(
       withRetry(policy, c.signal, async () => "x"),
     ).rejects.toBe(reason);
+  });
+  // A14: withRetry の signal.reason 未設定経路もフォールバックで AbortError
+  it("withRetry: signal.reason 未設定でもフォールバック AbortError", async () => {
+    const c = new AbortController();
+    c.abort();
+    Object.defineProperty(c.signal, "reason", { value: undefined, configurable: true });
+    const policy = mergeRetryDefaults({ maxRetries: 3, jitter: "none" });
+    await expect(
+      withRetry(policy, c.signal, async () => "x"),
+    ).rejects.toMatchObject({ name: "AbortError" });
   });
   // signal が abort 時に reason 未設定
   it("signal abort で reason 未設定なら AbortError を投げる", async () => {

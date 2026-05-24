@@ -16,6 +16,12 @@ export function useHttpClient(): HttpClient {
   return client;
 }
 
+// useScopedHttpClient の override で受け付けるフィールド（A11/A12 対応、react と同型）
+export type ScopedHttpOverride = Pick<
+  HttpClientConfig,
+  "baseUrl" | "defaultHeaders" | "retry" | "timeout"
+>;
+
 // オブジェクトの浅い等価判定
 function shallowEqual<T extends Record<string, unknown>>(
   a: T | undefined,
@@ -37,47 +43,66 @@ function shallowEqual<T extends Record<string, unknown>>(
   return true;
 }
 
+// 配列要素比較
+function arrayEqual<T>(a: readonly T[] | undefined, b: readonly T[] | undefined): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!Object.is(a[i], b[i])) return false;
+  }
+  return true;
+}
+
+// RetryPolicy 部分指定の構造比較（関数フィールド shouldRetry/random は参照同一性を信頼）
+function retryEqual(
+  a: HttpClientConfig["retry"] | undefined,
+  b: HttpClientConfig["retry"] | undefined,
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  if (a.maxRetries !== b.maxRetries) return false;
+  if (a.backoffBaseMs !== b.backoffBaseMs) return false;
+  if (a.backoffMaxMs !== b.backoffMaxMs) return false;
+  if (a.jitter !== b.jitter) return false;
+  if (!arrayEqual(a.retryableStatuses, b.retryableStatuses)) return false;
+  return true;
+}
+
+// TimeoutPolicy の比較（プリミティブのみ）
+function timeoutEqual(
+  a: HttpClientConfig["timeout"] | undefined,
+  b: HttpClientConfig["timeout"] | undefined,
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  return a.totalMs === b.totalMs && a.perAttemptMs === b.perAttemptMs;
+}
+
 // useScopedHttpClient 用キャッシュ
 interface ScopedCache {
   parent: HttpClient;
-  baseUrl: string | undefined;
-  defaultHeaders: Record<string, string> | undefined;
-  retry: Partial<HttpClientConfig["retry"]>;
-  timeout: HttpClientConfig["timeout"];
+  override: ScopedHttpOverride;
   child: HttpClient;
 }
 
 // 親 HttpClient に設定を上書きした派生クライアントを取得（react 版と同実装）
-export function useScopedHttpClient(
-  override: Partial<HttpClientConfig>,
-): HttpClient {
+// override は ScopedHttpOverride に限定（A11/A12: auth/logger/interceptors は受け付けない）
+export function useScopedHttpClient(override: ScopedHttpOverride): HttpClient {
   const parent = useHttpClient();
   const cacheRef = useRef<ScopedCache | null>(null);
-  const baseUrl = override.baseUrl;
-  const defaultHeaders = override.defaultHeaders;
-  const retry = override.retry;
-  const timeout = override.timeout;
   // キャッシュ無効化判定
   if (
     cacheRef.current === null ||
     cacheRef.current.parent !== parent ||
-    cacheRef.current.baseUrl !== baseUrl ||
-    !shallowEqual(cacheRef.current.defaultHeaders, defaultHeaders) ||
-    !shallowEqual(
-      cacheRef.current.retry as Record<string, unknown> | undefined,
-      retry as Record<string, unknown> | undefined,
-    ) ||
-    !shallowEqual(
-      cacheRef.current.timeout as Record<string, unknown> | undefined,
-      timeout as Record<string, unknown> | undefined,
-    )
+    cacheRef.current.override.baseUrl !== override.baseUrl ||
+    !shallowEqual(cacheRef.current.override.defaultHeaders, override.defaultHeaders) ||
+    !retryEqual(cacheRef.current.override.retry, override.retry) ||
+    !timeoutEqual(cacheRef.current.override.timeout, override.timeout)
   ) {
     cacheRef.current = {
       parent,
-      baseUrl,
-      defaultHeaders,
-      retry,
-      timeout,
+      override,
       child: parent.withConfig(override),
     };
   }

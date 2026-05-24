@@ -1,12 +1,40 @@
 // React の hook を取り込み
 import { useCallback, useEffect, useRef, useState } from "react";
-// HTTP クライアント関連の型を core から取り込み
-import type {
-  HttpError,
-  HttpRequestInit,
-} from "@k1s0-ts-http/core";
+// HTTP クライアント関連の型と HttpError を core から取り込み
+import { HttpError } from "@k1s0-ts-http/core";
+import type { HttpRequestInit } from "@k1s0-ts-http/core";
 // 親クライアント取得
 import { useHttpClient } from "./hooks.js";
+
+// 任意の throw 値を HttpError にラップ（duck-typing 解消、B-14）
+function toHttpError(err: unknown): HttpError {
+  // 既に HttpError ならそのまま
+  if (err instanceof HttpError) return err;
+  // Error 派生はメッセージと cause を引き継ぐ
+  if (err instanceof Error) {
+    return new HttpError({
+      message: err.message,
+      code: "UNKNOWN",
+      retryable: false,
+      cause: err,
+    });
+  }
+  // プリミティブは String 化（null/undefined も含む）
+  return new HttpError({
+    message: `non-Error thrown: ${String(err)}`,
+    code: "UNKNOWN",
+    retryable: false,
+    cause: err,
+  });
+}
+
+// useHttpQuery のオプション（B-10）
+export interface HttpQueryOptions {
+  // 依存配列（変化で再 fetch、既定 []）
+  deps?: readonly unknown[];
+  // false の間は fetch しない（loading: false / data: undefined を返し、enabled=true への遷移で自動 fetch、既定 true）
+  enabled?: boolean;
+}
 
 // useHttpQuery の戻り値型
 export interface HttpQueryState<T> {
@@ -18,38 +46,58 @@ export interface HttpQueryState<T> {
   loading: boolean;
   // 直近リクエストの相関 ID
   requestId: string | undefined;
-  // 強制再 fetch（手動リフレッシュ）
-  refetch: () => void;
+  // 強制再 fetch（Promise を返す、await して完了/失敗を待てる、B-15）
+  refetch: () => Promise<void>;
 }
 
 // 軽量な GET 等の問い合わせ Hook
-// init が依存配列で変わるたびに再 fetch、unmount や次回 fetch で前回 request を abort する
+// init は ref で常に最新を参照（A7 対応の継続）
+// 再 fetch トリガーは options.deps（既定 []）。options.enabled=false の間は実行しない
 export function useHttpQuery<T = unknown>(
   init: HttpRequestInit,
-  deps: readonly unknown[] = [],
+  options: HttpQueryOptions = {},
 ): HttpQueryState<T> {
   // 親クライアントを取得
   const client = useHttpClient();
-  // 状態保持
+  // enabled の解決（既定 true）
+  const enabled = options.enabled ?? true;
+  // 状態保持（enabled=false なら初期 loading=false）
   const [state, setState] = useState<{
     data: T | undefined;
     error: HttpError | undefined;
     loading: boolean;
     requestId: string | undefined;
-  }>({ data: undefined, error: undefined, loading: true, requestId: undefined });
+  }>({
+    data: undefined,
+    error: undefined,
+    loading: enabled,
+    requestId: undefined,
+  });
   // 直前の AbortController を保持（再 fetch 時に abort するため）
   const ctrlRef = useRef<AbortController | null>(null);
-  // fetch 実行ヘルパ（refetch から再利用）
-  const fetchOnce = useCallback(() => {
+  // 最新 init を ref に保存（stale closure 防止）
+  const initRef = useRef(init);
+  initRef.current = init;
+  // fetch 実行ヘルパ（Promise を返す、B-15）
+  // enabled / deps を useCallback の依存に含めることで、変化時に useEffect が再実行される（R-A3）
+  const deps = options.deps;
+  const fetchOnce = useCallback((): Promise<void> => {
     // 前回の request を abort
     ctrlRef.current?.abort();
+    // enabled=false なら fetch しない（loading 状態は変更不要なら setState skip、R-A2）
+    if (!enabled) {
+      ctrlRef.current = null;
+      // 既に loading=false なら setState を skip（不要な再 render を防ぐ）
+      setState((s) => (s.loading ? { ...s, loading: false } : s));
+      return Promise.resolve();
+    }
     const ctrl = new AbortController();
     ctrlRef.current = ctrl;
     // loading 状態へ
-    setState((s) => ({ ...s, loading: true }));
-    // 実行
-    client
-      .request<T>({ ...init, signal: ctrl.signal })
+    setState((s) => (s.loading ? s : { ...s, loading: true }));
+    // 実行（最新 init を ref から取得）
+    return client
+      .request<T>({ ...initRef.current, signal: ctrl.signal })
       .then((res) => {
         // unmount 後の状態更新を避ける（abort 済みなら無視）
         if (ctrl.signal.aborted) return;
@@ -61,21 +109,24 @@ export function useHttpQuery<T = unknown>(
         });
       })
       .catch((err: unknown) => {
-        // HttpError の ABORTED は次回 fetch による意図的中断なので state は更新しない
-        const e = err as HttpError;
-        if (e?.code === "ABORTED") return;
+        // abort 後の catch も無視（race 防止）
+        if (ctrl.signal.aborted) return;
+        // HttpError にラップしてから判定（B-14）
+        const httpErr = toHttpError(err);
+        // ABORTED は次回 fetch による意図的中断なので state は更新しない
+        if (httpErr.code === "ABORTED") return;
         setState({
           data: undefined,
-          error: e,
+          error: httpErr,
           loading: false,
-          requestId: e?.requestId,
+          requestId: httpErr.requestId,
         });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, ...deps]);
+  }, [client, enabled, ...(deps ?? [])]);
   // 依存変化で fetch（unmount 時は abort）
   useEffect(() => {
-    fetchOnce();
+    void fetchOnce();
     return () => {
       ctrlRef.current?.abort();
     };
@@ -83,7 +134,7 @@ export function useHttpQuery<T = unknown>(
   return { ...state, refetch: fetchOnce };
 }
 
-// useHttpMutation の戻り値型
+// useHttpMutation の戻り値型（B-13 で mutate / mutateAsync に分離、R-A4 で TBody 制約を明示）
 export interface HttpMutationState<TBody, TRes> {
   // 直近の成功データ
   data: TRes | undefined;
@@ -91,17 +142,25 @@ export interface HttpMutationState<TBody, TRes> {
   error: HttpError | undefined;
   // 実行中フラグ
   loading: boolean;
-  // 実行関数（body と任意の上書きを受け取り Promise<TRes> を返す）
-  mutate: (
-    body: TBody,
-    override?: Partial<HttpRequestInit>,
-  ) => Promise<TRes>;
+  // fire-and-forget 実行（throw しない、エラーは state.error から取得、B-13）
+  mutate: (body: TBody, override?: Partial<HttpRequestInit>) => void;
+  // 実行（throw する、await して結果を受け取る、B-13）
+  mutateAsync: (body: TBody, override?: Partial<HttpRequestInit>) => Promise<TRes>;
   // 状態をリセット
   reset: () => void;
 }
 
-// POST 等の変更操作 Hook
-export function useHttpMutation<TBody = unknown, TRes = unknown>(
+/**
+ * POST 等の変更操作 Hook（B-13 で mutate / mutateAsync を分離）
+ *
+ * 注意（R-A4）:
+ * - TBody は fetch の `BodyInit` 互換が必須（string / FormData / Blob / URLSearchParams / ArrayBuffer / ReadableStream）
+ * - JSON を送りたい場合は呼び出し側で `JSON.stringify` し、`headers: { "Content-Type": "application/json" }` を指定
+ * - もしくは core の `post(client, url, body, init)` ヘルパを使う（自動 JSON stringify）
+ *
+ * Race 防止（R-A1）: 連続 mutate 時は最後の呼び出しのみが state に反映される
+ */
+export function useHttpMutation<TBody extends BodyInit | null | undefined = BodyInit, TRes = unknown>(
   init: Omit<HttpRequestInit, "body">,
 ): HttpMutationState<TBody, TRes> {
   // 親クライアントを取得
@@ -112,7 +171,7 @@ export function useHttpMutation<TBody = unknown, TRes = unknown>(
     error: HttpError | undefined;
     loading: boolean;
   }>({ data: undefined, error: undefined, loading: false });
-  // mutate 関数（unmount 後の state 更新を避けるため mounted ref を持つ）
+  // mounted ref（unmount 後の state 更新を避ける）
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
@@ -120,40 +179,65 @@ export function useHttpMutation<TBody = unknown, TRes = unknown>(
       mountedRef.current = false;
     };
   }, []);
-  // 実行関数
-  const mutate = useCallback(
+  // 最新 init を ref に保存（A8、依存配列から除外）
+  const initRef = useRef(init);
+  initRef.current = init;
+  // 最新呼び出し ID（R-A1: race 防止用、自分が最新でない呼び出しは state を更新しない）
+  const latestCallIdRef = useRef(0);
+  // 実体（throw する側、B-13）
+  const mutateAsync = useCallback(
     async (body: TBody, override?: Partial<HttpRequestInit>): Promise<TRes> => {
-      // loading 状態へ
-      if (mountedRef.current) setState((s) => ({ ...s, loading: true }));
+      // 自分の呼び出し ID を確保（連打時に最後の呼び出しのみ state 更新を許す）
+      const callId = ++latestCallIdRef.current;
+      // loading 状態へ（既に true なら skip）
+      if (mountedRef.current) {
+        setState((s) => (s.loading ? s : { ...s, loading: true }));
+      }
       try {
-        // 実行（body と override を init に合成）
+        // 実行（最新 init と override を合成）
         const res = await client.request<TRes>({
-          ...init,
+          ...initRef.current,
           ...override,
-          body: body as BodyInit | null | undefined,
+          body,
         });
-        // unmount 後でなければ state 更新
-        if (mountedRef.current) {
+        // unmount 後 or 自分より新しい呼び出しが既に走っている場合は state 更新を skip
+        if (mountedRef.current && callId === latestCallIdRef.current) {
           setState({ data: res.body, error: undefined, loading: false });
         }
         return res.body;
       } catch (err) {
-        // unmount 後でなければ state 更新
-        if (mountedRef.current) {
-          setState({
-            data: undefined,
-            error: err as HttpError,
-            loading: false,
-          });
+        // HttpError にラップしてから state 更新（B-14）
+        const httpErr = toHttpError(err);
+        if (mountedRef.current && callId === latestCallIdRef.current) {
+          setState({ data: undefined, error: httpErr, loading: false });
         }
-        throw err;
+        throw httpErr;
       }
     },
-    [client, init],
+    [client],
+  );
+  // fire-and-forget 版（throw しない、エラーは state 経由）
+  const mutate = useCallback(
+    (body: TBody, override?: Partial<HttpRequestInit>): void => {
+      // dev 環境では mutate のエラーを console.warn で通知（unhandled rejection 監視の代替）
+      mutateAsync(body, override).catch((err: unknown) => {
+        // process.env を globalThis 経由で安全に参照（@types/node 非依存）
+        const env = (globalThis as { process?: { env?: { NODE_ENV?: string } } })
+          .process?.env;
+        if (env !== undefined && env.NODE_ENV !== "production") {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[useHttpMutation] mutate error (use mutateAsync to handle):",
+            err,
+          );
+        }
+      });
+    },
+    [mutateAsync],
   );
   // リセット関数
   const reset = useCallback(() => {
     setState({ data: undefined, error: undefined, loading: false });
   }, []);
-  return { ...state, mutate, reset };
+  return { ...state, mutate, mutateAsync, reset };
 }

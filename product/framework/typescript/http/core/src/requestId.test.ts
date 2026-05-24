@@ -1,7 +1,12 @@
 // vitest DSL を取り込み
 import { afterEach, describe, expect, it, vi } from "vitest";
 // テスト対象
-import { REQUEST_ID_HEADER, createRequestId } from "./requestId.js";
+import {
+  REQUEST_ID_HEADER,
+  TRACEPARENT_HEADER,
+  createRequestId,
+  createTraceparent,
+} from "./requestId.js";
 
 describe("REQUEST_ID_HEADER", () => {
   // 標準ヘッダ名
@@ -34,5 +39,70 @@ describe("createRequestId", () => {
     vi.stubGlobal("crypto", undefined);
     const id = createRequestId();
     expect(id.length).toBeGreaterThan(0);
+  });
+});
+
+describe("TRACEPARENT_HEADER", () => {
+  // W3C 標準ヘッダ名は小文字固定
+  it("traceparent (小文字固定)", () => {
+    expect(TRACEPARENT_HEADER).toBe("traceparent");
+  });
+});
+
+describe("createTraceparent", () => {
+  // 各テスト後に stub を解除
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+  // W3C trace-context 形式の検証
+  it("00-<32hex>-<16hex>-01 形式を返す", () => {
+    const tp = createTraceparent();
+    expect(tp).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+  });
+  // 連続生成で異なる ID を返す
+  it("連続生成で trace-id / span-id が変わる", () => {
+    const a = createTraceparent();
+    const b = createTraceparent();
+    expect(a).not.toBe(b);
+  });
+  // crypto.getRandomValues が無い環境（Math.random フォールバック）
+  it("crypto.getRandomValues 無しでもフォールバックで生成", () => {
+    vi.stubGlobal("crypto", {});
+    const tp = createTraceparent();
+    expect(tp).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+  });
+  // T-A4: Math.random フォールバックが決定論的に動作する（全 0）
+  it("T-A4: Math.random=0 固定で全 byte 0 の traceparent を生成", () => {
+    vi.stubGlobal("crypto", {});
+    const spy = vi.spyOn(Math, "random").mockReturnValue(0);
+    try {
+      const tp = createTraceparent();
+      // 0x00 を 24 byte 分: trace 32 hex + span 16 hex
+      expect(tp).toBe("00-00000000000000000000000000000000-0000000000000000-01");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  // T-A4: Math.random=0.999 固定で全 byte 0xff（padStart 不要だが整合確認）
+  it("T-A4: Math.random=0.999 固定で全 byte 0xff の traceparent を生成", () => {
+    vi.stubGlobal("crypto", {});
+    const spy = vi.spyOn(Math, "random").mockReturnValue(0.999);
+    try {
+      const tp = createTraceparent();
+      expect(tp).toBe("00-ffffffffffffffffffffffffffffffff-ffffffffffffffff-01");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  // T-A5: getRandomValues 不在時 Math.random が 16+8 = 24 回呼ばれる（バイト数の担保）
+  it("T-A5: フォールバック時 Math.random が 24 回呼ばれる", () => {
+    vi.stubGlobal("crypto", {});
+    const spy = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    try {
+      createTraceparent();
+      expect(spy).toHaveBeenCalledTimes(24);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

@@ -55,19 +55,44 @@ export class HttpError extends Error {
 export function normalizeError(err: unknown, req: HttpRequest): HttpError {
   // 既存 HttpError は素通し
   if (err instanceof HttpError) {
-    // requestId が無ければ req のものを補完して新規生成
+    // requestId が無ければ補完が必要
     if (err.requestId === undefined) {
-      return new HttpError({
-        // 元のフィールドを引き継ぐ
+      // サブクラスの場合は new HttpError で複製するとサブクラス固有フィールドが失われる
+      // → 原位置で defineProperty で requestId を上書き（C-A5）
+      if (err.constructor !== HttpError) {
+        try {
+          Object.defineProperty(err, "requestId", {
+            value: req.requestId,
+            writable: false,
+            enumerable: true,
+            configurable: true,
+          });
+          return err;
+          /* v8 ignore next 3 */
+        } catch {
+          // 何らかの理由で defineProperty が失敗した場合は基底 HttpError として複製にフォールバック
+        }
+      }
+      // 基底 HttpError なら新規生成（フィールドは元のものを引き継ぐ）
+      const next = new HttpError({
         message: err.message,
         status: err.status,
         code: err.code,
         retryable: err.retryable,
-        // 補完
         requestId: req.requestId,
         cause: err.cause,
         response: err.response,
       });
+      // stack を元のエラーから引き継ぐ（throw 元のフレームを残す、B-5）
+      if (err.stack !== undefined) {
+        try {
+          next.stack = err.stack;
+          /* v8 ignore next 3 */
+        } catch {
+          // stack の writable が false の環境では諦める（実害なし、新 stack で続行）
+        }
+      }
+      return next;
     }
     // 既に requestId がある場合は素通し
     return err;
@@ -93,11 +118,25 @@ export function normalizeError(err: unknown, req: HttpRequest): HttpError {
     });
   }
   // fetch のネットワーク失敗は TypeError として上がる
+  // Node 環境（undici）では cause.code に ECONNREFUSED/ECONNRESET/ETIMEDOUT 等が入る → これらのみ retryable
+  // ブラウザ環境では cause が無い場合がほとんど（CORS/Mixed Content 等の永続失敗も同居）→ 安全のため非 retryable
   if (err instanceof TypeError) {
+    const cause = (err as { cause?: { code?: string } }).cause;
+    const code = cause?.code;
+    const RETRYABLE_NET_CODES = new Set([
+      "ECONNREFUSED",
+      "ECONNRESET",
+      "ETIMEDOUT",
+      "EAI_AGAIN",
+      "EPIPE",
+      "ENETUNREACH",
+      "ENOTFOUND",
+    ]);
+    const retryable = typeof code === "string" && RETRYABLE_NET_CODES.has(code);
     return new HttpError({
       message: err.message,
       code: "NETWORK",
-      retryable: true,
+      retryable,
       requestId: req.requestId,
       cause: err,
     });
