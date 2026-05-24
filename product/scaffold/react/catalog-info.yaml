@@ -1,0 +1,29 @@
+# Backstage Software Catalog - Component: k1s0-scaffold-react
+# React 19 + TypeScript + Vite の Web SPA スターター雛形
+
+# Backstage Catalog のスキーマバージョン
+apiVersion: backstage.io/v1alpha1
+# エンティティ種別 (Component)
+kind: Component
+# エンティティ自身を識別するメタデータ
+metadata:
+  # Component の一意な名前 (kebab-case 必須、ディレクトリ名と異なる場合あり)
+  name: k1s0-scaffold-react
+  # UI 表示用の説明文
+  description: "React 19 + TypeScript + Vite の Web SPA スターター雛形"
+  # 検索・フィルタ用タグ
+  tags:
+    - scaffold
+    - react
+    - vite
+    - typescript
+# Component 固有の仕様
+spec:
+  # 種別 (SPA は website)
+  type: website
+  # ライフサイクル (雛形のため experimental)
+  lifecycle: experimental
+  # 所有者 (framework/typescript で先に登録済みの Group)
+  owner: k1s0-framework-team
+  # 所属する System (本ディレクトリ直上で定義した k1s0-scaffold)
+  system: k1s0-scaffold
