@@ -477,14 +477,19 @@ impl SetupEngine for BackstageEngine {
         nssm.install(&service_name, cmd_exe, reporter)?;
 
         // AppParameters を起動モードに応じて設定する
+        let app_config_path = app_dir.join("app-config.yaml");
+        let app_config_path_str = app_config_path.to_string_lossy().to_string();
         let app_parameters = match config.backstage.mode {
             // dev は frontend/backend の開発サーバーをまとめて起動する
-            BackstageMode::Dev => "/c yarn start",
+            BackstageMode::Dev => "/c yarn start".to_string(),
             // build はビルド済み frontend を production backend から配信する
-            BackstageMode::Build => "/c yarn workspace backend start --config app-config.yaml",
+            BackstageMode::Build => format!(
+                "/c yarn workspace backend start --config \"{}\"",
+                app_config_path_str
+            ),
         };
         // AppParameters を設定する
-        nssm.set(&service_name, "AppParameters", app_parameters)?;
+        nssm.set(&service_name, "AppParameters", &app_parameters)?;
 
         // ステップ 7/9: NSSM でサービスの詳細設定を行う
         reporter.step_start(
