@@ -187,3 +187,102 @@ API リファレンスや使用例は各パッケージ配下の README を参�
 - [notification/core/README.md](notification/core/README.md)
 
 `react` / `react-native` 版の README もそれぞれのディレクトリ直下にあります。
+
+## Backstage カタログ登録
+
+このディレクトリ配下のパッケージ群は、社内 Backstage (DevPortal の setup ツールでインストール、`http://localhost:7007`) の Software Catalog に登録できる状態にしてあります。登録すると依存関係グラフや所有者一覧が Backstage UI 上で可視化されます。
+
+### 登録される 18 エンティティの構成
+
+| ファイル | 種別 | 名前 | 役割 |
+|---|---|---|---|
+| `catalog-info.yaml` | Location | `k1s0-ts-framework` | 配下 17 ファイルの一括取り込みエントリポイント |
+| `owners.yaml` | Group + Domain | `k1s0-framework-team` / `k1s0-framework` | 所有チームとフレームワーク領域 |
+| `<domain>/catalog-info.yaml` | System | `k1s0-ts-<domain>` | 4 ドメイン (config / http / logger / notification) |
+| `<domain>/<platform>/catalog-info.yaml` | Component | `k1s0-ts-<domain>-<platform>` | 12 パッケージ (core / react / react-native) |
+
+`react` / `react-native` 版 Component は `spec.dependsOn` で同ドメインの `core` を参照しているため、Backstage UI の「Dependency Graph」タブで `core → react / react-native` の矢印が表示されます。
+
+### 登録手順 (推奨: バッチ一発)
+
+`publish-all.bat` と同じ要領で、`register-all.bat` 一発で 17 ファイルを Catalog REST API (`POST /api/catalog/locations`) 経由で一括登録できます。サービス再起動も管理者権限も不要です。
+
+```cmd
+cd C:\work\github\DevPortal\product\framework\typescript
+register-all.bat
+```
+
+これだけで以下が自動実行されます。
+
+1. Backstage (`http://localhost:7007/api/catalog/health`) の死活確認
+2. 既存 location 一覧を取得 (重複検出用)
+3. 第 1 ラウンドで `owners.yaml` + 4 System を並列 POST (既定 4 並列、`-MaxParallel` で変更可)
+4. 第 2 ラウンドで 12 Component を並列 POST
+5. 集計結果 (location ごとの所要時間 + トータル) を OK / SKIP / FAIL の色付きで表示
+6. `component:k1s0-ts-config-core` を 1 件取得して取り込み完了を sanity check
+
+終了コードは「FAIL が 1 件でもあれば 1、それ以外 0」です。再実行時は既存 location が SKIP 扱いになるので idempotent です。
+
+#### オプション
+
+| パラメータ | 既定値 | 説明 |
+|---|---|---|
+| `-BackstageUrl` | `http://localhost:7007` | 登録先 Backstage の baseUrl |
+| `-LocationType` | `file` | location type (`file` = backend filesystem パス / `url` = HTTP URL) |
+| `-UrlBase` | (なし) | `url` モード時の必須 base URL。各 `RelPath` を `{UrlBase}/{RelPath}` に結合して target にする |
+| `-OnConflict` | `refresh` | 既存 location の挙動 (`refresh` / `reject`) |
+| `-Token` | (なし) | permission framework 有効時の Bearer トークン |
+| `-DryRun` | (なし) | 指定時は `?dryRun=true` を付与し DB に書かずバリデーションのみ |
+| `-MaxParallel` | `4` | 1 ラウンド内の並列度 (1〜16) |
+| `-LogFile` | (なし) | タイムスタンプ付きで全イベントを追記出力 |
+
+```cmd
+:: ローカルファイル直接 (デフォルト、同一マシンに Backstage がある場合)
+register-all.bat -DryRun -MaxParallel 2 -LogFile register.log
+
+:: 別マシンの Backstage に対し、GitHub raw URL 経由で登録
+register-all.bat -BackstageUrl http://192.168.0.10:7007 ^
+                 -LocationType url ^
+                 -UrlBase https://raw.githubusercontent.com/myorg/DevPortal/main/product/framework/typescript ^
+                 -Token <bearer>
+```
+
+引数は `.bat` から `.ps1` にそのまま転送されます。
+
+#### publish-all との対比
+
+| 項目 | publish-all | register-all |
+|---|---|---|
+| 対象 | 12 npm パッケージ | 17 catalog-info.yaml |
+| 送信先 | Verdaccio (`/-/ping`, npm publish) | Backstage (`/api/catalog/health`, `POST /locations`) |
+| 認証 | htpasswd Basic auth (`_auth=Base64`) | optional Bearer (permission 有効時のみ) |
+| Round 構造 | Round 1 = core 4 / Round 2 = react・react-native 8 | Round 1 = owners + 4 System / Round 2 = 12 Component |
+| 重複検出 | `npm view <name>@<ver>` で SKIP | 既存 locations の target 一致で SKIP / 409 を SKIP 扱い |
+
+### 失敗時のトラブルシュート
+
+| 症状 | 確認ポイント |
+|---|---|
+| `Backstage に到達できません` | `Get-Service DevPortal-Backstage` で起動状態を確認、停止していたら `Start-Service DevPortal-Backstage` |
+| `HTTP 401` / `HTTP 403` | Backstage の permission framework が有効化されている可能性。`-Token <bearer>` で service-to-service トークンを渡す |
+| `HTTP 400` でファイルが見つからない | `-LocationType file` の場合、Backstage backend が動いている Windows ホスト上の絶対パスとして解決される。共有マシン以外で動かす場合は GitHub に push して `-LocationType url` に切り替える |
+| `HTTP 409` で全件 SKIP | 既に登録済み。`-OnConflict refresh` で強制リフレッシュ (デフォルト)。完全に消したい場合は Backstage UI の「Unregister」を使う |
+
+### 手動登録 (バッチを使わない場合)
+
+1. Backstage 左メニュー「Create」→ 右上「Register Existing Component」を開きます。
+2. このリポジトリの `product/framework/typescript/catalog-info.yaml` の URL (GitHub の Web URL または raw URL) を入力し、Analyze → Import を実行します。
+3. もしくは `%ProgramData%\DevPortal\backstage\app\app-config.yaml` の `catalog.locations` に以下を追記して `DevPortal-Backstage` サービスを再起動しても取り込めます。
+
+```yaml
+catalog:
+  locations:
+    - type: url
+      target: https://github.com/<org>/DevPortal/blob/main/product/framework/typescript/catalog-info.yaml
+```
+
+### 雛形・公式仕様
+
+- 各種別の最小雛形: [../format/backstage/README.md](../format/backstage/README.md)
+- 公式 Descriptor Format: https://backstage.io/docs/features/software-catalog/descriptor-format
+- Catalog REST API (Create Location): https://backstage.io/docs/features/software-catalog/api/create-location

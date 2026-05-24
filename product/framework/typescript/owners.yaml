@@ -1,0 +1,41 @@
+# Backstage Software Catalog - framework/typescript 配下の所有者定義
+# Group と Domain を multi-document YAML で 1 ファイルにまとめる
+# Component / System から owner / domain として参照される
+
+# === Group: フレームワーク開発チーム ===
+# Backstage Catalog のスキーマバージョン
+apiVersion: backstage.io/v1alpha1
+# エンティティ種別 (Group)
+kind: Group
+# エンティティ自身を識別するメタデータ
+metadata:
+  # チームの一意な名前 (Component の owner から参照)
+  name: k1s0-framework-team
+  # UI 表示用の説明文
+  description: "@k1s0-ts-* TypeScript フレームワークパッケージ群の所有チーム"
+# Group 固有の仕様
+spec:
+  # 種別: チーム
+  type: team
+  # プロフィール情報
+  profile:
+    # UI に表示する正式名称
+    displayName: k1s0 Framework Team
+  # 子 Group (なし、必須フィールドのため空配列)
+  children: []
+---
+# === Domain: フレームワーク領域 ===
+# Backstage Catalog のスキーマバージョン
+apiVersion: backstage.io/v1alpha1
+# エンティティ種別 (Domain)
+kind: Domain
+# エンティティ自身を識別するメタデータ
+metadata:
+  # ドメインの一意な名前 (System の domain から参照)
+  name: k1s0-framework
+  # UI 表示用の説明文
+  description: "DevPortal の社内共通フレームワーク領域 (TypeScript / Rust 等)"
+# Domain 固有の仕様
+spec:
+  # 所有者 (上で定義した Group)
+  owner: k1s0-framework-team

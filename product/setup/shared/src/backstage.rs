@@ -195,6 +195,18 @@ impl BackstageEngine {
             &["backend", "cors", "origin"],
             serde_yaml::Value::String(format!("http://localhost:{}", app_port)),
         );
+        if matches!(config.backstage.mode, BackstageMode::Build) {
+            Self::set_yaml_path(
+                &mut yaml_value,
+                &[
+                    "auth",
+                    "providers",
+                    "guest",
+                    "dangerouslyAllowOutsideDevelopment",
+                ],
+                serde_yaml::Value::Bool(true),
+            );
+        }
 
         // 更新した YAML を文字列にシリアライズする
         let updated_content = match serde_yaml::to_string(&yaml_value) {

@@ -1,0 +1,31 @@
+# Backstage Software Catalog - Component: @k1s0-ts-config/react-native
+
+# Backstage Catalog のスキーマバージョン
+apiVersion: backstage.io/v1alpha1
+# エンティティ種別 (Component)
+kind: Component
+# エンティティ自身を識別するメタデータ
+metadata:
+  # Component の一意な名前
+  name: k1s0-ts-config-react-native
+  # UI 表示用の説明文 (package.json の description より)
+  description: "DevPortal 設定管理ライブラリの React Native 連携 (Provider / hooks / Platform 別マージ)"
+  # 検索・フィルタ用タグ
+  tags:
+    - typescript
+    - library
+    - config
+    - react-native
+# Component 固有の仕様
+spec:
+  # 種別 (再利用ライブラリ)
+  type: library
+  # ライフサイクル (本番利用可)
+  lifecycle: production
+  # 所有者 (owners.yaml で定義した Group)
+  owner: k1s0-framework-team
+  # 所属する System (config ドメイン)
+  system: k1s0-ts-config
+  # 依存先 Component (core を内部利用)
+  dependsOn:
+    - component:default/k1s0-ts-config-core

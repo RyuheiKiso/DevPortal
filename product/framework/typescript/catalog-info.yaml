@@ -1,0 +1,42 @@
+# Backstage Software Catalog - framework/typescript ルート Location
+# このファイル 1 つを Backstage に登録すると、targets に列挙した
+# 17 ファイル (Group+Domain / 4 System / 12 Component) が一括で取り込まれる
+
+# Backstage Catalog のスキーマバージョン
+apiVersion: backstage.io/v1alpha1
+# エンティティ種別 (Location: 他カタログファイルへのポインタ)
+kind: Location
+# エンティティ自身を識別するメタデータ
+metadata:
+  # Location 自身の一意な名前
+  name: k1s0-ts-framework
+  # UI 表示用の説明文
+  description: framework/typescript 配下の 17 個のカタログファイルを一括登録するエントリポイント
+# Location 固有の仕様
+spec:
+  # 参照先タイプ (相対パスでも url 指定で動作)
+  type: url
+  # 取り込み対象ファイル (相対パス、Location ファイル基準)
+  targets:
+    # 所有者 (Group + Domain)
+    - ./owners.yaml
+    # config ドメイン: System + Component 3 種
+    - ./config/catalog-info.yaml
+    - ./config/core/catalog-info.yaml
+    - ./config/react/catalog-info.yaml
+    - ./config/react-native/catalog-info.yaml
+    # http ドメイン: System + Component 3 種
+    - ./http/catalog-info.yaml
+    - ./http/core/catalog-info.yaml
+    - ./http/react/catalog-info.yaml
+    - ./http/react-native/catalog-info.yaml
+    # logger ドメイン: System + Component 3 種
+    - ./logger/catalog-info.yaml
+    - ./logger/core/catalog-info.yaml
+    - ./logger/react/catalog-info.yaml
+    - ./logger/react-native/catalog-info.yaml
+    # notification ドメイン: System + Component 3 種
+    - ./notification/catalog-info.yaml
+    - ./notification/core/catalog-info.yaml
+    - ./notification/react/catalog-info.yaml
+    - ./notification/react-native/catalog-info.yaml
