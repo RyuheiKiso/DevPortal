@@ -129,6 +129,32 @@ describe("sleep", () => {
 });
 
 describe("withRetry", () => {
+  it("不正な policy は attempt 実行前に拒否", async () => {
+    const policy = {
+      ...mergeRetryDefaults({ maxRetries: 0 }),
+      maxRetries: -1,
+    };
+    const attempt = vi.fn(async () => "ok");
+
+    await expect(withRetry(policy, undefined, attempt)).rejects.toThrow(
+      /maxRetries/,
+    );
+    expect(attempt).not.toHaveBeenCalled();
+  });
+
+  it("不正な jitter は attempt 実行前に拒否", async () => {
+    const policy = {
+      ...mergeRetryDefaults({ maxRetries: 0 }),
+      jitter: "bad",
+    } as ReturnType<typeof mergeRetryDefaults>;
+    const attempt = vi.fn(async () => "ok");
+
+    await expect(withRetry(policy, undefined, attempt)).rejects.toThrow(
+      /jitter/,
+    );
+    expect(attempt).not.toHaveBeenCalled();
+  });
+
   // 試行 1 回で成功
   it("最初の試行で成功すればそのまま返す", async () => {
     const policy = mergeRetryDefaults({ maxRetries: 3, jitter: "none" });
@@ -214,7 +240,11 @@ describe("withRetry", () => {
     const attempt = vi.fn(async () => {
       throw err;
     });
-    await expect(withRetry(policy, undefined, attempt)).rejects.toBe(err);
+    await expect(withRetry(policy, undefined, attempt)).rejects.toMatchObject({
+      message: "x",
+      status: 503,
+      retryable: false,
+    });
     expect(attempt).toHaveBeenCalledTimes(1);
   });
   // signal abort で即時中断

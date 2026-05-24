@@ -1,6 +1,3 @@
-// React Native の Platform を取り込み
-import { Platform } from "react-native";
-
 // Platform 別の fetch 実装マップ（default は必須）
 export interface PlatformFetchMap {
   // すべての Platform に対するデフォルト fetch
@@ -11,10 +8,24 @@ export interface PlatformFetchMap {
   android?: typeof fetch;
 }
 
+declare const require:
+  | ((id: string) => unknown)
+  | undefined;
+
+function getPlatformOS(): string {
+  if (typeof require !== "function") {
+    return "default";
+  }
+  const mod = require("react-native") as {
+    Platform?: { OS?: string };
+  };
+  return mod.Platform?.OS ?? "default";
+}
+
 // Platform.OS に応じた fetch を返す（指定がなければ default にフォールバック）
 export function resolvePlatformFetch(map: PlatformFetchMap): typeof fetch {
   // OS 判定（logger/react-native と同じ手法）
-  switch (Platform.OS) {
+  switch (getPlatformOS()) {
     case "ios":
       return map.ios ?? map.default;
     case "android":

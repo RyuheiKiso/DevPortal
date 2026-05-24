@@ -1,5 +1,5 @@
 // rest サブモジュールの公開エントリ（re-export のみ）
-export { encodeSearchParams, joinUrl } from "./url.js";
+export { appendSearchParams, encodeSearchParams, joinUrl } from "./url.js";
 export { isJsonContentType, isJsonSerializableBody } from "./json.js";
 export {
   del,

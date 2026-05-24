@@ -18,6 +18,18 @@ interface NetInfoModule {
   fetch: () => Promise<NetInfoState>;
 }
 
+interface OfflineWaiter {
+  resolve: () => void;
+  reject: (err: HttpError) => void;
+  requestId: string;
+  signal?: AbortSignal;
+  onAbort?: () => void;
+}
+
+function getAbortReason(signal: AbortSignal | undefined): unknown {
+  return (signal as { reason?: unknown } | undefined)?.reason;
+}
+
 // createNetInfoAware のオプション
 export interface NetInfoAwareOptions {
   // オフライン時に即 reject するか（既定 true、queueWhenOffline と排他）
@@ -61,16 +73,19 @@ export async function createNetInfoAware(
   // 初期状態を fetch で取得（楽観前提を回避、A10）
   const initial = await mod.fetch();
   let online = initial.isConnected === true;
-  // オフライン時に待機している resolver 群
-  const waiters: Array<() => void> = [];
+  // オフライン時に待機している request 群
+  const waiters: OfflineWaiter[] = [];
   // 状態変化を購読し、unsubscribe を保持（A9）
   const unsubscribe = mod.addEventListener((state) => {
     const next = state.isConnected === true;
     // オフライン→オンライン復帰時に待機中の resolver を解放
     if (!online && next) {
       const list = waiters.splice(0, waiters.length);
-      for (const fn of list) {
-        fn();
+      for (const waiter of list) {
+        if (waiter.signal !== undefined && waiter.onAbort !== undefined) {
+          waiter.signal.removeEventListener("abort", waiter.onAbort);
+        }
+        waiter.resolve();
       }
       logger?.info("netinfo.online", { resumed: list.length });
     } else if (online && !next) {
@@ -94,22 +109,54 @@ export async function createNetInfoAware(
         requestId: req.requestId,
       });
     }
-    // queueWhenOffline: オンライン復帰を待つ（Promise を保留、dispose で reject）
+    // queueWhenOffline: オンライン復帰を待つ。signal abort / dispose では reject する。
     await new Promise<void>((resolve, reject) => {
-      // dispose 後に enqueue されたら即 reject
-      if (disposed) {
+      const rejectWith = (message: string, code: string, cause?: unknown): void => {
         reject(
           new HttpError({
-            message: "netInfo aware disposed",
-            code: "OFFLINE",
+            message,
+            code,
             retryable: false,
             requestId: req.requestId,
+            cause,
           }),
         );
+      };
+      // dispose 後に enqueue されたら即 reject
+      if (disposed) {
+        rejectWith("netInfo aware disposed", "OFFLINE");
         return;
       }
-      waiters.push(resolve);
+      if (req.signal?.aborted === true) {
+        rejectWith("request aborted while offline", "ABORTED", getAbortReason(req.signal));
+        return;
+      }
+      const waiter: OfflineWaiter = {
+        resolve,
+        reject: (err) => reject(err),
+        requestId: req.requestId,
+        signal: req.signal,
+      };
+      waiter.onAbort = (): void => {
+        const index = waiters.indexOf(waiter);
+        if (index >= 0) {
+          waiters.splice(index, 1);
+        }
+        rejectWith("request aborted while offline", "ABORTED", getAbortReason(req.signal));
+      };
+      if (req.signal !== undefined) {
+        req.signal.addEventListener("abort", waiter.onAbort, { once: true });
+      }
+      waiters.push(waiter);
     });
+    if (disposed) {
+      throw new HttpError({
+        message: "netInfo aware disposed",
+        code: "OFFLINE",
+        retryable: false,
+        requestId: req.requestId,
+      });
+    }
     return req;
   };
   // dispose: 購読解除 + 待機中の resolver を解放（ループからの出口を与える）
@@ -117,10 +164,20 @@ export async function createNetInfoAware(
     if (disposed) return;
     disposed = true;
     unsubscribe();
-    // 待機中の resolver を全部解放（後段 interceptor で online 判定が false なら再度 reject される）
+    // 待機中 request を全部 reject する。
     const pending = waiters.splice(0, waiters.length);
-    for (const fn of pending) {
-      fn();
+    for (const waiter of pending) {
+      if (waiter.signal !== undefined && waiter.onAbort !== undefined) {
+        waiter.signal.removeEventListener("abort", waiter.onAbort);
+      }
+      waiter.reject(
+        new HttpError({
+          message: "netInfo aware disposed",
+          code: "OFFLINE",
+          retryable: false,
+          requestId: waiter.requestId,
+        }),
+      );
     }
   };
   // 既存 interceptors の後ろに追加して派生クライアントを返す

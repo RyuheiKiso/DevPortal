@@ -1,7 +1,7 @@
 // vitest DSL を取り込み
 import { describe, expect, it } from "vitest";
 // テスト対象
-import { encodeSearchParams, joinUrl } from "./url.js";
+import { appendSearchParams, encodeSearchParams, joinUrl } from "./url.js";
 
 describe("encodeSearchParams", () => {
   // undefined / 空オブジェクト
@@ -42,5 +42,33 @@ describe("joinUrl", () => {
     expect(joinUrl("https://a", "x")).toBe("https://a/x");
     expect(joinUrl("https://a/", "x")).toBe("https://a/x");
     expect(joinUrl("https://a", "/x")).toBe("https://a/x");
+  });
+});
+
+describe("appendSearchParams", () => {
+  it("query が無ければ URL を変更しない", () => {
+    expect(appendSearchParams("/users?active=true", undefined)).toBe(
+      "/users?active=true",
+    );
+  });
+
+  it("既存 query には & で追記する", () => {
+    expect(appendSearchParams("/users?active=true", { page: 2 })).toBe(
+      "/users?active=true&page=2",
+    );
+  });
+
+  it("? / & で終わる URL には区切り文字を重複させない", () => {
+    expect(appendSearchParams("/users?", { page: 2 })).toBe("/users?page=2");
+    expect(appendSearchParams("/users?active=true&", { page: 2 })).toBe(
+      "/users?active=true&page=2",
+    );
+  });
+
+  it("hash fragment の前に query を追加する", () => {
+    expect(appendSearchParams("/users#top", { page: 2 })).toBe("/users?page=2#top");
+    expect(appendSearchParams("/users?active=true#top", { page: 2 })).toBe(
+      "/users?active=true&page=2#top",
+    );
   });
 });

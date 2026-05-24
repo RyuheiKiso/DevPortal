@@ -1,13 +1,71 @@
 // React の hook を取り込み
 import { useCallback, useEffect, useRef, useState } from "react";
 // HTTP クライアント関連の型と HttpError を core から取り込み
-import { HttpError } from "@k1s0-ts-http/core";
-import type { HttpRequestInit } from "@k1s0-ts-http/core";
+import { HttpError, isJsonContentType } from "@k1s0-ts-http/core";
+import type { HttpRequestInit, HttpResponse } from "@k1s0-ts-http/core";
 // 親クライアント取得
 import { useHttpClient } from "./hooks.js";
 
 // HttpRequestInit["body"] の型エイリアス（BodyInit | null | undefined と等価、RN の lib に DOM が無いため）
 type MutationBody = NonNullable<HttpRequestInit["body"]>;
+
+export type HttpResponseBodyMode =
+  | "auto"
+  | "json"
+  | "text"
+  | "blob"
+  | "arrayBuffer"
+  | "stream";
+
+async function resolveJsonBody<T>(res: HttpResponse<T>): Promise<T> {
+  const text = await res.raw.text();
+  return (text.length > 0 ? JSON.parse(text) : undefined) as T;
+}
+
+async function resolveResponseBody<T>(
+  res: HttpResponse<T>,
+  mode: HttpResponseBodyMode = "auto",
+): Promise<T> {
+  try {
+    if (res.body !== undefined) {
+      return res.body;
+    }
+
+    if (mode === "json") {
+      return await resolveJsonBody(res);
+    }
+    if (mode === "text") {
+      const text = await res.raw.text();
+      return (text.length > 0 ? text : undefined) as T;
+    }
+    if (mode === "blob") {
+      return (await res.raw.blob()) as T;
+    }
+    if (mode === "arrayBuffer") {
+      return (await res.raw.arrayBuffer()) as T;
+    }
+    if (mode === "stream") {
+      return res.raw.body as T;
+    }
+
+    const contentType = res.headers["content-type"];
+    if (isJsonContentType(contentType)) {
+      return await resolveJsonBody(res);
+    }
+
+    const text = await res.raw.text();
+    return (text.length > 0 ? text : undefined) as T;
+  } catch (cause) {
+    throw new HttpError({
+      message: cause instanceof Error ? cause.message : "failed to parse response body",
+      code: "PARSE_ERROR",
+      retryable: false,
+      requestId: res.request.requestId,
+      response: res,
+      cause,
+    });
+  }
+}
 
 // 任意の throw 値を HttpError にラップ（duck-typing 解消、B-14）
 function toHttpError(err: unknown): HttpError {
@@ -32,6 +90,8 @@ function toHttpError(err: unknown): HttpError {
 export interface HttpQueryOptions {
   deps?: readonly unknown[];
   enabled?: boolean;
+  // レスポンス body の解釈方法。auto は JSON content-type なら JSON、それ以外は text
+  parseAs?: HttpResponseBodyMode;
 }
 
 // useHttpQuery の戻り値型
@@ -51,6 +111,7 @@ export function useHttpQuery<T = unknown>(
 ): HttpQueryState<T> {
   const client = useHttpClient();
   const enabled = options.enabled ?? true;
+  const parseAs = options.parseAs ?? "auto";
   const [state, setState] = useState<{
     data: T | undefined;
     error: HttpError | undefined;
@@ -81,10 +142,12 @@ export function useHttpQuery<T = unknown>(
     setState((s) => (s.loading ? s : { ...s, loading: true }));
     return client
       .request<T>({ ...initRef.current, signal: ctrl.signal })
-      .then((res) => {
+      .then(async (res) => {
+        if (ctrl.signal.aborted) return;
+        const body = await resolveResponseBody(res, parseAs);
         if (ctrl.signal.aborted) return;
         setState({
-          data: res.body,
+          data: body,
           error: undefined,
           loading: false,
           requestId: res.request.requestId,
@@ -102,7 +165,7 @@ export function useHttpQuery<T = unknown>(
         });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, enabled, ...(deps ?? [])]);
+  }, [client, enabled, parseAs, ...(deps ?? [])]);
   useEffect(() => {
     void fetchOnce();
     return () => {
@@ -124,6 +187,11 @@ export interface HttpMutationState<TBody, TRes> {
   reset: () => void;
 }
 
+export interface HttpMutationOptions {
+  // レスポンス body の解釈方法。auto は JSON content-type なら JSON、それ以外は text
+  parseAs?: HttpResponseBodyMode;
+}
+
 /**
  * POST 等の変更操作 Hook（react 版と同実装）
  *
@@ -136,8 +204,10 @@ export interface HttpMutationState<TBody, TRes> {
  */
 export function useHttpMutation<TBody extends MutationBody = MutationBody, TRes = unknown>(
   init: Omit<HttpRequestInit, "body">,
+  options: HttpMutationOptions = {},
 ): HttpMutationState<TBody, TRes> {
   const client = useHttpClient();
+  const parseAs = options.parseAs ?? "auto";
   const [state, setState] = useState<{
     data: TRes | undefined;
     error: HttpError | undefined;
@@ -168,10 +238,11 @@ export function useHttpMutation<TBody extends MutationBody = MutationBody, TRes 
           ...override,
           body,
         });
+        const responseBody = await resolveResponseBody(res, parseAs);
         if (mountedRef.current && callId === latestCallIdRef.current) {
-          setState({ data: res.body, error: undefined, loading: false });
+          setState({ data: responseBody, error: undefined, loading: false });
         }
-        return res.body;
+        return responseBody;
       } catch (err) {
         const httpErr = toHttpError(err);
         if (mountedRef.current && callId === latestCallIdRef.current) {
@@ -180,7 +251,7 @@ export function useHttpMutation<TBody extends MutationBody = MutationBody, TRes 
         throw httpErr;
       }
     },
-    [client],
+    [client, parseAs],
   );
   // fire-and-forget 版
   const mutate = useCallback(

@@ -1,7 +1,7 @@
 {
   "name": "@k1s0-ts-http/react",
   "version": "0.1.0",
-  "description": "DevPortal HTTP クライアントの React 連携（HttpClientProvider / useHttpClient / useScopedHttpClient / useHttpQuery / useHttpMutation）",
+  "description": "DevPortal HTTP client React integration: provider, scoped clients, query hooks, and mutation hooks.",
   "license": "UNLICENSED",
   "private": false,
   "type": "module",
@@ -22,9 +22,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-    "prepublishOnly": "npm run clean && npm run build && node -e \"const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.dependencies['@k1s0-ts-http/core']=p.version;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\\n');\"",
-    "postpublish": "node -e \"const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.dependencies['@k1s0-ts-http/core']='file:../core';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\\n');\""
+    "prepublishOnly": "npm run clean && npm run build && npm test",
+    "prepack": "node -e \"const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.dependencies['@k1s0-ts-http/core']=p.version;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\\n');\"",
+    "postpack": "node -e \"const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.dependencies['@k1s0-ts-http/core']='file:../core';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\\n');\""
   },
   "dependencies": {
     "@k1s0-ts-http/core": "file:../core"
@@ -40,8 +42,11 @@
   },
   "devDependencies": {
     "@types/react": "^18.3.0",
+    "@types/react-test-renderer": "^18.3.0",
     "react": "^18.3.0",
-    "typescript": "~5.8.3"
+    "react-test-renderer": "^18.3.0",
+    "typescript": "~5.8.3",
+    "vitest": "^2.1.0"
   },
   "publishConfig": {
     "access": "restricted"

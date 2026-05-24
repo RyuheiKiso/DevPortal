@@ -21,7 +21,41 @@ import {
   mergeRetryDefaults,
   withRetry,
 } from "./retry.js";
+import { appendSearchParams, joinUrl } from "./rest/url.js";
 import { withTimeout } from "./timeout.js";
+
+function assertNonNegativeInteger(name: string, value: number | undefined): void {
+  if (value === undefined) return;
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`HttpClientConfig.${name} must be a non-negative integer`);
+  }
+}
+
+function validateRuntimeConfig(config: HttpClientConfig): void {
+  if (config.requestIdHeader !== undefined && config.requestIdHeader.trim().length === 0) {
+    throw new Error("HttpClientConfig.requestIdHeader must be a non-empty string");
+  }
+
+  assertNonNegativeInteger("retry.maxRetries", config.retry?.maxRetries);
+  assertNonNegativeInteger("retry.backoffBaseMs", config.retry?.backoffBaseMs);
+  assertNonNegativeInteger("retry.backoffMaxMs", config.retry?.backoffMaxMs);
+  if (
+    config.retry?.jitter !== undefined &&
+    config.retry.jitter !== "full" &&
+    config.retry.jitter !== "none"
+  ) {
+    throw new Error('HttpClientConfig.retry.jitter must be "full" or "none"');
+  }
+  if (
+    config.retry?.retryableStatuses !== undefined &&
+    !config.retry.retryableStatuses.every((status) => Number.isInteger(status))
+  ) {
+    throw new Error("HttpClientConfig.retry.retryableStatuses must contain only integers");
+  }
+
+  assertNonNegativeInteger("timeout.totalMs", config.timeout?.totalMs);
+  assertNonNegativeInteger("timeout.perAttemptMs", config.timeout?.perAttemptMs);
+}
 
 // 平坦化された Response.headers を Record<string,string> に変換
 function headersToObject(headers: Headers): Record<string, string> {
@@ -31,50 +65,6 @@ function headersToObject(headers: Headers): Record<string, string> {
     out[key.toLowerCase()] = value;
   });
   return out;
-}
-
-// baseUrl と path を連結する（path が絶対 URL なら素通し）
-function joinUrl(baseUrl: string | undefined, path: string): string {
-  // 絶対 URL（http:// or https://）はそのまま返す
-  if (/^https?:\/\//i.test(path)) {
-    return path;
-  }
-  // baseUrl が無い場合は path をそのまま返す（呼出側責務）
-  if (baseUrl === undefined || baseUrl.length === 0) {
-    return path;
-  }
-  // 末尾スラッシュと先頭スラッシュの重複を吸収して連結
-  const left = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
-  const right = path.startsWith("/") ? path : `/${path}`;
-  return `${left}${right}`;
-}
-
-// HttpRequestInit.query を URL クエリ文字列にエンコードする
-function encodeSearchParams(query: HttpRequestInit["query"]): string {
-  // クエリが無ければ空文字
-  if (query === undefined) {
-    return "";
-  }
-  // URLSearchParams に詰める（配列値は複数回 append で展開、null/undefined はスキップ）
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
-    // null / undefined はキー自体を出力しない
-    if (value === null || value === undefined) {
-      continue;
-    }
-    // 配列値は要素ごとに append（key=v1&key=v2）
-    if (Array.isArray(value)) {
-      for (const v of value) {
-        params.append(key, String(v));
-      }
-      continue;
-    }
-    // プリミティブ値は文字列化して append
-    params.append(key, String(value));
-  }
-  // 1 件以上あれば ? プレフィックス付きで返す（無ければ空文字）
-  const s = params.toString();
-  return s.length > 0 ? `?${s}` : "";
 }
 
 // body が「1 度しか読めない」ものなら true（ReadableStream / consumed Body）
@@ -175,12 +165,42 @@ function mergeConfig(
   };
 }
 
+function snapshotConfig(config: HttpClientConfig): HttpClientConfig {
+  return {
+    ...config,
+    defaultHeaders:
+      config.defaultHeaders === undefined ? undefined : { ...config.defaultHeaders },
+    retry: config.retry === undefined ? undefined : { ...config.retry },
+    timeout: config.timeout === undefined ? undefined : { ...config.timeout },
+    requestInterceptors:
+      config.requestInterceptors === undefined
+        ? undefined
+        : [...config.requestInterceptors],
+    responseInterceptors:
+      config.responseInterceptors === undefined
+        ? undefined
+        : [...config.responseInterceptors],
+    errorInterceptors:
+      config.errorInterceptors === undefined ? undefined : [...config.errorInterceptors],
+  };
+}
+
+function freezeConfigSnapshot(config: HttpClientConfig): Readonly<HttpClientConfig> {
+  const snapshot = snapshotConfig(config);
+  if (snapshot.defaultHeaders !== undefined) Object.freeze(snapshot.defaultHeaders);
+  if (snapshot.retry !== undefined) Object.freeze(snapshot.retry);
+  if (snapshot.timeout !== undefined) Object.freeze(snapshot.timeout);
+  if (snapshot.requestInterceptors !== undefined) Object.freeze(snapshot.requestInterceptors);
+  if (snapshot.responseInterceptors !== undefined) Object.freeze(snapshot.responseInterceptors);
+  if (snapshot.errorInterceptors !== undefined) Object.freeze(snapshot.errorInterceptors);
+  return Object.freeze(snapshot);
+}
+
 // HTTP クライアントを生成するファクトリ
-export function createHttpClient(config: HttpClientConfig = {}): HttpClient {
-  // requestIdHeader の空文字 validation（C-A7、空キーヘッダの生成を防止）
-  if (config.requestIdHeader !== undefined && config.requestIdHeader.trim().length === 0) {
-    throw new Error("HttpClientConfig.requestIdHeader must be a non-empty string");
-  }
+export function createHttpClient(rawConfig: HttpClientConfig = {}): HttpClient {
+  const config = snapshotConfig(rawConfig);
+  // JS 利用や外部設定由来の不正値を入口で止める（負の retry などの無限ループ防止）
+  validateRuntimeConfig(config);
   // fetch 実装の解決（globalThis.fetch は環境差で undefined のことがあるので bind を行わず参照のみ）
   const fetchImpl: typeof fetch =
     config.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
@@ -204,7 +224,7 @@ export function createHttpClient(config: HttpClientConfig = {}): HttpClient {
     init: HttpRequestInit,
   ): Promise<HttpResponse<T>> {
     // [A] URL を組み立て（baseUrl + path + query）
-    const url = joinUrl(config.baseUrl, init.url) + encodeSearchParams(init.query);
+    const url = appendSearchParams(joinUrl(config.baseUrl, init.url), init.query);
     // [B] HttpRequest 雛形（method 既定 GET / requestId 生成 / headers マージ）
     const method: HttpMethod = init.method ?? "GET";
     const mergedHeaders: Record<string, string> = {
@@ -260,13 +280,18 @@ export function createHttpClient(config: HttpClientConfig = {}): HttpClient {
             // [I] 相関 ID を最終的に付与（auth より後、interceptor の置換からも保護、A1）
             // ヘッダ名は config.requestIdHeader でカスタマイズ可能（既定 "X-Request-Id"、B-2）
             attemptHeaders[requestIdHeader] = req.requestId;
-            // [J] fetch 本体を呼び出し
-            const raw = await fetchImpl(req.url, {
-              method: req.method,
-              headers: attemptHeaders,
-              body: req.body,
-              signal,
-            });
+            // [J] fetch 本体を呼び出し、retry 層が判定できるよう fetch 由来の例外も正規化する
+            let raw: Response;
+            try {
+              raw = await fetchImpl(req.url, {
+                method: req.method,
+                headers: attemptHeaders,
+                body: req.body,
+                signal,
+              });
+            } catch (err) {
+              throw normalizeError(err, req);
+            }
             // [K] !ok なら HttpError を throw（retry 判定対象に / response も保持、A2）
             if (!raw.ok) {
               // エラーレスポンスを HttpResponse として保持（利用者が err.response.raw.text() 等で読める）
@@ -280,9 +305,13 @@ export function createHttpClient(config: HttpClientConfig = {}): HttpClient {
                 request: req,
               };
               // retryable は effectivePolicy ベースで判定（冪等性ガードで実際に retry されない場合は false に、C-A1）
+              const canRetryMore =
+                attempt < effectiveRetryPolicy.maxRetries &&
+                effectiveRetryPolicy.maxRetries > 0;
               const willActuallyRetry =
-                effectiveRetryPolicy.maxRetries > 0 &&
-                effectiveRetryPolicy.retryableStatuses.includes(raw.status);
+                canRetryMore &&
+                (effectiveRetryPolicy.shouldRetry !== undefined ||
+                  effectiveRetryPolicy.retryableStatuses.includes(raw.status));
               const httpErr = new HttpError({
                 message: `HTTP ${raw.status}`,
                 status: raw.status,
@@ -303,7 +332,7 @@ export function createHttpClient(config: HttpClientConfig = {}): HttpClient {
               ok: true,
               headers: headersToObject(raw.headers),
               rawHeaders: raw.headers,
-              body: undefined as unknown as T,
+              body: undefined,
               raw,
               request: req,
             };
@@ -345,6 +374,6 @@ export function createHttpClient(config: HttpClientConfig = {}): HttpClient {
   return {
     request,
     withConfig: withConfigOverride,
-    config: Object.freeze({ ...config }),
+    config: freezeConfigSnapshot(config),
   };
 }

@@ -68,8 +68,16 @@ describe("createTraceparent", () => {
   // crypto.getRandomValues が無い環境（Math.random フォールバック）
   it("crypto.getRandomValues 無しでもフォールバックで生成", () => {
     vi.stubGlobal("crypto", {});
-    const tp = createTraceparent();
-    expect(tp).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const tp = createTraceparent();
+      expect(tp).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("crypto.getRandomValues unavailable"),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
   // T-A4: Math.random フォールバックが決定論的に動作する（全 0）
   it("T-A4: Math.random=0 固定で全 byte 0 の traceparent を生成", () => {

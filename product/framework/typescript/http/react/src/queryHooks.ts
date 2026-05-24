@@ -1,10 +1,68 @@
 // React の hook を取り込み
 import { useCallback, useEffect, useRef, useState } from "react";
 // HTTP クライアント関連の型と HttpError を core から取り込み
-import { HttpError } from "@k1s0-ts-http/core";
-import type { HttpRequestInit } from "@k1s0-ts-http/core";
+import { HttpError, isJsonContentType } from "@k1s0-ts-http/core";
+import type { HttpRequestInit, HttpResponse } from "@k1s0-ts-http/core";
 // 親クライアント取得
 import { useHttpClient } from "./hooks.js";
+
+export type HttpResponseBodyMode =
+  | "auto"
+  | "json"
+  | "text"
+  | "blob"
+  | "arrayBuffer"
+  | "stream";
+
+async function resolveJsonBody<T>(res: HttpResponse<T>): Promise<T> {
+  const text = await res.raw.text();
+  return (text.length > 0 ? JSON.parse(text) : undefined) as T;
+}
+
+async function resolveResponseBody<T>(
+  res: HttpResponse<T>,
+  mode: HttpResponseBodyMode = "auto",
+): Promise<T> {
+  try {
+    if (res.body !== undefined) {
+      return res.body;
+    }
+
+    if (mode === "json") {
+      return await resolveJsonBody(res);
+    }
+    if (mode === "text") {
+      const text = await res.raw.text();
+      return (text.length > 0 ? text : undefined) as T;
+    }
+    if (mode === "blob") {
+      return (await res.raw.blob()) as T;
+    }
+    if (mode === "arrayBuffer") {
+      return (await res.raw.arrayBuffer()) as T;
+    }
+    if (mode === "stream") {
+      return res.raw.body as T;
+    }
+
+    const contentType = res.headers["content-type"];
+    if (isJsonContentType(contentType)) {
+      return await resolveJsonBody(res);
+    }
+
+    const text = await res.raw.text();
+    return (text.length > 0 ? text : undefined) as T;
+  } catch (cause) {
+    throw new HttpError({
+      message: cause instanceof Error ? cause.message : "failed to parse response body",
+      code: "PARSE_ERROR",
+      retryable: false,
+      requestId: res.request.requestId,
+      response: res,
+      cause,
+    });
+  }
+}
 
 // 任意の throw 値を HttpError にラップ（duck-typing 解消、B-14）
 function toHttpError(err: unknown): HttpError {
@@ -34,6 +92,8 @@ export interface HttpQueryOptions {
   deps?: readonly unknown[];
   // false の間は fetch しない（loading: false / data: undefined を返し、enabled=true への遷移で自動 fetch、既定 true）
   enabled?: boolean;
+  // レスポンス body の解釈方法。auto は JSON content-type なら JSON、それ以外は text
+  parseAs?: HttpResponseBodyMode;
 }
 
 // useHttpQuery の戻り値型
@@ -61,6 +121,7 @@ export function useHttpQuery<T = unknown>(
   const client = useHttpClient();
   // enabled の解決（既定 true）
   const enabled = options.enabled ?? true;
+  const parseAs = options.parseAs ?? "auto";
   // 状態保持（enabled=false なら初期 loading=false）
   const [state, setState] = useState<{
     data: T | undefined;
@@ -98,11 +159,13 @@ export function useHttpQuery<T = unknown>(
     // 実行（最新 init を ref から取得）
     return client
       .request<T>({ ...initRef.current, signal: ctrl.signal })
-      .then((res) => {
+      .then(async (res) => {
         // unmount 後の状態更新を避ける（abort 済みなら無視）
         if (ctrl.signal.aborted) return;
+        const body = await resolveResponseBody(res, parseAs);
+        if (ctrl.signal.aborted) return;
         setState({
-          data: res.body,
+          data: body,
           error: undefined,
           loading: false,
           requestId: res.request.requestId,
@@ -123,7 +186,7 @@ export function useHttpQuery<T = unknown>(
         });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, enabled, ...(deps ?? [])]);
+  }, [client, enabled, parseAs, ...(deps ?? [])]);
   // 依存変化で fetch（unmount 時は abort）
   useEffect(() => {
     void fetchOnce();
@@ -150,6 +213,11 @@ export interface HttpMutationState<TBody, TRes> {
   reset: () => void;
 }
 
+export interface HttpMutationOptions {
+  // レスポンス body の解釈方法。auto は JSON content-type なら JSON、それ以外は text
+  parseAs?: HttpResponseBodyMode;
+}
+
 /**
  * POST 等の変更操作 Hook（B-13 で mutate / mutateAsync を分離）
  *
@@ -162,9 +230,11 @@ export interface HttpMutationState<TBody, TRes> {
  */
 export function useHttpMutation<TBody extends BodyInit | null | undefined = BodyInit, TRes = unknown>(
   init: Omit<HttpRequestInit, "body">,
+  options: HttpMutationOptions = {},
 ): HttpMutationState<TBody, TRes> {
   // 親クライアントを取得
   const client = useHttpClient();
+  const parseAs = options.parseAs ?? "auto";
   // 状態保持
   const [state, setState] = useState<{
     data: TRes | undefined;
@@ -200,11 +270,12 @@ export function useHttpMutation<TBody extends BodyInit | null | undefined = Body
           ...override,
           body,
         });
+        const responseBody = await resolveResponseBody(res, parseAs);
         // unmount 後 or 自分より新しい呼び出しが既に走っている場合は state 更新を skip
         if (mountedRef.current && callId === latestCallIdRef.current) {
-          setState({ data: res.body, error: undefined, loading: false });
+          setState({ data: responseBody, error: undefined, loading: false });
         }
-        return res.body;
+        return responseBody;
       } catch (err) {
         // HttpError にラップしてから state 更新（B-14）
         const httpErr = toHttpError(err);
@@ -214,7 +285,7 @@ export function useHttpMutation<TBody extends BodyInit | null | undefined = Body
         throw httpErr;
       }
     },
-    [client],
+    [client, parseAs],
   );
   // fire-and-forget 版（throw しない、エラーは state 経由）
   const mutate = useCallback(

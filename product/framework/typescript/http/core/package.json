@@ -1,17 +1,18 @@
 {
   "name": "@k1s0-ts-http/core",
   "version": "0.1.0",
-  "description": "DevPortal 共通の HTTP クライアント基盤（fetch wrapper / timeout / retry / 認証ヘッダ / エラー正規化 / リクエスト ID / ログ連携 / REST / gRPC-web）",
+  "description": "DevPortal shared HTTP client core with fetch, timeout, retry, auth headers, request IDs, REST helpers, and gRPC-web support.",
   "license": "UNLICENSED",
   "private": false,
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/cjs/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/cjs/index.js"
     },
     "./package.json": "./package.json"
   },
@@ -20,7 +21,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json',JSON.stringify({type:'commonjs'},null,2)+'\\n')\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

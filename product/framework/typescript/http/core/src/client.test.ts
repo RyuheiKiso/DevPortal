@@ -245,6 +245,30 @@ describe("createHttpClient.request", () => {
     });
   });
 
+  it("retryable なネットワークエラーは retry される", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const fetchImpl = vi.fn(async () => {
+      calls++;
+      if (calls === 1) {
+        throw new TypeError("socket closed", {
+          cause: { code: "ECONNRESET" },
+        });
+      }
+      return jsonOk({ ok: true });
+    });
+    const client = createHttpClient({
+      fetchImpl,
+      retry: { maxRetries: 1, backoffBaseMs: 1, jitter: "none" },
+    });
+
+    const p = client.request({ url: "/x" });
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(p).resolves.toMatchObject({ status: 200 });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   // withConfig: 派生クライアントの設定
   it("withConfig で baseUrl 上書き", async () => {
     const fetchImpl = vi.fn(async () => jsonOk({}));
@@ -255,6 +279,42 @@ describe("createHttpClient.request", () => {
     // 元クライアントは影響を受けない
     expect(c1.config.baseUrl).toBe("https://a");
     expect(c2.config.baseUrl).toBe("https://b");
+  });
+
+  it("createHttpClient 後に元 config を mutate しても client の挙動は変わらない", async () => {
+    const fetchImpl = vi.fn(async () => jsonOk({}));
+    const config = {
+      baseUrl: "https://a",
+      defaultHeaders: { "X-A": "1" },
+      retry: { maxRetries: 0 },
+      fetchImpl,
+    };
+    const client = createHttpClient(config);
+    config.baseUrl = "https://mutated";
+    config.defaultHeaders["X-A"] = "2";
+    config.retry.maxRetries = 5;
+
+    await client.request({ url: "/x" });
+
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://a/x");
+    const headers = fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers["X-A"]).toBe("1");
+    expect(client.config.baseUrl).toBe("https://a");
+    expect(client.config.defaultHeaders?.["X-A"]).toBe("1");
+    expect(client.config.retry?.maxRetries).toBe(0);
+  });
+
+  it("公開 config は nested オブジェクトも freeze されたスナップショット", () => {
+    const client = createHttpClient({
+      defaultHeaders: { "X-A": "1" },
+      retry: { maxRetries: 0 },
+      requestInterceptors: [(r) => r],
+    });
+
+    expect(Object.isFrozen(client.config)).toBe(true);
+    expect(Object.isFrozen(client.config.defaultHeaders)).toBe(true);
+    expect(Object.isFrozen(client.config.retry)).toBe(true);
+    expect(Object.isFrozen(client.config.requestInterceptors)).toBe(true);
   });
 
   // withConfig: interceptor は連結される
@@ -318,6 +378,20 @@ describe("createHttpClient.request", () => {
     const client = createHttpClient({ baseUrl: "https://a", fetchImpl });
     await client.request({ url: "/x", query: { a: null, b: undefined } });
     expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://a/x");
+  });
+
+  it("既存 query がある URL には & で query を追記する", async () => {
+    const fetchImpl = vi.fn(async () => jsonOk({}));
+    const client = createHttpClient({ baseUrl: "https://a", fetchImpl });
+    await client.request({ url: "/x?active=true", query: { page: 2 } });
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://a/x?active=true&page=2");
+  });
+
+  it("hash fragment がある URL では fragment の前に query を追加する", async () => {
+    const fetchImpl = vi.fn(async () => jsonOk({}));
+    const client = createHttpClient({ baseUrl: "https://a", fetchImpl });
+    await client.request({ url: "/x#section", query: { page: 2 } });
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://a/x?page=2#section");
   });
 
   // A1: interceptor が headers を完全置換しても X-Request-Id が残る
@@ -541,8 +615,8 @@ describe("createHttpClient.request", () => {
     ).rejects.toMatchObject({ status: 503, retryable: false });
   });
 
-  // C-A1: GET + 503 は本来 retry されるので HttpError.retryable=true（最終失敗時も true のまま）
-  it("C-A1: GET + 503 最終失敗時の HttpError.retryable は true", async () => {
+  // C-A1: GET + 503 は retry 対象だが、最大試行後の最終エラーは retryable=false
+  it("C-A1: GET + 503 最終失敗時の HttpError.retryable は false", async () => {
     vi.useFakeTimers();
     const fetchImpl = vi.fn(async () => bad(503));
     const client = createHttpClient({
@@ -553,7 +627,7 @@ describe("createHttpClient.request", () => {
     await vi.advanceTimersByTimeAsync(10);
     const err = (await p) as { status: number; retryable: boolean };
     expect(err.status).toBe(503);
-    expect(err.retryable).toBe(true);
+    expect(err.retryable).toBe(false);
   });
 
   // C-A7: requestIdHeader 空文字は createHttpClient で throw
@@ -562,6 +636,31 @@ describe("createHttpClient.request", () => {
       /requestIdHeader must be a non-empty string/,
     );
     expect(() => createHttpClient({ requestIdHeader: "  " })).toThrow();
+  });
+
+  it("retry / timeout の不正な数値設定は createHttpClient で拒否", () => {
+    expect(() =>
+      createHttpClient({ retry: { maxRetries: -1 } }),
+    ).toThrow(/retry\.maxRetries/);
+    expect(() =>
+      createHttpClient({ retry: { backoffBaseMs: 1.5 } }),
+    ).toThrow(/retry\.backoffBaseMs/);
+    expect(() =>
+      createHttpClient({ timeout: { totalMs: -1 } }),
+    ).toThrow(/timeout\.totalMs/);
+  });
+
+  it("retryableStatuses と jitter の不正値は createHttpClient で拒否", () => {
+    expect(() =>
+      createHttpClient({
+        retry: { retryableStatuses: [500.5] },
+      }),
+    ).toThrow(/retryableStatuses/);
+    expect(() =>
+      createHttpClient({
+        retry: { jitter: "bad" as "full" },
+      }),
+    ).toThrow(/retry\.jitter/);
   });
 
   // B-3: 425 はデフォルトで retry されない

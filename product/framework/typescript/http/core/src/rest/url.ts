@@ -2,7 +2,6 @@
 import type { HttpRequestInit } from "../types.js";
 
 // HttpRequestInit.query を URL クエリ文字列にエンコード（先頭 ? 込み、無ければ空文字）
-// client.ts と同等ロジックを公開 API として外出し
 export function encodeSearchParams(query: HttpRequestInit["query"]): string {
   // クエリが無ければ空文字
   if (query === undefined) {
@@ -27,6 +26,29 @@ export function encodeSearchParams(query: HttpRequestInit["query"]): string {
   }
   const s = params.toString();
   return s.length > 0 ? `?${s}` : "";
+}
+
+// 既存の query / hash を保ったまま HttpRequestInit.query を URL に追記する
+export function appendSearchParams(
+  url: string,
+  query: HttpRequestInit["query"],
+): string {
+  const encoded = encodeSearchParams(query);
+  if (encoded.length === 0) {
+    return url;
+  }
+
+  const hashIndex = url.indexOf("#");
+  const beforeHash = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
+  const hash = hashIndex >= 0 ? url.slice(hashIndex) : "";
+  const separator =
+    beforeHash.includes("?") && !beforeHash.endsWith("?") && !beforeHash.endsWith("&")
+      ? "&"
+      : beforeHash.includes("?")
+        ? ""
+        : "?";
+
+  return `${beforeHash}${separator}${encoded.slice(1)}${hash}`;
 }
 
 // baseUrl と path を連結（path が絶対 URL なら素通し）

@@ -1,7 +1,7 @@
 // retry 層に必要な型をインポート
 import type { HttpMethod, RetryPolicy } from "./types.js";
 // retryable 判定とエラー型
-import { isRetryableError } from "./errors.js";
+import { HttpError, isRetryableError } from "./errors.js";
 
 // 冪等メソッド（B-4）。これら以外のメソッドは既定で retry 無効
 // PUT/DELETE は副作用があっても結果が同じ（idempotent）ので含む
@@ -80,6 +80,46 @@ export function sleep(ms: number, signal: AbortSignal | undefined): Promise<void
   });
 }
 
+function markRetryExhausted(err: unknown): unknown {
+  if (!(err instanceof HttpError) || err.retryable === false) {
+    return err;
+  }
+  const exhausted = new HttpError({
+    message: err.message,
+    status: err.status,
+    code: err.code,
+    retryable: false,
+    requestId: err.requestId,
+    cause: err.cause,
+    response: err.response,
+  });
+  if (err.stack !== undefined) {
+    try {
+      exhausted.stack = err.stack;
+      /* v8 ignore next 3 */
+    } catch {
+      // Some runtimes expose a non-writable stack; the cloned error is still usable.
+    }
+  }
+  return exhausted;
+}
+
+function assertRetryPolicy(policy: ReturnType<typeof mergeRetryDefaults>): void {
+  const entries: Array<[string, number]> = [
+    ["maxRetries", policy.maxRetries],
+    ["backoffBaseMs", policy.backoffBaseMs],
+    ["backoffMaxMs", policy.backoffMaxMs],
+  ];
+  for (const [name, value] of entries) {
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error(`RetryPolicy.${name} must be a non-negative integer`);
+    }
+  }
+  if (policy.jitter !== "full" && policy.jitter !== "none") {
+    throw new Error('RetryPolicy.jitter must be "full" or "none"');
+  }
+}
+
 // withRetry: attempt 関数を policy に従って繰り返し呼び出す
 // while(true) で TS の到達可能性解析を活用し、最終 throw を不要にする
 export async function withRetry<T>(
@@ -87,6 +127,7 @@ export async function withRetry<T>(
   signal: AbortSignal | undefined,
   attempt: (attemptIndex: number) => Promise<T>,
 ): Promise<T> {
+  assertRetryPolicy(policy);
   // 0 オリジンの試行カウンタ
   let i = 0;
   // 必ず return か throw で抜ける（lint への明示）
@@ -106,7 +147,7 @@ export async function withRetry<T>(
           : isRetryableError(err, policy.retryableStatuses);
       // 最大回数に達した or リトライ不可なら即 throw
       if (!shouldRetryDecision || i === policy.maxRetries) {
-        throw err;
+        throw markRetryExhausted(err);
       }
       // 指数バックオフ（base * 2^i）を上限でクリップ
       const exp = Math.min(

@@ -51,7 +51,7 @@ export interface HttpResponse<T = unknown> {
   // 例: res.rawHeaders.getSetCookie() で全 Set-Cookie 値の配列を取得
   rawHeaders: Headers;
   // 利用側で型付け可能なボディ（低レベル client では undefined、rest ヘルパで JSON parse 済み）
-  body: T;
+  body: T | undefined;
   // 原本 Response（streaming / バイナリ等のため保持）
   raw: Response;
   // 対応するリクエスト（requestId 参照用）
