@@ -1,6 +1,8 @@
 // 縦タイムライン形式のステッパー UI コンポーネント
 // SetupEvent を集約した StepperState を受け取り、進捗・完了・失敗を視覚的に表現する
 
+// useState フックを使ってログ保存状態を保持するためインポートする
+import { useState } from 'react';
 // lucide-react のアイコンをインポートする
 import {
   // 完了ステップのアイコン
@@ -19,9 +21,11 @@ import {
   ArrowLeft,
   // コピーボタンのアイコン
   Copy,
+  // ログ保存ボタンのアイコン
+  Save,
 } from 'lucide-react';
 // ステップ状態の型定義をインポートする
-import type { StepState, StepperState } from './useStepState';
+import type { StepState, StepperState, LogStream } from './useStepState';
 // 細線プログレスバーをインポートする
 import { LinearProgress } from '../../ui/LinearProgress';
 // バナーコンポーネントをインポートする
@@ -41,6 +45,9 @@ interface StepperProps {
   onRetry?: () => void;
   // 「Overview へ戻る」ボタンが押されたときのコールバック（省略時はボタンを表示しない）
   onBack?: () => void;
+  // ログをファイルに保存するコールバック（省略時は保存ボタンを表示しない）
+  // 引数に全ログ文字列を渡し、戻り値で保存先絶対パスを Promise で返す
+  onSaveLog?: (logs: string) => Promise<string>;
 }
 
 // durationMs をわかりやすい文字列にフォーマットするヘルパー関数
@@ -68,6 +75,34 @@ function getStepContentClass(status: StepState['status']): string {
     case 'failed':  return styles.contentFailed;
     // その他はデフォルトスタイルを使用する
     default:        return '';
+  }
+}
+
+// ストリーム種別に応じた 1 行の CSS クラスを返すヘルパー関数
+function getLogLineClass(stream: LogStream): string {
+  switch (stream) {
+    // 標準出力は控えめなテキスト色
+    case 'stdout': return styles.logLineStdout;
+    // 標準エラーは危険色
+    case 'stderr': return styles.logLineStderr;
+    // 情報は通常色
+    case 'info':   return styles.logLineInfo;
+    // 警告は警告色
+    case 'warn':   return styles.logLineWarn;
+  }
+}
+
+// ストリーム種別を 3〜4 文字のラベル文字列に変換するヘルパー関数
+function getLogStreamLabel(stream: LogStream): string {
+  switch (stream) {
+    // 標準出力は OUT
+    case 'stdout': return 'OUT';
+    // 標準エラーは ERR
+    case 'stderr': return 'ERR';
+    // 情報は INFO
+    case 'info':   return 'INFO';
+    // 警告は WARN
+    case 'warn':   return 'WARN';
   }
 }
 
@@ -101,6 +136,34 @@ function StepIcon({ status }: { status: StepState['status'] }) {
   }
 }
 
+// 失敗ステップの全ログを折りたたみ表示するサブコンポーネント
+// stream 別に色分けした 1 行ずつをコンソール風に並べる
+function StepLogConsole({ step }: { step: StepState }) {
+  // 出力行が無い場合は何も描画しない（空の details を表示しない）
+  if (step.outputLines.length === 0) return null;
+  // details/summary で折りたたみ可能なログコンソールを構築する
+  return (
+    <details className={styles.logConsole} open>
+      {/* クリックで開閉できる summary に行数を含めて視認性を高める */}
+      <summary className={styles.logConsoleSummary}>
+        ログ詳細（{step.outputLines.length} 行）
+      </summary>
+      {/* 展開時に表示する本体（縦並びのコンソール）*/}
+      <div className={styles.logConsoleBody}>
+        {step.outputLines.map((entry, li) => (
+          // ストリーム種別に応じた色クラスを付与した 1 行を描画する
+          <div key={li} className={[styles.logLine, getLogLineClass(entry.stream)].join(' ')}>
+            {/* 行先頭にストリーム種別ラベルを表示して種別を一目で分かるようにする */}
+            <span className={styles.logStreamLabel}>[{getLogStreamLabel(entry.stream)}]</span>
+            {/* ログ本文をそのまま表示する */}
+            {entry.line}
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 // エラーテキストをクリップボードにコピーするヘルパー関数
 function copyToClipboard(text: string) {
   // navigator.clipboard が利用可能な場合はコピーする
@@ -110,7 +173,29 @@ function copyToClipboard(text: string) {
 }
 
 // 縦タイムラインのステッパーコンポーネント
-export function Stepper({ state, onRetry, onBack }: StepperProps) {
+export function Stepper({ state, onRetry, onBack, onSaveLog }: StepperProps) {
+  // ログ保存成功時の保存先パスを保持する（失敗バナー下に表示する）
+  const [savedPath, setSavedPath] = useState<string | null>(null);
+  // ログ保存失敗時のエラーメッセージを保持する
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // ログをファイルに保存するハンドラ（onSaveLog コールバック経由）
+  const handleSaveLog = async () => {
+    // onSaveLog が未指定なら何もしない（型安全のためのガード）
+    if (!onSaveLog) return;
+    try {
+      // 全ログ文字列を渡してファイル保存を実行する
+      const path = await onSaveLog(state.allLogs);
+      // 成功時は保存先パスを表示する（エラー表示はクリア）
+      setSavedPath(path);
+      setSaveError(null);
+    } catch (e) {
+      // 失敗時はエラーメッセージを表示する（パス表示はクリア）
+      setSaveError(String(e));
+      setSavedPath(null);
+    }
+  };
+
   // ステッパー全体のコンテナを描画する
   return (
     <div className={styles.stepper}>
@@ -193,6 +278,9 @@ export function Stepper({ state, onRetry, onBack }: StepperProps) {
                 </div>
               )}
 
+              {/* 失敗ステップは折りたたみログコンソールで全ログを表示する（原因究明用）*/}
+              {step.status === 'failed' && <StepLogConsole step={step} />}
+
               {/* 警告メッセージが設定されていれば表示する */}
               {step.warn && (
                 <div className={styles.warnMessage}>{step.warn}</div>
@@ -234,7 +322,7 @@ export function Stepper({ state, onRetry, onBack }: StepperProps) {
           </Banner>
           {/* 失敗後のアクションボタン群 */}
           <div className={styles.resultActions}>
-            {/* エラーコピーボタン（エラーテキストをクリップボードにコピーする）*/}
+            {/* エラーコピーボタン（エラーテキストのみをクリップボードにコピーする）*/}
             <Button
               variant="ghost"
               size="sm"
@@ -243,6 +331,22 @@ export function Stepper({ state, onRetry, onBack }: StepperProps) {
               <Icon icon={Copy} size={14} />
               エラーをコピー
             </Button>
+            {/* 全ログコピーボタン（時系列の info/stdout/stderr/warn をすべてコピーする）*/}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => copyToClipboard(state.allLogs)}
+            >
+              <Icon icon={Copy} size={14} />
+              全ログをコピー
+            </Button>
+            {/* ログをファイル保存ボタン（onSaveLog コールバックが渡されている場合のみ表示）*/}
+            {onSaveLog && (
+              <Button variant="ghost" size="sm" onClick={handleSaveLog}>
+                <Icon icon={Save} size={14} />
+                ログをファイル保存
+              </Button>
+            )}
             {/* 再試行ボタン（recoverable かつコールバックが設定されている場合のみ表示）*/}
             {state.failed.recoverable && onRetry && (
               <Button variant="primary" size="sm" onClick={onRetry}>
@@ -258,6 +362,18 @@ export function Stepper({ state, onRetry, onBack }: StepperProps) {
               </Button>
             )}
           </div>
+          {/* 保存成功時の保存先パスを表示する（再保存できるよう常時更新される）*/}
+          {savedPath && (
+            <div className={styles.savedPathHint}>
+              ログを保存しました: {savedPath}
+            </div>
+          )}
+          {/* 保存失敗時のエラーメッセージを表示する */}
+          {saveError && (
+            <div className={styles.saveErrorHint}>
+              ログ保存に失敗しました: {saveError}
+            </div>
+          )}
         </div>
       )}
     </div>

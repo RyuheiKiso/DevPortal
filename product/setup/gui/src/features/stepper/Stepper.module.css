@@ -207,4 +207,126 @@
   display: flex;
   /* ボタン間の間隔 */
   gap: var(--space-2);
+  /* 折り返しを許可する（ボタン増加時に幅不足で潰れないようにする）*/
+  flex-wrap: wrap;
+}
+
+/* 保存成功時のヒント表示（パスを示す）*/
+.savedPathHint {
+  /* 上に少し余白を設ける */
+  margin-top: var(--space-2);
+  /* 小さいフォントサイズを使用する */
+  font-size: var(--fs-small);
+  /* 補助テキスト色で控えめに表示する */
+  color: var(--text-muted);
+  /* 長いパスを折り返す */
+  word-break: break-all;
+}
+
+/* 保存失敗時のヒント表示（エラーメッセージ）*/
+.saveErrorHint {
+  /* 上に少し余白を設ける */
+  margin-top: var(--space-2);
+  /* 小さいフォントサイズを使用する */
+  font-size: var(--fs-small);
+  /* 危険色でエラーを強調する */
+  color: var(--danger);
+  /* 長い文を折り返す */
+  word-break: break-all;
+}
+
+/* ─── 失敗ステップ用ログコンソール（折りたたみ可能）─── */
+
+/* details 要素全体のスタイル */
+.logConsole {
+  /* 上に余白を設けてヘッダーから離す */
+  margin-top: var(--space-2);
+  /* 細い罫線で囲んでコンソールらしさを出す */
+  border: 1px solid var(--border);
+  /* 角を少し丸める */
+  border-radius: 4px;
+  /* 背景色をわずかに暗くしてコンソール感を出す */
+  background: var(--bg-subtle, transparent);
+}
+
+/* summary 要素（クリックで展開/折りたたみ）のスタイル */
+.logConsoleSummary {
+  /* クリック可能であることを示す */
+  cursor: pointer;
+  /* 内側の余白で押しやすくする */
+  padding: var(--space-2) var(--space-3);
+  /* 小さいフォントサイズを使用する */
+  font-size: var(--fs-small);
+  /* やや太めにしてラベル感を出す */
+  font-weight: 500;
+  /* デフォルトの三角マーカーは残す（user-select は通常通り）*/
+  user-select: none;
+}
+
+/* 展開時のコンソール本体（行を縦に並べる）*/
+.logConsoleBody {
+  /* 縦方向フレックスで行を並べる */
+  display: flex;
+  flex-direction: column;
+  /* 行間の隙間 */
+  gap: 2px;
+  /* 内側の余白でコンソールらしい配置にする */
+  padding: var(--space-2) var(--space-3);
+  /* 上部に罫線を引いて summary と分離する */
+  border-top: 1px solid var(--border);
+  /* スクロール可能にして高さを制限する */
+  max-height: 320px;
+  overflow-y: auto;
+  /* 等幅フォントで全行を統一する */
+  font-family: var(--font-mono);
+  /* 小さいフォントサイズで多くの行を表示できるようにする */
+  font-size: 11px;
+}
+
+/* ログ 1 行の汎用スタイル */
+.logLine {
+  /* 等幅フォントで揃える（親で指定済みだが念のため）*/
+  font-family: var(--font-mono);
+  /* 行内で改行可能にしておく */
+  white-space: pre-wrap;
+  /* 長いパスやエラーメッセージを途中で折り返す */
+  word-break: break-all;
+}
+
+/* 標準出力の行（控えめなテキスト色）*/
+.logLineStdout {
+  /* 補助テキスト色で控えめに表示する */
+  color: var(--text-subtle);
+}
+
+/* 標準エラーの行（赤系で強調）*/
+.logLineStderr {
+  /* 危険色で強調する */
+  color: var(--danger);
+}
+
+/* 情報メッセージの行（通常色）*/
+.logLineInfo {
+  /* 主要テキスト色で読みやすくする */
+  color: var(--text);
+}
+
+/* 警告メッセージの行（警告色）*/
+.logLineWarn {
+  /* 警告色で強調する */
+  color: var(--warning);
+}
+
+/* 各行先頭のストリーム種別ラベル（[OUT]/[ERR]/[INFO]/[WARN]）*/
+.logStreamLabel {
+  /* 右側にスペースを設けて本文と分離する */
+  margin-right: var(--space-2);
+  /* やや太めにしてラベル感を出す */
+  font-weight: 600;
+  /* 大文字感を強調する */
+  text-transform: uppercase;
+  /* 文字間隔を広げる */
+  letter-spacing: 0.04em;
+  /* 不透明度を下げてラベルを控えめにする */
+  opacity: 0.75;
 }

@@ -1,0 +1,22 @@
+# Backstage Software Catalog - Resource エンティティ最小雛形
+# 使い方: ファイルをコピーし、`my-*` プレースホルダを実際の値に置換してください
+# 公式仕様: https://backstage.io/docs/features/software-catalog/descriptor-format#kind-resource
+
+# Backstage Catalog のスキーマバージョン (v1alpha1 固定)
+apiVersion: backstage.io/v1alpha1
+# エンティティ種別 (この雛形は Resource: DB / S3 / k8s クラスタ等のインフラ資源)
+kind: Resource
+# エンティティ自身を識別するメタデータ
+metadata:
+  # 一意な名前 (kebab-case 必須)
+  name: my-resource
+  # UI 上の説明文 (省略可)
+  description: 自分の Resource についての一行説明
+# Resource 固有の仕様
+spec:
+  # 種別: database / s3-bucket / kubernetes-cluster 等の自由文字列
+  type: database
+  # 所有者 (Group または User エンティティの name)
+  owner: my-team
+  # 所属する System (省略可)
+  system: my-system

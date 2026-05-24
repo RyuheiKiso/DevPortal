@@ -1,0 +1,21 @@
+# Backstage Software Catalog - Location エンティティ最小雛形
+# 使い方: ファイルをコピーし、targets に登録したい catalog-info ファイルの URL を列挙してください
+# 公式仕様: https://backstage.io/docs/features/software-catalog/descriptor-format#kind-location
+
+# Backstage Catalog のスキーマバージョン (v1alpha1 固定)
+apiVersion: backstage.io/v1alpha1
+# エンティティ種別 (この雛形は Location: 他カタログファイルへのポインタ)
+kind: Location
+# エンティティ自身を識別するメタデータ
+metadata:
+  # 一意な名前 (kebab-case 必須)
+  name: my-location
+  # UI 上の説明文 (省略可)
+  description: 自分の Location についての一行説明
+# Location 固有の仕様
+spec:
+  # 参照先タイプ (url / file 等、省略可)
+  type: url
+  # 参照先 catalog-info ファイルの一覧 (target 単数形でも可)
+  targets:
+    - https://github.com/my-org/my-repo/blob/main/catalog-info.yaml

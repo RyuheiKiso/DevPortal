@@ -51,6 +51,8 @@ pub fn run() {
             commands::plugin::cmd_plugin_install,
             // プラグイン削除コマンドを登録する
             commands::plugin::cmd_plugin_remove,
+            // セットアップログ保存コマンドを登録する
+            commands::save_log::cmd_save_install_log,
         ])
         // tauri.conf.json などの設定を取り込んでアプリを起動する
         .run(tauri::generate_context!())
