@@ -1,0 +1,76 @@
+# Backstage Software Template - React Native Windows (VS2026) スターター
+# Backstage UI の /create/templates に表示され、社内利用者が新規 React Native Windows プロジェクトをここから生成できる
+
+# Backstage Scaffolder のスキーマバージョン (v1beta3 が現行安定版)
+apiVersion: scaffolder.backstage.io/v1beta3
+# エンティティ種別 (Template = Scaffolder の雛形)
+kind: Template
+# エンティティ自身を識別するメタデータ
+metadata:
+  # Template の一意な名前 (kebab-case 必須、ディレクトリ名 react_native とは別表記)
+  name: k1s0-scaffold-react-native-template
+  # UI カードの見出し
+  title: "React Native Windows (VS2026)"
+  # UI カードの説明文
+  description: "React Native 0.84 + Windows ネイティブ (VS2026) のアプリスターターを新規生成"
+  # 検索・フィルタ用タグ
+  tags:
+    - scaffold
+    - react-native
+    - windows
+    - typescript
+# Template 固有の仕様
+spec:
+  # 所有者 (framework/typescript で先に登録済みの Group)
+  owner: k1s0-framework-team
+  # 生成される Component の種別
+  type: website
+  # ユーザー入力フォーム定義 (JSON Schema 形式)
+  parameters:
+    # 入力グループ (UI 上のステップ)
+    - title: プロジェクト基本情報
+      # 入力必須項目の列挙
+      required:
+        - name
+      # フィールド定義
+      properties:
+        # プロジェクト名 (必須)
+        name:
+          title: プロジェクト名
+          type: string
+          description: 新規プロジェクトのディレクトリ名 (kebab-case 推奨)
+          # kebab-case を強制する正規表現
+          pattern: '^[a-z][a-z0-9-]*$'
+          # 開いたらこのフィールドにフォーカスする
+          ui:autofocus: true
+        # 説明文 (任意)
+        description:
+          title: 説明 (任意)
+          type: string
+          description: 新規プロジェクトの簡単な説明
+  # 生成時に走らせるアクション (上から順に実行)
+  steps:
+    # 雛形ファイル群を取得 (template.yaml と同じディレクトリ配下を一括コピー)
+    - id: fetch
+      name: スターターファイルを取得
+      action: fetch:plain
+      input:
+        # template.yaml の位置からの相対パス (./ で自ディレクトリ配下全部)
+        url: ./
+        # 出力先 (Backstage Scaffolder のワークスペース直下)
+        targetPath: ./
+  # 生成後に UI に表示する案内
+  output:
+    text:
+      - title: 完了案内
+        content: |
+          React Native Windows スターター ${{ parameters.name }} を生成しました。
+
+          ## 次の手順
+
+          1. node_modules / windows ビルド成果物 (.dll / .appx / .vcxproj.FileListAbsolute.txt 等) が scaffold dir からコピーされている場合があります。不要なものは削除してください。
+          2. `npm install` を実行して依存を解決
+          3. Visual Studio 2026 + Windows SDK が必要
+          4. `npx react-native run-windows` で起動
+
+          詳細は同梱の README.md を参照してください。

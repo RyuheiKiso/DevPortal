@@ -233,7 +233,7 @@ fn download_with_progress(
             // 0〜60% の範囲でダウンロード進捗を表示する（10% 開始、70% 終了予定）
             let dl_percent = (downloaded_bytes as f64 / total as f64 * 60.0) as u8 + 10;
             // 定期的に進捗を通知する（全バイト更新より間引く）
-            if downloaded_bytes % (DOWNLOAD_BUF_SIZE as u64 * 32) == 0 {
+            if downloaded_bytes.is_multiple_of(DOWNLOAD_BUF_SIZE as u64 * 32) {
                 // 進捗パーセントを通知する
                 reporter.progress("nssm_fetch", dl_percent, None);
             }

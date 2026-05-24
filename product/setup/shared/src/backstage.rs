@@ -8,7 +8,7 @@ use std::fs;
 use std::net::TcpStream;
 
 // 標準時間型をインポートする（タイムアウト・待機処理に使用）
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 // 独自エラー型を参照するために使用する
 use crate::error::SetupError;
@@ -195,6 +195,18 @@ impl BackstageEngine {
             &["backend", "cors", "origin"],
             serde_yaml::Value::String(format!("http://localhost:{}", app_port)),
         );
+        if matches!(config.backstage.mode, BackstageMode::Build) {
+            Self::set_yaml_path(
+                &mut yaml_value,
+                &[
+                    "auth",
+                    "providers",
+                    "guest",
+                    "dangerouslyAllowOutsideDevelopment",
+                ],
+                serde_yaml::Value::Bool(true),
+            );
+        }
 
         // 更新した YAML を文字列にシリアライズする
         let updated_content = match serde_yaml::to_string(&yaml_value) {
@@ -276,6 +288,7 @@ impl SetupEngine for BackstageEngine {
         fs::create_dir_all(&logs_dir)?;
 
         // ステップ 2: create-app を実行して Backstage アプリを生成する
+        let step_t = Instant::now();
         reporter.step_start(
             "create_app",
             "Backstage アプリを生成しています（時間がかかります）",
@@ -329,7 +342,7 @@ impl SetupEngine for BackstageEngine {
                 // 各行を収集するベクタ
                 let mut lines = Vec::new();
                 // 各行を読み取って収集する
-                for line in reader.lines().flatten() {
+                for line in reader.lines().map_while(Result::ok) {
                     // 行をベクタに追加する
                     lines.push(line);
                 }
@@ -350,7 +363,7 @@ impl SetupEngine for BackstageEngine {
             // stdout のリーダーを作成する
             let reader = std::io::BufReader::new(stdout);
             // 各行を読み取って reporter に送信する
-            for line in reader.lines().flatten() {
+            for line in reader.lines().map_while(Result::ok) {
                 // stdout の行を reporter に送信する
                 reporter.stdout_line("create_app", &line);
             }
@@ -380,8 +393,10 @@ impl SetupEngine for BackstageEngine {
                 code: status.code().unwrap_or(-1),
             });
         }
+        reporter.step_done("create_app", step_t.elapsed().as_millis() as u64);
 
         // ステップ 3: yarn install を実行して依存関係をインストールする
+        let step_t = Instant::now();
         reporter.step_start(
             "yarn_install",
             "yarn install を実行しています",
@@ -399,9 +414,11 @@ impl SetupEngine for BackstageEngine {
         yarn_install_cmd.current_dir(&app_dir_str);
         // yarn install をストリーミング実行する
         run_streaming(yarn_install_cmd, "yarn_install", reporter)?;
+        reporter.step_done("yarn_install", step_t.elapsed().as_millis() as u64);
 
         // ステップ 4: app-config.yaml のポート番号を更新する
         // Backstage の frontend build は app-config.yaml を読むため、build より前に更新する
+        let step_t = Instant::now();
         reporter.step_start(
             "app_config",
             "app-config.yaml のポート設定を更新しています",
@@ -410,6 +427,7 @@ impl SetupEngine for BackstageEngine {
         );
         // ポート設定の更新（失敗しても続行するためエラーは reporter に警告として出力）
         Self::update_app_config_ports(config, reporter);
+        reporter.step_done("app_config", step_t.elapsed().as_millis() as u64);
 
         // build モードの場合のみ frontend/backend をビルドする
         let nssm_fetch_index = match config.backstage.mode {
@@ -417,6 +435,7 @@ impl SetupEngine for BackstageEngine {
             BackstageMode::Build => {
                 // production モードでは backend が packages/app/dist/ の静的ファイルを serve する
                 // yarn build を実行しないと GET / が 404 になりブラウザから UI にアクセスできない
+                let step_t = Instant::now();
                 reporter.step_start(
                     "yarn_app_build",
                     "Backstage フロントエンドをビルドしています（数分かかります）",
@@ -429,8 +448,10 @@ impl SetupEngine for BackstageEngine {
                 yarn_app_build_cmd.current_dir(&app_dir_str);
                 // yarn build をストリーミング実行する
                 run_streaming(yarn_app_build_cmd, "yarn_app_build", reporter)?;
+                reporter.step_done("yarn_app_build", step_t.elapsed().as_millis() as u64);
 
                 // backend パッケージも事前にビルドして production 起動前にコンパイルエラーを検出する
+                let step_t = Instant::now();
                 reporter.step_start(
                     "yarn_backend_build",
                     "Backstage バックエンドをビルドしています",
@@ -444,12 +465,14 @@ impl SetupEngine for BackstageEngine {
                 yarn_backend_build_cmd.current_dir(&app_dir_str);
                 // backend build をストリーミング実行する
                 run_streaming(yarn_backend_build_cmd, "yarn_backend_build", reporter)?;
+                reporter.step_done("yarn_backend_build", step_t.elapsed().as_millis() as u64);
 
                 5
             }
         };
 
         // ステップ 5/7: NSSM を確保する（キャッシュがあれば即時、なければ HTTP 動的取得）
+        let step_t = Instant::now();
         reporter.step_start(
             "nssm_fetch",
             "NSSM を確保しています",
@@ -458,7 +481,9 @@ impl SetupEngine for BackstageEngine {
         );
         // Nssm::ensure はキャッシュ確認 → 必要なら自動ダウンロードを行う
         let nssm = Nssm::ensure(reporter)?;
+        reporter.step_done("nssm_fetch", step_t.elapsed().as_millis() as u64);
         // NSSM サービス登録ステップを開始する
+        let step_t = Instant::now();
         reporter.step_start(
             "nssm_install",
             "NSSM サービス登録",
@@ -477,16 +502,23 @@ impl SetupEngine for BackstageEngine {
         nssm.install(&service_name, cmd_exe, reporter)?;
 
         // AppParameters を起動モードに応じて設定する
+        let app_config_path = app_dir.join("app-config.yaml");
+        let app_config_path_str = app_config_path.to_string_lossy().to_string();
         let app_parameters = match config.backstage.mode {
             // dev は frontend/backend の開発サーバーをまとめて起動する
-            BackstageMode::Dev => "/c yarn start",
+            BackstageMode::Dev => "/c yarn start".to_string(),
             // build はビルド済み frontend を production backend から配信する
-            BackstageMode::Build => "/c yarn workspace backend start --config app-config.yaml",
+            BackstageMode::Build => format!(
+                "/c yarn workspace backend start --config \"{}\"",
+                app_config_path_str
+            ),
         };
         // AppParameters を設定する
-        nssm.set(&service_name, "AppParameters", app_parameters)?;
+        nssm.set(&service_name, "AppParameters", &app_parameters)?;
+        reporter.step_done("nssm_install", step_t.elapsed().as_millis() as u64);
 
         // ステップ 7/9: NSSM でサービスの詳細設定を行う
+        let step_t = Instant::now();
         reporter.step_start(
             "nssm_configure",
             "NSSM サービス設定",
@@ -528,8 +560,10 @@ impl SetupEngine for BackstageEngine {
 
         // AppThrottle を追加で設定する（スロットリング 60 秒）
         nssm.set(&service_name, "AppThrottle", "60000")?;
+        reporter.step_done("nssm_configure", step_t.elapsed().as_millis() as u64);
 
         // ステップ 8/10: サービスを起動する
+        let step_t = Instant::now();
         reporter.step_start(
             "service_start",
             "サービスを起動しています",
@@ -538,8 +572,10 @@ impl SetupEngine for BackstageEngine {
         );
         // sc.exe start でサービスを起動する（起動完了はヘルスチェックで確認する）
         nssm.start(&service_name)?;
+        reporter.step_done("service_start", step_t.elapsed().as_millis() as u64);
 
         // ステップ 9/11: ヘルスチェックを実施する（最大 100 回・3 秒ごと = 最大 300 秒）
+        let step_t = Instant::now();
         reporter.step_start(
             "health_check",
             "ヘルスチェック待機中（最大 5 分）",
@@ -567,6 +603,7 @@ impl SetupEngine for BackstageEngine {
                 ),
             );
         }
+        reporter.step_done("health_check", step_t.elapsed().as_millis() as u64);
 
         // インストール完了イベントを送信する
         reporter.finished(

@@ -1,0 +1,56 @@
+{
+  "name": "@k1s0-ts-notification/core",
+  "version": "0.1.0",
+  "description": "DevPortal common headless notification core for toast, dialog, confirm, and API error notifications.",
+  "license": "UNLICENSED",
+  "private": false,
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/cjs/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json',JSON.stringify({type:'commonjs'},null,2)+'\\n')\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "prepublishOnly": "npm run clean && npm run build && npm run test:coverage"
+  },
+  "dependencies": {
+    "zod": "^3.23.0"
+  },
+  "peerDependencies": {
+    "@k1s0-ts-http/core": "*",
+    "@k1s0-ts-logger/core": "*"
+  },
+  "peerDependenciesMeta": {
+    "@k1s0-ts-logger/core": {
+      "optional": true
+    },
+    "@k1s0-ts-http/core": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@k1s0-ts-http/core": "file:../../http/core",
+    "@vitest/coverage-v8": "^4.1.7",
+    "typescript": "~5.8.3",
+    "vitest": "^4.1.7"
+  },
+  "publishConfig": {
+    "access": "restricted"
+  }
+}

@@ -4,7 +4,7 @@
 // React のフックをインポートする（react-jsx transform を使用しているため React 自体は不要）
 import { useState, useCallback, useEffect } from 'react';
 // API ラッパー関数をインポートする
-import { installComponent, loadConfig, saveConfig, pickDirectory } from '../api/tauri';
+import { installComponent, loadConfig, saveConfig, pickDirectory, saveInstallLog } from '../api/tauri';
 // 型定義をインポートする
 import type { ComponentKind, SetupConfig, SetupEvent } from '../api/types';
 // ステップ状態フックをインポートする
@@ -36,6 +36,10 @@ const DISPLAY_NAMES: Record<ComponentKind, string> = {
   backstage: 'Backstage',
   // BaGet の表示名
   baget: 'BaGet',
+  // PostgreSQL の表示名
+  postgres: 'PostgreSQL',
+  // SQL Server の表示名
+  sqlserver: 'SQL Server',
 };
 
 // インストール画面コンポーネント
@@ -207,6 +211,8 @@ export function Install({ component, onBack }: InstallProps) {
             onRetry={handleInstall}
             // 完了・失敗後に Overview へ戻れるようにコールバックを渡す
             onBack={onBack}
+            // 失敗時に全ログをファイル保存するコールバックを渡す（コンポーネント名を埋め込む）
+            onSaveLog={(logs) => saveInstallLog(component, logs)}
           />
         </section>
       )}

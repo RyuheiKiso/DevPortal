@@ -1,0 +1,46 @@
+diff --git a/node_modules/@react-native-windows/cli/lib-commonjs/utils/deploy.js b/node_modules/@react-native-windows/cli/lib-commonjs/utils/deploy.js
+index ee5cad4..eb7282c 100644
+--- a/node_modules/@react-native-windows/cli/lib-commonjs/utils/deploy.js
++++ b/node_modules/@react-native-windows/cli/lib-commonjs/utils/deploy.js
+@@ -288,20 +288,12 @@ async function deployToDesktop(options, verbose, config, buildTools) {
+     }
+     else {
+         // Deploy from layout
+-        // If we have DeployAppRecipe.exe, use it (start in 16.8.4, earlier 16.8 versions have bugs)
+-        const appxRecipe = getAppxRecipePath(options, projectName);
+-        const ideFolder = `${buildTools.installationPath}\\Common7\\IDE`;
+-        const deployAppxRecipeExePath = `${ideFolder}\\DeployAppRecipe.exe`;
+-        if (vsVersion.gte(version_1.default.fromString('16.8.30906.45')) &&
+-            fs_1.default.existsSync(deployAppxRecipeExePath)) {
+-            await (0, commandWithProgress_1.commandWithProgress)((0, commandWithProgress_1.newSpinner)('Deploying'), `Deploying ${appxRecipe}`, deployAppxRecipeExePath, [appxRecipe], verbose, 'DeployRecipeFailure');
+-        }
+-        else {
+-            // Install the app package's dependencies before attempting to deploy.
+-            await (0, commandWithProgress_1.runPowerShellScriptFunction)('Installing dependent framework packages', windowsStoreAppUtils, `Install-AppDependencies ${appxManifestPath} ${appPackageFolder} ${options.arch}`, verbose, 'InstallAppDependenciesFailure');
+-            await build.buildSolution(buildTools, slnFile, 
+-            /* options.release ? 'Release' : */ 'Debug', options.arch, { DeployLayout: 'true' }, verbose, 'deploy', options.buildLogDirectory);
+-        }
++        // 元実装は DeployAppRecipe.exe（VS IDE 同梱）を使うが、Build Tools 17.14 では同梱 NuGet.VisualStudio.Contracts.dll のバージョン不整合（6.14.x 実体 vs 17.14.3.0 期待）で起動直後にクラッシュする
++        // MSBuild /t:Deploy フォールバックも .wapproj には Deploy ターゲットが無く error MSB4057 で失敗する
++        // そのため WindowsStoreAppUtils.psm1 に既存の Install-AppFromDirectory（内部で Add-AppxPackage -Path $Path -Register -ForceApplicationShutdown を実行）で AppX を直接登録する
++        // 依存フレームワーク（VCLibs 等）は従来通り Install-AppDependencies で先に導入する
++        await (0, commandWithProgress_1.runPowerShellScriptFunction)('Installing dependent framework packages', windowsStoreAppUtils, `Install-AppDependencies ${appxManifestPath} ${appPackageFolder} ${options.arch}`, verbose, 'InstallAppDependenciesFailure');
++        await (0, commandWithProgress_1.runPowerShellScriptFunction)('Deploying AppX package', windowsStoreAppUtils, `Install-AppFromDirectory '${appxManifestPath}'`, verbose, 'DeployRecipeFailure');
+     }
+     const appFamilyName = (0, child_process_1.execSync)(`${commandWithProgress_1.powershell} -NoProfile -c $(Get-AppxPackage -Name ${appName}).PackageFamilyName`)
+         .toString()
+diff --git a/node_modules/@react-native-windows/cli/lib-commonjs/utils/vsInstalls.js b/node_modules/@react-native-windows/cli/lib-commonjs/utils/vsInstalls.js
+index 622a7ec..cc37bd8 100644
+--- a/node_modules/@react-native-windows/cli/lib-commonjs/utils/vsInstalls.js
++++ b/node_modules/@react-native-windows/cli/lib-commonjs/utils/vsInstalls.js
+@@ -41,7 +41,9 @@ function vsWhere(args, verbose) {
+  * Enumerate the installed versions of Visual Studio
+  */
+ function enumerateVsInstalls(opts) {
+-    const args = [];
++    // Visual Studio Build Tools も検出対象に含めるため -products * を付与
++    // （CLI のデフォルトでは IDE 製品（Community/Pro/Ent）のみ列挙され、Build Tools エディションが除外されるため）
++    const args = ['-products *'];
+     if (opts.minVersion) {
+         // VS 2019 ex: minVersion == 16.7 => [16.7,17.0)
+         // VS 2022 ex: minVersion == 17.0 => [17.0,18.0)

@@ -52,7 +52,7 @@ pub enum Commands {
 // InstallArgs: install サブコマンドの引数構造体
 #[derive(clap::Args)]
 pub struct InstallArgs {
-    /// インストール対象（verdaccio / backstage / baget / all）
+    /// インストール対象（verdaccio / backstage / baget / postgres / sqlserver / all）
     // ポジショナル引数としてインストール対象を受け取る
     pub target: String,
     /// Verdaccio のポート番号
@@ -71,6 +71,18 @@ pub struct InstallArgs {
     // オプション引数として BaGet のポート番号を受け取る
     #[arg(long)]
     pub baget_port: Option<u16>,
+    /// PostgreSQL のポート番号
+    // オプション引数として PostgreSQL のポート番号を受け取る
+    #[arg(long)]
+    pub postgres_port: Option<u16>,
+    /// SQL Server のポート番号
+    // オプション引数として SQL Server のポート番号を受け取る
+    #[arg(long)]
+    pub sqlserver_port: Option<u16>,
+    /// SQL Server のインスタンス名
+    // オプション引数として SQL Server インスタンス名を受け取る
+    #[arg(long)]
+    pub sqlserver_instance: Option<String>,
     /// インストール先のベースディレクトリ
     // オプション引数としてインストール先ディレクトリを受け取る
     #[arg(long)]

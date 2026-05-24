@@ -20,6 +20,17 @@ use render::Renderer;
 
 // SetupConfig 構造体を取り込む
 use shared::config::SetupConfig;
+use shared::error::SetupError;
+
+fn load_config_or_default(config_path: &std::path::PathBuf) -> Result<SetupConfig, SetupError> {
+    match SetupConfig::from_file(config_path) {
+        Ok(config) => Ok(config),
+        Err(SetupError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+            Ok(SetupConfig::default())
+        }
+        Err(e) => Err(e),
+    }
+}
 
 // バイナリのエントリポイント
 fn main() {
@@ -36,7 +47,23 @@ fn main() {
         .unwrap_or_else(shared::paths::config_file);
 
     // 設定ファイルを読み込む（ファイルがなければデフォルト値を使う）
-    let mut config = SetupConfig::from_file(&config_path).unwrap_or_default();
+    let mut config = match load_config_or_default(&config_path) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("設定ファイルの読み込みに失敗しました: {e}");
+            std::process::exit(1);
+        }
+    };
+    let config_override = cli.config.as_ref().map(|path| {
+        if path.is_absolute() {
+            path.clone()
+        } else {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(path))
+                .unwrap_or_else(|_| path.clone())
+        }
+    });
+    let config_override = config_override.as_deref();
 
     // サブコマンドを実行する（各コマンドの run 関数に委譲する）
     let result = match &cli.command {
@@ -49,23 +76,44 @@ fn main() {
         // install: コンポーネントをインストールする（昇格フラグを渡す）
         Commands::Install(args) => {
             // install コマンドに昇格ループ防止フラグを渡す
-            commands::install::run(args, &config, &renderer, cli.no_elevate)
+            commands::install::run(
+                args,
+                &config,
+                &renderer,
+                cli.no_elevate,
+                cli.json,
+                config_override,
+            )
         }
 
         // uninstall: コンポーネントをアンインストールする（昇格フラグを渡す）
         Commands::Uninstall(args) => {
             // uninstall コマンドに昇格ループ防止フラグを渡す
-            commands::uninstall::run(args, &config, &renderer, cli.no_elevate)
+            commands::uninstall::run(
+                args,
+                &config,
+                &renderer,
+                cli.no_elevate,
+                cli.json,
+                config_override,
+            )
         }
 
         // service: Windows サービスを制御する（昇格フラグを渡す）
         Commands::Service(args) => {
             // service コマンドに昇格ループ防止フラグを渡す
-            commands::service::run(args, &config, &renderer, cli.no_elevate)
+            commands::service::run(
+                args,
+                &config,
+                &renderer,
+                cli.no_elevate,
+                cli.json,
+                config_override,
+            )
         }
 
         // config: セットアップ設定の表示・変更を行う（可変参照を渡す）
-        Commands::Config(args) => commands::config_cmd::run(args, &mut config),
+        Commands::Config(args) => commands::config_cmd::run(args, &mut config, &config_path),
     };
 
     // エラーがあれば標準エラーに表示して終了コード 1 で終了する

@@ -10,11 +10,14 @@ use shared::event::{ActionKind, Component, Reporter, SetupEvent};
 use shared::engine::engine_for;
 // shared クレートの設定構造体をインポートする
 use shared::config::SetupConfig;
+// 管理者権限の有無を判定する関数をインポートする（NSSM/レジストリ書き込みは昇格必須のため）
+use shared::elevation::is_elevated;
 // cmd_install: インストールを開始し進捗を Channel で送信する Tauri コマンド
 // component: "verdaccio" / "backstage" / "baget" を指定する文字列
 // config: インストール設定（フロントエンドから JSON でシリアライズされて渡される）
 // on_event: Tauri v2 の Channel<SetupEvent>（進捗イベントの送信先）
-// 注: 管理者権限は app.manifest の requireAdministrator で OS レベルで保証される
+// 注: 管理者権限は OS の app.manifest では強制していない（tauri.conf.json に requireAdministrator なし）
+// そのため install スレッド先頭で is_elevated() を確認し、未昇格なら NSSM 失敗より先に分かりやすいエラーを返す
 // async にすることで Tauri の非同期ランタイム上で実行し、メインスレッドをブロックしない
 #[tauri::command]
 pub async fn cmd_install(
@@ -33,6 +36,10 @@ pub async fn cmd_install(
         "backstage" => Component::Backstage,
         // "baget" を Component::BaGet に変換する
         "baget" => Component::BaGet,
+        // "postgres" を Component::Postgres に変換する
+        "postgres" => Component::Postgres,
+        // "sqlserver" を Component::SqlServer に変換する
+        "sqlserver" => Component::SqlServer,
         // 未知のコンポーネント名の場合はエラーを返す
         other => return Err(format!("未知のコンポーネント: {}", other)),
     };
@@ -46,11 +53,30 @@ pub async fn cmd_install(
         // Reporter を作成する（送信端を渡してイベントを Reporter 経由で送信する）
         let reporter = Reporter::new(tx);
 
-        // インストールエンジンを取得する（comp を clone して engine_for に渡し、元の値はエラー報告用に保持する）
-        let engine = engine_for(comp.clone());
-
         // 別スレッドでエンジンの install を実行する（JoinHandle を保持して panic を検知する）
         let handle = std::thread::spawn(move || {
+            // 管理者権限を早期に確認する（NSSM/sc.exe/レジストリ書き込みは昇格必須）
+            // 非昇格のまま install を進めると NSSM 段階で stderr 詳細なく失敗する事故が起きる
+            if !is_elevated() {
+                // 分かりやすいエラーを Failed イベントで送って即終了する（再試行不能とする）
+                reporter.failed(
+                    // 対象コンポーネントを渡す
+                    comp,
+                    // インストール操作であることを示す
+                    ActionKind::Install,
+                    // ユーザー向けの誘導メッセージ（改行で複数行にして読みやすくする）
+                    "DevPortal GUI が管理者権限で起動されていません。\n\
+                     サービス登録（NSSM／レジストリ書き込み）には管理者権限が必要です。\n\
+                     GUI のアイコンを右クリックして「管理者として実行」で起動し直してください。",
+                    // 再試行しても同じく失敗するので回復不可とする（再試行ボタンを表示しない）
+                    false,
+                );
+                // 以降の処理に進まずスレッドを終える
+                return;
+            }
+
+            // 管理者権限が確認できたのでインストールエンジンを取得する
+            let engine = engine_for(comp.clone());
             // エンジンの install メソッドを呼び出してインストールを実行する
             if let Err(e) = engine.install(&config, &reporter) {
                 // エンジンが reporter.failed() を呼ばずに Err を返した場合のフォールバック

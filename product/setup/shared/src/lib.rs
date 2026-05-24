@@ -39,6 +39,12 @@ pub mod backstage;
 // BaGet NuGet レジストリの SetupEngine 実装を定義するモジュール
 pub mod baget;
 
+// PostgreSQL リレーショナルデータベースの SetupEngine 実装を定義するモジュール
+pub mod postgres;
+
+// Microsoft SQL Server リレーショナルデータベースの SetupEngine 実装を定義するモジュール
+pub mod sqlserver;
+
 // NSSM バイナリを HTTP で動的取得・SHA-256 検証・ZIP 展開するモジュール
 pub mod nssm_fetcher;
 

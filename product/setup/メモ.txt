@@ -1,7 +1,0 @@
-※これはあとで消します。
-
-guiはtauri(react + rust)
-cliはrust
-sharedはguiとcliの共通の処理
-
-

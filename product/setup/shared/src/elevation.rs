@@ -14,59 +14,59 @@ mod windows_impl {
     use std::os::windows::ffi::OsStrExt;
 
     // Windows の BOOL 型（i32）を使用する
-    type BOOL = i32;
+    type Bool = i32;
     // Windows の HANDLE 型（void ポインタ）を使用する
-    type HANDLE = *mut std::ffi::c_void;
+    type Handle = *mut std::ffi::c_void;
     // Windows の DWORD 型（u32）を使用する
-    type DWORD = u32;
+    type Dword = u32;
 
     // TOKEN_ELEVATION 構造体（TokenIsElevated フィールドを持つ）
     #[repr(C)]
     struct TokenElevation {
         // 0 以外のとき昇格済みであることを示す
-        token_is_elevated: DWORD,
+        token_is_elevated: Dword,
     }
 
     // TOKEN_INFORMATION_CLASS の TokenElevation 値（定数として定義）
     const TOKEN_ELEVATION_CLASS: u32 = 20;
 
     // TOKEN_QUERY アクセス権（GetTokenInformation に必要）
-    const TOKEN_QUERY: DWORD = 0x0008;
+    const TOKEN_QUERY: Dword = 0x0008;
 
     // GetCurrentProcess を外部関数として宣言する
     extern "system" {
         // 現在のプロセスの疑似ハンドルを返す関数
-        fn GetCurrentProcess() -> HANDLE;
+        fn GetCurrentProcess() -> Handle;
         // プロセスのアクセストークンを開く関数
         fn OpenProcessToken(
             // 対象プロセスのハンドル
-            process_handle: HANDLE,
+            process_handle: Handle,
             // 要求するアクセス権
-            desired_access: DWORD,
+            desired_access: Dword,
             // トークンハンドルの出力先ポインタ
-            token_handle: *mut HANDLE,
-        ) -> BOOL;
+            token_handle: *mut Handle,
+        ) -> Bool;
         // トークンの情報を取得する関数
         fn GetTokenInformation(
             // トークンハンドル
-            token_handle: HANDLE,
+            token_handle: Handle,
             // 取得する情報のクラス
             token_information_class: u32,
             // 情報を受け取るバッファ
             token_information: *mut std::ffi::c_void,
             // バッファのサイズ（バイト）
-            token_information_length: DWORD,
+            token_information_length: Dword,
             // 実際に書き込まれたバイト数の出力先
-            return_length: *mut DWORD,
-        ) -> BOOL;
+            return_length: *mut Dword,
+        ) -> Bool;
         // ハンドルを閉じる関数
-        fn CloseHandle(object: HANDLE) -> BOOL;
+        fn CloseHandle(object: Handle) -> Bool;
     }
 
     // 現在のプロセスが管理者権限（Elevated）で動作しているかを返す Windows 実装
     pub fn is_elevated_impl() -> bool {
         // トークンハンドルを格納する変数（null で初期化）
-        let mut token_handle: HANDLE = null_mut();
+        let mut token_handle: Handle = null_mut();
 
         // 現在のプロセスのトークンを TOKEN_QUERY 権限で開く
         let open_result = unsafe {
@@ -93,7 +93,7 @@ mod windows_impl {
             token_is_elevated: 0,
         };
         // GetTokenInformation が実際に書き込んだバイト数を格納する変数
-        let mut return_length: DWORD = 0;
+        let mut return_length: Dword = 0;
 
         // GetTokenInformation で昇格情報を取得する
         let info_result = unsafe {
@@ -106,7 +106,7 @@ mod windows_impl {
                 // elevation 構造体のポインタをキャストして渡す
                 &mut elevation as *mut TokenElevation as *mut std::ffi::c_void,
                 // 構造体のサイズを渡す
-                std::mem::size_of::<TokenElevation>() as DWORD,
+                std::mem::size_of::<TokenElevation>() as Dword,
                 // 実際の書き込みサイズの出力先を渡す
                 &mut return_length,
             )
@@ -122,12 +122,54 @@ mod windows_impl {
         info_result != 0 && elevation.token_is_elevated != 0
     }
 
+    fn quote_arg(arg: &str) -> String {
+        if !arg.is_empty()
+            && !arg
+                .chars()
+                .any(|ch| matches!(ch, ' ' | '\t' | '\n' | '\r' | '"'))
+        {
+            return arg.to_string();
+        }
+
+        let mut quoted = String::from("\"");
+        let mut backslashes = 0usize;
+
+        for ch in arg.chars() {
+            match ch {
+                '\\' => {
+                    backslashes += 1;
+                }
+                '"' => {
+                    quoted.push_str(&"\\".repeat(backslashes * 2 + 1));
+                    quoted.push('"');
+                    backslashes = 0;
+                }
+                _ => {
+                    quoted.push_str(&"\\".repeat(backslashes));
+                    backslashes = 0;
+                    quoted.push(ch);
+                }
+            }
+        }
+
+        quoted.push_str(&"\\".repeat(backslashes * 2));
+        quoted.push('"');
+        quoted
+    }
+
+    fn join_args(args: &[&str]) -> String {
+        args.iter()
+            .map(|arg| quote_arg(arg))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     // 自身のプロセスを runas（管理者権限）で再起動する Windows 実装
     pub fn run_self_elevated_impl(args: &[&str]) -> Result<(), crate::error::SetupError> {
         // ShellExecuteW を使うために必要な型を定義する
-        type HWND = *mut std::ffi::c_void;
+        type Hwnd = *mut std::ffi::c_void;
         // HINSTANCE は void ポインタとして扱う
-        type HINSTANCE = *mut std::ffi::c_void;
+        type Hinstance = *mut std::ffi::c_void;
         // SW_SHOWDEFAULT ウィンドウ表示フラグの定数値
         const SW_SHOWDEFAULT: i32 = 10;
 
@@ -136,7 +178,7 @@ mod windows_impl {
             // ShellExecuteW: 指定した動詞でファイルを実行する関数
             fn ShellExecuteW(
                 // 親ウィンドウハンドル（NULL で可）
-                hwnd: HWND,
+                hwnd: Hwnd,
                 // 操作動詞の Unicode 文字列ポインタ
                 lp_operation: *const u16,
                 // 実行ファイルの Unicode 文字列ポインタ
@@ -147,7 +189,7 @@ mod windows_impl {
                 lp_directory: *const u16,
                 // ウィンドウ表示フラグ
                 n_show_cmd: i32,
-            ) -> HINSTANCE;
+            ) -> Hinstance;
         }
 
         // 現在の実行ファイルのパスを取得する
@@ -168,8 +210,8 @@ mod windows_impl {
             // ベクタに収集する
             .collect();
 
-        // 追加引数を 1 つのコマンドライン文字列に結合する
-        let params_str = args.join(" ");
+        // 追加引数を Windows のコマンドライン規則に従って結合する
+        let params_str = join_args(args);
         // params_str を UTF-16 の null 終端文字列に変換する
         let params_wide: Vec<u16> = params_str
             // OsStr 経由でエンコードする
@@ -224,6 +266,26 @@ mod windows_impl {
 
         // 昇格プロセスの起動に成功した場合は Ok(()) を返す
         Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::join_args;
+
+        #[test]
+        fn join_args_quotes_paths_with_spaces() {
+            let args = ["--config", r"C:\ProgramData\Dev Portal\setup.toml"];
+            assert_eq!(
+                join_args(&args),
+                r#"--config "C:\ProgramData\Dev Portal\setup.toml""#
+            );
+        }
+
+        #[test]
+        fn join_args_escapes_quotes_and_trailing_slashes() {
+            let args = [r#"C:\Temp\quoted "name"\"#];
+            assert_eq!(join_args(&args), r#""C:\Temp\quoted \"name\"\\""#);
+        }
     }
 }
 

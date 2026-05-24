@@ -1,0 +1,24 @@
+# Backstage Software Catalog - Component エンティティ最小雛形
+# 使い方: ファイルをコピーし、`my-*` プレースホルダを実際の値に置換してください
+# 公式仕様: https://backstage.io/docs/features/software-catalog/descriptor-format#kind-component
+
+# Backstage Catalog のスキーマバージョン (v1alpha1 固定)
+apiVersion: backstage.io/v1alpha1
+# エンティティ種別 (Component / API / System / Domain / Resource / Group / User / Location)
+kind: Component
+# エンティティ自身を識別するメタデータ
+metadata:
+  # 一意な名前 (kebab-case 必須、namespace 内で衝突不可)
+  name: my-component
+  # UI 上の説明文 (省略可)
+  description: 自分のコンポーネントについての一行説明
+# Component 固有の仕様
+spec:
+  # 種別: service / website / library のいずれか
+  type: service
+  # ライフサイクル: experimental / production / deprecated
+  lifecycle: production
+  # 所有者 (Group または User エンティティの name)
+  owner: my-team
+  # 所属する System (省略可)
+  system: my-system

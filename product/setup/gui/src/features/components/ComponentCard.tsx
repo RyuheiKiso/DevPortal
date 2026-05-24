@@ -76,6 +76,10 @@ const DISPLAY_NAMES: Record<string, string> = {
   backstage:  'Backstage',
   // BaGet の表示名
   baget: 'BaGet',
+  // PostgreSQL の表示名
+  postgres: 'PostgreSQL',
+  // SQL Server の表示名
+  sqlserver: 'SQL Server',
 };
 
 // コンポーネント種別ごとの説明文マップ
@@ -86,6 +90,10 @@ const DESCRIPTIONS: Record<string, string> = {
   backstage:  '開発者ポータル',
   // BaGet の説明文
   baget: 'プライベート NuGet レジストリ',
+  // PostgreSQL の説明文
+  postgres: 'リレーショナルデータベース',
+  // SQL Server の説明文
+  sqlserver: 'Microsoft SQL Server データベース',
 };
 
 // コンポーネントの状態カードコンポーネント

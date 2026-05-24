@@ -7,6 +7,9 @@ use std::fs;
 // ファイル読み込みに必要なトレイトをインポートする
 use std::io::{BufRead, BufReader};
 
+// 外部コマンド実行（sc.exe による SQL Server サービス制御）に必要な型をインポートする
+use std::process::Command;
+
 // ServiceArgs と ServiceAction 型を参照するために使用する
 use crate::args::{ServiceAction, ServiceArgs};
 
@@ -32,10 +35,11 @@ use shared::nssm::Nssm;
 use shared::paths;
 
 // 管理者権限確認と昇格再起動の関数を参照するために使用する
-use shared::elevation::{is_elevated, run_self_elevated};
+use shared::elevation::is_elevated;
 
 // target 文字列を Component に変換するヘルパー関数
-// "verdaccio" → Component::Verdaccio、"backstage" → Component::Backstage、"baget" → Component::BaGet
+// "verdaccio" → Component::Verdaccio、"backstage" → Component::Backstage、"baget" → Component::BaGet、
+// "postgres" → Component::Postgres、"sqlserver" → Component::SqlServer
 fn parse_component(target: &str) -> anyhow::Result<Component> {
     // target を小文字に正規化してマッチングする
     match target.to_lowercase().as_str() {
@@ -45,9 +49,13 @@ fn parse_component(target: &str) -> anyhow::Result<Component> {
         "backstage" => Ok(Component::Backstage),
         // "baget" の場合は BaGet コンポーネントを返す
         "baget" => Ok(Component::BaGet),
+        // "postgres" の場合は Postgres コンポーネントを返す
+        "postgres" => Ok(Component::Postgres),
+        // "sqlserver" の場合は SqlServer コンポーネントを返す
+        "sqlserver" => Ok(Component::SqlServer),
         // 未知の値の場合はエラーを返す
         _ => Err(anyhow::anyhow!(
-            "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / baget",
+            "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / baget / postgres / sqlserver",
             target
         )),
     }
@@ -63,70 +71,71 @@ pub fn run(
     config: &SetupConfig,
     _renderer: &Renderer,
     no_elevate: bool,
+    json: bool,
+    config_path: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
     // logs コマンドのみ管理者権限不要のため、操作種別を先に確認する
-    match &args.action {
+    if let ServiceAction::Logs { target, tail } = &args.action {
         // logs コマンドの場合はログファイルを読み込んで表示する
-        ServiceAction::Logs { target, tail } => {
-            // target を Component に変換する
-            let component = parse_component(target)?;
+        // target を Component に変換する
+        let component = parse_component(target)?;
 
-            // コンポーネントに応じてログディレクトリを決定する
-            let logs_dir = match component {
-                // Verdaccio の場合は verdaccio のログディレクトリを取得する
-                Component::Verdaccio => paths::verdaccio_logs_dir(config),
-                // Backstage の場合は backstage のログディレクトリを取得する
-                Component::Backstage => paths::backstage_logs_dir(config),
-                // BaGet の場合は baget のログディレクトリを取得する
-                Component::BaGet => paths::baget_logs_dir(config),
-            };
+        // コンポーネントに応じてログファイルのパスを決定する
+        let log_file = match component {
+            // Verdaccio の場合は verdaccio の logs/stdout.log を参照する
+            Component::Verdaccio => paths::verdaccio_logs_dir(config).join("stdout.log"),
+            // Backstage の場合は backstage の logs/stdout.log を参照する
+            Component::Backstage => paths::backstage_logs_dir(config).join("stdout.log"),
+            // BaGet の場合は baget の logs/stdout.log を参照する
+            Component::BaGet => paths::baget_logs_dir(config).join("stdout.log"),
+            // PostgreSQL は postgres-stdout.log にリダイレクトしている
+            Component::Postgres => paths::postgres_logs_dir(config).join("postgres-stdout.log"),
+            // SQL Server は ERRORLOG（拡張子なし）を SQL Server 自身が data_dir/Log に出力する
+            Component::SqlServer => paths::sqlserver_data_dir(config)
+                .join("Log")
+                .join("ERRORLOG"),
+        };
 
-            // stdout.log ファイルのパスを構築する
-            let log_file = logs_dir.join("stdout.log");
-
-            // ログファイルが存在するか確認する
-            if !log_file.exists() {
-                // ログファイルが存在しない場合はエラーメッセージを表示して終了する
-                println!("ログファイルが見つかりません: {}", log_file.display());
-                // 正常終了する（ログがないのはエラーではない）
-                return Ok(());
-            }
-
-            // ログファイルを開く
-            let file = fs::File::open(&log_file)
-                .map_err(|e| anyhow::anyhow!("ログファイルを開けませんでした: {}", e))?;
-
-            // バッファリングしてファイルを行単位で読み込む
-            let reader = BufReader::new(file);
-
-            // 全行をベクタに収集する
-            let lines: Vec<String> = reader
-                .lines()
-                // 読み込みエラーをスキップする
-                .filter_map(|l| l.ok())
-                // 全行をベクタに収集する
-                .collect();
-
-            // 末尾から tail 行分を取得する
-            let start = if lines.len() > *tail {
-                // tail 行より多い場合は末尾 tail 行のみ表示する
-                lines.len() - tail
-            } else {
-                // tail 行以下の場合は全行表示する
-                0
-            };
-
-            // 対象行を標準出力に表示する
-            for line in &lines[start..] {
-                // 各行を表示する
-                println!("{}", line);
-            }
-
-            // logs コマンドは管理者権限不要のため昇格チェックをスキップして終了する
+        // ログファイルが存在するか確認する
+        if !log_file.exists() {
+            // ログファイルが存在しない場合はエラーメッセージを表示して終了する
+            println!("ログファイルが見つかりません: {}", log_file.display());
+            // 正常終了する（ログがないのはエラーではない）
             return Ok(());
         }
-        // その他のコマンド（start/stop/restart）は管理者権限チェックを行う
-        _ => {}
+
+        // ログファイルを開く
+        let file = fs::File::open(&log_file)
+            .map_err(|e| anyhow::anyhow!("ログファイルを開けませんでした: {}", e))?;
+
+        // バッファリングしてファイルを行単位で読み込む
+        let reader = BufReader::new(file);
+
+        // 全行をベクタに収集する
+        let lines: Vec<String> = reader
+            .lines()
+            // 読み込みエラーをスキップする
+            .map_while(Result::ok)
+            // 全行をベクタに収集する
+            .collect();
+
+        // 末尾から tail 行分を取得する
+        let start = if lines.len() > *tail {
+            // tail 行より多い場合は末尾 tail 行のみ表示する
+            lines.len() - tail
+        } else {
+            // tail 行以下の場合は全行表示する
+            0
+        };
+
+        // 対象行を標準出力に表示する
+        for line in &lines[start..] {
+            // 各行を表示する
+            println!("{}", line);
+        }
+
+        // logs コマンドは管理者権限不要のため昇格チェックをスキップして終了する
+        return Ok(());
     }
 
     // start/stop/restart コマンドは管理者権限が必要なため確認する
@@ -144,62 +153,43 @@ pub fn run(
         };
 
         // 昇格引数リストを構築する
-        let elevated_args = vec![
-            // service サブコマンドを指定する
-            "service",
-            // 操作種別（start/stop/restart）を指定する
-            action_name,
-            // ターゲット（verdaccio/backstage）を指定する
-            target_name,
-            // 昇格ループ防止フラグを付与する
-            "--no-elevate",
+        let command_args = vec![
+            "service".to_string(),
+            action_name.to_string(),
+            target_name.to_string(),
         ];
 
         // 管理者権限で自身を再起動する
-        run_self_elevated(&elevated_args)?;
+        crate::commands::run_self_elevated_owned(crate::commands::elevated_args(
+            json,
+            config_path,
+            &command_args,
+        ))?;
         // 昇格再起動が成功したら現在のプロセスは終了する
         return Ok(());
     }
 
-    // NSSM を確保するための一時チャネルを作成する
-    // service コマンドには Reporter が渡されないため、ここでダミーチャネルを作成する
-    let (tx, rx) = std::sync::mpsc::channel::<SetupEvent>();
-    // Reporter インスタンスを作成する
-    let reporter = Reporter::new(tx);
-
-    // NSSM インスタンスを確保する（キャッシュがあれば即時、なければ HTTP 動的取得）
-    // NSSM ダウンロード進捗を受信スレッドで Renderer に渡す
-    let nssm_result = {
-        // NSSM 取得を別スレッドで実行する（reporter と同じスレッドでは recv できないため）
-        let reporter_ref = reporter;
-        // メインスレッドで NSSM を確保する
-        Nssm::ensure(&reporter_ref)
-            .map_err(|e| anyhow::anyhow!("NSSM の初期化に失敗しました: {}", e))?
-    };
-
-    // 受信チャネルのイベントを Renderer で表示する（既に受信可能なイベントがあれば処理）
-    // try_recv でノンブロッキングに受信する
-    while let Ok(event) = rx.try_recv() {
-        // Renderer でイベントを表示する
-        _renderer.render(&event);
-    }
-
-    // 確保した NSSM インスタンスを使用する
-    let nssm = nssm_result;
-
-    // 操作種別に応じて対応する NSSM コマンドを実行する
+    // 操作種別に応じて対応するサービス制御コマンドを実行する
+    // SQL Server は NSSM 管理下にないため sc.exe を直接呼び出す
     match &args.action {
         // start コマンドの処理
         ServiceAction::Start { target } => {
             // target を Component に変換する
             let component = parse_component(target)?;
-            // エンジンを生成してサービス名を取得する
-            let engine = engine_for(component);
+            // エンジンを生成してサービス名を取得する（component は後で matches! で比較するため clone する）
+            let engine = engine_for(component.clone());
             // サービス名を取得する
             let service_name = engine.service_name(config);
-            // NSSM でサービスを起動する
-            nssm.start(&service_name)
-                .map_err(|e| anyhow::anyhow!("サービス起動に失敗しました: {}", e))?;
+            // SQL Server の場合は sc.exe で操作する
+            if matches!(component, Component::SqlServer) {
+                // sc.exe start でサービスを起動する
+                sc_start(&service_name)?;
+            } else {
+                let nssm = ensure_nssm_for_service(_renderer)?;
+                // それ以外は NSSM でサービスを起動する
+                nssm.start(&service_name)
+                    .map_err(|e| anyhow::anyhow!("サービス起動に失敗しました: {}", e))?;
+            }
             // 起動成功メッセージを表示する
             println!("サービス '{}' を起動しました", service_name);
         }
@@ -207,13 +197,20 @@ pub fn run(
         ServiceAction::Stop { target } => {
             // target を Component に変換する
             let component = parse_component(target)?;
-            // エンジンを生成してサービス名を取得する
-            let engine = engine_for(component);
+            // エンジンを生成してサービス名を取得する（component は後で matches! で比較するため clone する）
+            let engine = engine_for(component.clone());
             // サービス名を取得する
             let service_name = engine.service_name(config);
-            // NSSM でサービスを停止する
-            nssm.stop(&service_name)
-                .map_err(|e| anyhow::anyhow!("サービス停止に失敗しました: {}", e))?;
+            // SQL Server の場合は sc.exe で停止する
+            if matches!(component, Component::SqlServer) {
+                // sc.exe stop でサービスを停止する
+                sc_stop(&service_name)?;
+            } else {
+                let nssm = ensure_nssm_for_service(_renderer)?;
+                // それ以外は NSSM でサービスを停止する
+                nssm.stop(&service_name)
+                    .map_err(|e| anyhow::anyhow!("サービス停止に失敗しました: {}", e))?;
+            }
             // 停止成功メッセージを表示する
             println!("サービス '{}' を停止しました", service_name);
         }
@@ -221,15 +218,24 @@ pub fn run(
         ServiceAction::Restart { target } => {
             // target を Component に変換する
             let component = parse_component(target)?;
-            // エンジンを生成してサービス名を取得する
-            let engine = engine_for(component);
+            // エンジンを生成してサービス名を取得する（component は後で matches! で比較するため clone する）
+            let engine = engine_for(component.clone());
             // サービス名を取得する
             let service_name = engine.service_name(config);
-            // まず NSSM でサービスを停止する（失敗しても続行する）
-            let _ = nssm.stop(&service_name);
-            // 次に NSSM でサービスを起動する
-            nssm.start(&service_name)
-                .map_err(|e| anyhow::anyhow!("サービス再起動に失敗しました: {}", e))?;
+            // SQL Server の場合は sc.exe で停止 → 起動する
+            if matches!(component, Component::SqlServer) {
+                // 停止失敗は無視する（既に停止していることがある）
+                let _ = sc_stop(&service_name);
+                // 停止後に sc.exe start でサービスを起動する
+                sc_start(&service_name)?;
+            } else {
+                let nssm = ensure_nssm_for_service(_renderer)?;
+                // それ以外は NSSM で停止 → 起動する
+                let _ = nssm.stop(&service_name);
+                // 次に NSSM でサービスを起動する
+                nssm.start(&service_name)
+                    .map_err(|e| anyhow::anyhow!("サービス再起動に失敗しました: {}", e))?;
+            }
             // 再起動成功メッセージを表示する
             println!("サービス '{}' を再起動しました", service_name);
         }
@@ -239,4 +245,86 @@ pub fn run(
 
     // 正常終了を示す Ok(()) を返す
     Ok(())
+}
+
+fn ensure_nssm_for_service(renderer: &Renderer) -> anyhow::Result<Nssm> {
+    let (tx, rx) = std::sync::mpsc::channel::<SetupEvent>();
+    let reporter = Reporter::new(tx);
+    let result =
+        Nssm::ensure(&reporter).map_err(|e| anyhow::anyhow!("NSSM の初期化に失敗しました: {}", e));
+    drop(reporter);
+
+    while let Ok(event) = rx.try_recv() {
+        renderer.render(&event);
+    }
+
+    result
+}
+
+// sc.exe start <service_name> を実行するヘルパー関数（SQL Server 用）
+fn sc_start(service_name: &str) -> anyhow::Result<()> {
+    // sc.exe start を起動する
+    let output = Command::new("sc.exe")
+        // start サブコマンドを指定する
+        .arg("start")
+        // 対象サービス名を指定する
+        .arg(service_name)
+        // 実行する
+        .output()
+        .map_err(|e| anyhow::anyhow!("sc.exe start の実行に失敗しました: {}", e))?;
+
+    // 終了コードが 0 でない場合は起動失敗として呼び出し元に返す
+    if !output.status.success() {
+        let details = format_sc_output(&output);
+        return Err(anyhow::anyhow!(
+            "sc.exe start が失敗しました（終了コード: {:?}）{}",
+            output.status.code(),
+            details
+        ));
+    }
+
+    // 正常終了として扱う
+    Ok(())
+}
+
+// sc.exe stop <service_name> を実行するヘルパー関数（SQL Server 用）
+fn sc_stop(service_name: &str) -> anyhow::Result<()> {
+    // sc.exe stop を起動する
+    let output = Command::new("sc.exe")
+        // stop サブコマンドを指定する
+        .arg("stop")
+        // 対象サービス名を指定する
+        .arg(service_name)
+        // 実行する
+        .output()
+        .map_err(|e| anyhow::anyhow!("sc.exe stop の実行に失敗しました: {}", e))?;
+
+    // 終了コードが 0 でない場合は停止失敗として呼び出し元に返す
+    if !output.status.success() {
+        let details = format_sc_output(&output);
+        return Err(anyhow::anyhow!(
+            "sc.exe stop が失敗しました（終了コード: {:?}）{}",
+            output.status.code(),
+            details
+        ));
+    }
+
+    // 正常終了として扱う
+    Ok(())
+}
+
+fn format_sc_output(output: &std::process::Output) -> String {
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let combined = [stdout, stderr]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if combined.is_empty() {
+        String::new()
+    } else {
+        format!(": {}", combined)
+    }
 }

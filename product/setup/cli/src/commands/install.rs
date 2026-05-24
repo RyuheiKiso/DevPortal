@@ -20,7 +20,7 @@ use shared::engine::engine_for;
 use shared::event::{Component, Reporter, SetupEvent};
 
 // 管理者権限確認と昇格再起動の関数を参照するために使用する
-use shared::elevation::{is_elevated, run_self_elevated};
+use shared::elevation::is_elevated;
 
 // 1 つのコンポーネントをインストールするヘルパー関数
 // component: インストール対象のコンポーネント種別
@@ -95,62 +95,66 @@ pub fn run(
     config: &SetupConfig,
     renderer: &Renderer,
     no_elevate: bool,
+    json: bool,
+    config_path: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
     // 管理者権限を確認し、未昇格かつ --no-elevate 未指定の場合は昇格して再起動する
     if !is_elevated() && !no_elevate {
         // 昇格して再起動する際に渡す引数リストを構築する
-        let mut elevated_args = vec![
-            // install サブコマンドを指定する
-            "install",
-            // ターゲットを指定する
-            args.target.as_str(),
-            // 昇格ループ防止フラグを付与する
-            "--no-elevate",
-        ];
+        let mut command_args = vec!["install".to_string(), args.target.clone()];
 
         // --yes フラグが指定されている場合は昇格後のコマンドにも追加する
         if args.yes {
             // 確認スキップフラグを追加する
-            elevated_args.push("--yes");
+            command_args.push("--yes".to_string());
         }
         // --verdaccio-port が指定されている場合は昇格後のコマンドにも追加する
-        let verdaccio_port_arg;
         if let Some(port) = args.verdaccio_port {
-            elevated_args.push("--verdaccio-port");
-            verdaccio_port_arg = port.to_string();
-            elevated_args.push(verdaccio_port_arg.as_str());
+            command_args.push("--verdaccio-port".to_string());
+            command_args.push(port.to_string());
         }
         // --backstage-port が指定されている場合は昇格後のコマンドにも追加する
-        let backstage_port_arg;
         if let Some(port) = args.backstage_port {
-            elevated_args.push("--backstage-port");
-            backstage_port_arg = port.to_string();
-            elevated_args.push(backstage_port_arg.as_str());
+            command_args.push("--backstage-port".to_string());
+            command_args.push(port.to_string());
         }
         // --backstage-mode が指定されている場合は昇格後のコマンドにも追加する
-        let backstage_mode_arg;
         if let Some(mode) = &args.backstage_mode {
-            elevated_args.push("--backstage-mode");
-            backstage_mode_arg = mode.clone();
-            elevated_args.push(backstage_mode_arg.as_str());
+            command_args.push("--backstage-mode".to_string());
+            command_args.push(mode.clone());
         }
         // --baget-port が指定されている場合は昇格後のコマンドにも追加する
-        let baget_port_arg;
         if let Some(port) = args.baget_port {
-            elevated_args.push("--baget-port");
-            baget_port_arg = port.to_string();
-            elevated_args.push(baget_port_arg.as_str());
+            command_args.push("--baget-port".to_string());
+            command_args.push(port.to_string());
+        }
+        // --postgres-port が指定されている場合は昇格後のコマンドにも追加する
+        if let Some(port) = args.postgres_port {
+            command_args.push("--postgres-port".to_string());
+            command_args.push(port.to_string());
+        }
+        // --sqlserver-port が指定されている場合は昇格後のコマンドにも追加する
+        if let Some(port) = args.sqlserver_port {
+            command_args.push("--sqlserver-port".to_string());
+            command_args.push(port.to_string());
+        }
+        // --sqlserver-instance が指定されている場合は昇格後のコマンドにも追加する
+        if let Some(name) = &args.sqlserver_instance {
+            command_args.push("--sqlserver-instance".to_string());
+            command_args.push(name.clone());
         }
         // --install-dir が指定されている場合は昇格後のコマンドにも追加する
-        let install_dir_arg;
         if let Some(dir) = &args.install_dir {
-            elevated_args.push("--install-dir");
-            install_dir_arg = dir.to_string_lossy().to_string();
-            elevated_args.push(install_dir_arg.as_str());
+            command_args.push("--install-dir".to_string());
+            command_args.push(dir.to_string_lossy().to_string());
         }
 
         // 管理者権限で自身を再起動する
-        run_self_elevated(&elevated_args)?;
+        crate::commands::run_self_elevated_owned(crate::commands::elevated_args(
+            json,
+            config_path,
+            &command_args,
+        ))?;
         // 昇格再起動が成功したら現在のプロセスは終了する
         return Ok(());
     }
@@ -191,6 +195,24 @@ pub fn run(
         effective_config.baget.port = port;
     }
 
+    // --postgres-port が指定されている場合は設定を上書きする
+    if let Some(port) = args.postgres_port {
+        // PostgreSQL のポート番号を上書きする
+        effective_config.postgres.port = port;
+    }
+
+    // --sqlserver-port が指定されている場合は設定を上書きする
+    if let Some(port) = args.sqlserver_port {
+        // SQL Server のポート番号を上書きする
+        effective_config.sqlserver.port = port;
+    }
+
+    // --sqlserver-instance が指定されている場合は設定を上書きする
+    if let Some(name) = &args.sqlserver_instance {
+        // SQL Server インスタンス名を上書きする
+        effective_config.sqlserver.instance_name = name.clone();
+    }
+
     // --install-dir が指定されている場合は設定を上書きする
     if let Some(dir) = &args.install_dir {
         // インストール先のベースディレクトリを上書きする
@@ -226,7 +248,21 @@ pub fn run(
             // 失敗フラグを更新する
             any_failed = any_failed || failed;
         }
-        // target が "all" の場合は Verdaccio → Backstage → BaGet の順でインストールする
+        // target が "postgres" の場合は PostgreSQL のみインストールする
+        "postgres" => {
+            // PostgreSQL をインストールしてフラグを更新する
+            let failed = install_component(Component::Postgres, effective_config, renderer)?;
+            // 失敗フラグを更新する
+            any_failed = any_failed || failed;
+        }
+        // target が "sqlserver" の場合は SQL Server のみインストールする
+        "sqlserver" => {
+            // SQL Server をインストールしてフラグを更新する
+            let failed = install_component(Component::SqlServer, effective_config, renderer)?;
+            // 失敗フラグを更新する
+            any_failed = any_failed || failed;
+        }
+        // target が "all" の場合は Verdaccio → Backstage → BaGet → Postgres → SqlServer の順でインストールする
         "all" => {
             // Verdaccio を先にインストールする（config のクローンをスレッドに渡す）
             let verdaccio_config = effective_config.clone();
@@ -242,18 +278,32 @@ pub fn run(
             // 失敗フラグを更新する
             any_failed = any_failed || failed_b;
 
-            // BaGet を最後にインストールする
-            let baget_config = effective_config;
+            // BaGet をその次にインストールする
+            let baget_config = effective_config.clone();
             // BaGet のインストールを実行する
             let failed_bg = install_component(Component::BaGet, baget_config, renderer)?;
             // 失敗フラグを更新する
             any_failed = any_failed || failed_bg;
+
+            // PostgreSQL をその次にインストールする
+            let postgres_config = effective_config.clone();
+            // PostgreSQL のインストールを実行する
+            let failed_pg = install_component(Component::Postgres, postgres_config, renderer)?;
+            // 失敗フラグを更新する
+            any_failed = any_failed || failed_pg;
+
+            // SQL Server を最後にインストールする
+            let sqlserver_config = effective_config;
+            // SQL Server のインストールを実行する
+            let failed_sql = install_component(Component::SqlServer, sqlserver_config, renderer)?;
+            // 失敗フラグを更新する
+            any_failed = any_failed || failed_sql;
         }
         // 未知の target が指定された場合はエラーを返す
         unknown => {
             // 不明なターゲット名を含むエラーメッセージを返す
             return Err(anyhow::anyhow!(
-                "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / baget / all",
+                "不明なターゲット: '{}'. 有効な値: verdaccio / backstage / baget / postgres / sqlserver / all",
                 unknown
             ));
         }

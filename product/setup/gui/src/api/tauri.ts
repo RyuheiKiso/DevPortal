@@ -179,6 +179,18 @@ export async function openInBrowser(url: string): Promise<void> {
   await openUrl(url);
 }
 
+// saveInstallLog: 集約済みのセットアップログをファイルに保存する関数
+// Rust 側の cmd_save_install_log を invoke して保存先絶対パスを返す
+export async function saveInstallLog(
+  // 保存先ディレクトリを決定するためのコンポーネント名（"backstage" / "verdaccio" など）
+  component: string,
+  // 保存するログ本文（StepperState.allLogs の中身）
+  content: string,
+): Promise<string> {
+  // invoke で cmd_save_install_log コマンドを呼び出して保存先パスを受け取る
+  return invoke<string>('cmd_save_install_log', { component, content });
+}
+
 // pluginRemove: プラグインを削除し進捗イベントを受け取る関数
 // Channel を作成して進捗イベントを onEvent コールバックにブリッジする
 export async function pluginRemove(

@@ -1,0 +1,20 @@
+# Backstage Software Catalog - System エンティティ最小雛形
+# 使い方: ファイルをコピーし、`my-*` プレースホルダを実際の値に置換してください
+# 公式仕様: https://backstage.io/docs/features/software-catalog/descriptor-format#kind-system
+
+# Backstage Catalog のスキーマバージョン (v1alpha1 固定)
+apiVersion: backstage.io/v1alpha1
+# エンティティ種別 (この雛形は System: 関連する Component / API / Resource をまとめる単位)
+kind: System
+# エンティティ自身を識別するメタデータ
+metadata:
+  # 一意な名前 (kebab-case 必須)
+  name: my-system
+  # UI 上の説明文 (省略可)
+  description: 自分の System についての一行説明
+# System 固有の仕様
+spec:
+  # 所有者 (Group または User エンティティの name)
+  owner: my-team
+  # 所属する Domain (省略可)
+  domain: my-domain

@@ -1,0 +1,23 @@
+# Backstage Software Catalog - User エンティティ最小雛形
+# 使い方: ファイルをコピーし、`my-*` プレースホルダを実際の値に置換してください
+# 公式仕様: https://backstage.io/docs/features/software-catalog/descriptor-format#kind-user
+
+# Backstage Catalog のスキーマバージョン (v1alpha1 固定)
+apiVersion: backstage.io/v1alpha1
+# エンティティ種別 (この雛形は User: 個人ユーザー)
+kind: User
+# エンティティ自身を識別するメタデータ
+metadata:
+  # 一意な名前 (社内 ID 等、kebab-case 必須)
+  name: my-user
+# User 固有の仕様
+spec:
+  # プロフィール情報 (省略可)
+  profile:
+    # UI に表示する氏名
+    displayName: My User
+    # 連絡先メールアドレス
+    email: my-user@example.com
+  # 所属する Group の一覧 (空配列でも可)
+  memberOf:
+    - my-team

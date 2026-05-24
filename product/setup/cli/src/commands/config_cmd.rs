@@ -22,7 +22,11 @@ fn parse_bool(value: &str) -> anyhow::Result<bool> {
 // config コマンドのエントリポイント関数
 // args: config サブコマンドの引数（show または set 操作を含む）
 // config: セットアップ設定への可変参照（set 操作で変更するため可変参照を受け取る）
-pub fn run(args: &ConfigArgs, config: &mut SetupConfig) -> anyhow::Result<()> {
+pub fn run(
+    args: &ConfigArgs,
+    config: &mut SetupConfig,
+    config_path: &std::path::PathBuf,
+) -> anyhow::Result<()> {
     // 操作種別に応じた処理を実行する
     match &args.action {
         // show: 現在の設定を JSON 形式で表示する
@@ -142,13 +146,9 @@ pub fn run(args: &ConfigArgs, config: &mut SetupConfig) -> anyhow::Result<()> {
                 }
             }
 
-            // 変更した設定をファイルに保存する
-            // 設定ファイルのデフォルトパスを取得する
-            let config_path = shared::paths::config_file();
-
             // 設定をファイルに書き込む
             config
-                .save_to(&config_path)
+                .save_to(config_path)
                 .map_err(|e| anyhow::anyhow!("設定ファイルの保存に失敗しました: {}", e))?;
 
             // 保存完了メッセージを表示する
@@ -158,4 +158,35 @@ pub fn run(args: &ConfigArgs, config: &mut SetupConfig) -> anyhow::Result<()> {
 
     // 正常終了を示す Ok(()) を返す
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::args::ConfigAction;
+
+    #[test]
+    fn set_saves_to_the_loaded_config_path() {
+        let path = std::env::temp_dir().join(format!(
+            "devportal-setup-cli-config-{}-{}.toml",
+            std::process::id(),
+            "set-path"
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        let args = ConfigArgs {
+            action: ConfigAction::Set {
+                key: "baget.port".to_string(),
+                value: "5099".to_string(),
+            },
+        };
+        let mut config = SetupConfig::default();
+
+        run(&args, &mut config, &path).expect("config set should save");
+
+        let saved = SetupConfig::from_file(&path).expect("saved config should be readable");
+        assert_eq!(saved.baget.port, 5099);
+
+        let _ = std::fs::remove_file(path);
+    }
 }

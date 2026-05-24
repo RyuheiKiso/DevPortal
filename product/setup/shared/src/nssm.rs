@@ -123,28 +123,28 @@ impl Nssm {
     // reporter: 各ステップの進行状況を GUI/CLI ログに表示するために使用する
     pub fn install(&self, name: &str, exe: &str, reporter: &Reporter) -> Result<(), SetupError> {
         // ベストエフォートで既存サービスを停止する（失敗は無視）
-        reporter.info(&format!(
+        reporter.info(format!(
             "[クリーンアップ] 既存サービス '{}' の停止を試行",
             name
         ));
         let _ = self.stop(name);
 
         // ベストエフォートで NSSM 経由のサービス削除を試みる（失敗は無視）
-        reporter.info(&format!(
+        reporter.info(format!(
             "[クリーンアップ] 既存サービス '{}' の NSSM remove を試行",
             name
         ));
         let _ = self.run_nssm(&["remove", name, "confirm"]);
 
         // ベストエフォートで sc.exe 経由の削除を試みる（NSSM remove が失敗した場合の保険）
-        reporter.info(&format!(
+        reporter.info(format!(
             "[クリーンアップ] 既存サービス '{}' の sc.exe delete を試行",
             name
         ));
         self.run_system_cmd_ignore("sc.exe", &["delete", name]);
 
         // レジストリ残骸を再帰削除する（NSSM の Parameters 初期化を阻害しないよう先に消す）
-        reporter.info(&format!(
+        reporter.info(format!(
             "[クリーンアップ] レジストリ HKLM\\SYSTEM\\CurrentControlSet\\Services\\{} を削除を試行",
             name
         ));
@@ -155,12 +155,12 @@ impl Nssm {
         std::thread::sleep(std::time::Duration::from_millis(500));
 
         // nssm install でサービスを SCM に登録し Parameters\Application を初期化する
-        reporter.info(&format!("[インストール] nssm install '{}' を実行", name));
+        reporter.info(format!("[インストール] nssm install '{}' を実行", name));
         self.run_nssm(&["install", name, exe])?;
 
         // nssm install は稀に Application を空文字列で書き込む（NSSM 2.24 の既知バグ）
         // winreg で明示的に上書き設定して空値問題を確実に排除する
-        reporter.info(&format!(
+        reporter.info(format!(
             "[インストール] Application を winreg で明示設定 ('{}' = '{}')",
             name, exe
         ));
@@ -168,16 +168,13 @@ impl Nssm {
 
         // Parameters\Application が実際に非空の値で書き込まれたことを winreg で検証する
         // nssm install は exit 0 を返しても稀に Parameters を書かないことがあるため
-        reporter.info(&format!(
+        reporter.info(format!(
             "[検証] Parameters\\Application の書き込みを確認 ('{}')",
             name
         ));
         self.verify_parameters_application(name)?;
 
-        reporter.info(&format!(
-            "[検証] OK: nssm install が正常に完了 ('{}')",
-            name
-        ));
+        reporter.info(format!("[検証] OK: nssm install が正常に完了 ('{}')", name));
         Ok(())
     }
 
@@ -640,9 +637,9 @@ impl Nssm {
     // Backstage のように起動に時間がかかるサービスは NSSM start がタイムアウトしてエラーになるため
     // 起動完了の確認は呼び出し元のヘルスチェック（TCP 接続確認）に委ねる
     pub fn start(&self, name: &str) -> Result<(), SetupError> {
-        // sc.exe start を発火のみで実行し、START_PENDING 等の非エラー状態を無視する
-        self.run_system_cmd_ignore("sc.exe", &["start", name]);
-        Ok(())
+        // sc.exe start は発火だけを行い、SERVICE_RUNNING への到達確認は呼び出し元に委ねる。
+        // ただしサービス未登録などの明確な起動失敗は呼び出し元へ返す。
+        self.run_system_cmd_strict("sc.exe", &["start", name])
     }
 
     // サービスを停止する（タイムアウト: 30 秒）
@@ -668,6 +665,7 @@ impl Nssm {
 
     // サービスの完全設定を一括で行うヘルパメソッド
     // set() を使って各プロパティを winreg / sc.exe で設定する
+    #[allow(clippy::too_many_arguments)]
     pub fn configure_service(
         &self,
         // Windows サービスの識別名（sc.exe でも使用する名前）
