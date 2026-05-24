@@ -237,6 +237,12 @@ function computeState(events: SetupEvent[]): StepperState {
       // 正常完了イベント: summary を保存する
       case 'finished': {
         finished = { summary: ev.summary };
+        for (const step of stepMap.values()) {
+          if (step.status === 'running') {
+            step.status = 'done';
+          }
+        }
+        currentRunningStepId = null;
         // 全ログに完了マーカーを追加する
         appendAllLog('info', '', `=== セットアップ完了: ${ev.summary} ===`);
         break;
