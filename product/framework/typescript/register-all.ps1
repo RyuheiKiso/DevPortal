@@ -9,8 +9,23 @@
     依存解決の都合で Round 1 (Group/Domain + 4 System) → Round 2 (12 Component) の
     順に投入し、ラウンド内では並列実行する。既存 location との重複は SKIP する。
 
+.PARAMETER Method
+    登録方式 (既定: ConfigFile)。
+    - ConfigFile : app-config.yaml に catalog.locations を追記してサービス再起動 (file:// が default で動かない問題の回避策、管理者権限が必要)
+    - ApiPost    : POST /api/catalog/locations で逐次登録 (GitHub raw URL 等の HTTP URL 用、permission framework 対応)
+
 .PARAMETER BackstageUrl
     登録先 Backstage の baseUrl (既定: http://localhost:7007)。
+
+.PARAMETER AppConfig
+    ConfigFile モードで編集対象の app-config.yaml の絶対パス
+    (既定: %ProgramData%\DevPortal\backstage\app\app-config.yaml)。
+
+.PARAMETER ServiceName
+    ConfigFile モードで再起動する Windows サービス名 (既定: DevPortal-Backstage)。
+
+.PARAMETER SkipRestart
+    ConfigFile モードでサービス再起動をスキップする (手動で再起動したい場合用)。
 
 .PARAMETER CatalogRoot
     17 ファイル探索のルート (既定: スクリプト自身のあるディレクトリ = framework/typescript)。
@@ -44,8 +59,16 @@
 # スクリプトパラメータ定義 (PowerShell 標準の CmdletBinding を有効化)
 [CmdletBinding()]
 param(
+    # 登録方式 (ConfigFile = app-config.yaml 編集 + 再起動 / ApiPost = REST API POST)
+    [ValidateSet("ConfigFile","ApiPost")][string]$Method = "ConfigFile",
     # 登録先 Backstage の baseUrl (デフォルト setup ツールが起動するポート 7007)
     [string]$BackstageUrl = "http://localhost:7007",
+    # ConfigFile モードで編集対象の app-config.yaml の絶対パス
+    [string]$AppConfig = "",
+    # ConfigFile モードで再起動する Windows サービス名
+    [string]$ServiceName = "DevPortal-Backstage",
+    # ConfigFile モードでサービス再起動をスキップする
+    [switch]$SkipRestart,
     # catalog-info.yaml の探索ルート (既定はスクリプトと同一ディレクトリ)
     [string]$CatalogRoot = "",
     # Backstage location type (file = backend filesystem パス、url = HTTP URL)
@@ -82,6 +105,11 @@ if ($LocationType -eq "url" -and [string]::IsNullOrWhiteSpace($UrlBase)) {
 }
 # UrlBase の末尾スラッシュは後で RelPath と結合するときに統一するため正規化しておく
 $UrlBase = $UrlBase.TrimEnd('/')
+
+# AppConfig 未指定時は setup ツールの既定インストール先を解決する
+if ([string]::IsNullOrWhiteSpace($AppConfig)) {
+    $AppConfig = Join-Path -Path $env:ProgramData -ChildPath "DevPortal\backstage\app\app-config.yaml"
+}
 
 # ログファイルパスをスクリプトスコープで Write-Log から参照できるよう保持する
 $script:LogFilePath = if ([string]::IsNullOrWhiteSpace($LogFile)) { $null } else { [System.IO.Path]::GetFullPath($LogFile) }
@@ -160,6 +188,196 @@ function Write-Log {
         [System.IO.File]::AppendAllText($script:LogFilePath, $line, [System.Text.UTF8Encoding]::new($false))
     }
 }
+
+# ===== ConfigFile モード専用ヘルパー (start) =====
+
+# 現在の PowerShell プロセスが管理者権限で動いているか判定する
+function Test-IsAdmin {
+    # Windows 標準 API でビルトイン Administrator ロール所属を確認する
+    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
+    return $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# app-config.yaml をタイムスタンプ付きで同階層にバックアップする
+function Backup-AppConfig {
+    param([string]$Path)
+    # ファイル名: <stem>.bak.YYYYMMDD-HHMMSS.<ext>
+    $stamp = (Get-Date).ToString("yyyyMMdd-HHmmss")
+    $dir = Split-Path -Parent $Path
+    $name = Split-Path -Leaf $Path
+    $backupPath = Join-Path -Path $dir -ChildPath "$name.bak.$stamp"
+    # 確実に複製 (Force でロック中ファイルでも上書き、$null = で出力抑制)
+    Copy-Item -Path $Path -Destination $backupPath -Force
+    return $backupPath
+}
+
+# Python ヘルパー (register-locations.py) を呼び出して app-config.yaml をマージする
+function Invoke-LocationMerge {
+    param(
+        # app-config.yaml の絶対パス
+        [string]$AppConfigPath,
+        # CatalogRoot 絶対パス
+        [string]$CatalogRootPath,
+        # 相対パスの配列
+        [string[]]$RelPaths
+    )
+    # python ヘルパーのパス (同階層に配置)
+    $helper = Join-Path -Path $PSScriptRoot -ChildPath "register-locations.py"
+    if (-not (Test-Path $helper -PathType Leaf)) {
+        throw "register-locations.py が見つかりません: $helper"
+    }
+    # python がパスに存在することを確認 (PyYAML は前提)
+    $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $pythonCmd) {
+        throw "python コマンドが PATH にありません。Python 3 と PyYAML をインストールしてください。"
+    }
+    # 相対パスをカンマ区切りで結合する
+    $relCsv = ($RelPaths -join ',')
+    # python ヘルパー実行 (stdout に JSON 1 行が出る)
+    $stdout = & python $helper --config $AppConfigPath --catalog-root $CatalogRootPath --rel-paths $relCsv 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "register-locations.py が異常終了 (exit=$LASTEXITCODE): $stdout"
+    }
+    # 末尾行を JSON としてパース (途中行は警告等の可能性)
+    $jsonLine = ($stdout -split "`r?`n" | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
+    if (-not $jsonLine) {
+        throw "register-locations.py の JSON 出力をパースできませんでした: $stdout"
+    }
+    # PowerShell の PSCustomObject に変換して返す
+    return $jsonLine | ConvertFrom-Json
+}
+
+# DevPortal-Backstage サービスを再起動する (管理者権限必須)
+function Restart-BackstageService {
+    param([string]$Name)
+    Write-Log Info "サービス '$Name' を再起動します..."
+    # Restart-Service は同期 (デフォルトでタイムアウト 30 秒、起動完了は別途 wait)
+    Restart-Service -Name $Name -Force -ErrorAction Stop
+    Write-Log Ok "サービス再起動コマンドを発行 (実際の ready 判定は HTTP poll で確認)"
+}
+
+# Backstage が起動完了するまで /api/auth/guest/refresh を最大 $MaxSeconds 秒ポーリングする
+function Wait-BackstageReady {
+    param([int]$MaxSeconds = 90)
+    Write-Log Info "Backstage の起動完了を待機中 (最大 $MaxSeconds 秒)..."
+    $deadline = (Get-Date).AddSeconds($MaxSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $r = Invoke-WebRequest -Uri "$BackstageUrl/api/auth/guest/refresh" -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
+            if ($r.StatusCode -eq 200) {
+                Write-Log Ok "Backstage が応答可能になりました"
+                return $true
+            }
+        } catch {
+            # まだ起動中の可能性 (ECONNREFUSED 等) なので継続
+        }
+        Start-Sleep -Seconds 2
+    }
+    Write-Log Fail "Backstage が $MaxSeconds 秒以内に応答しませんでした"
+    return $false
+}
+
+# k1s0-* エンティティが取り込まれたか確認する (catalog processor が file を消化するまでに数秒〜数十秒かかる)
+function Wait-EntitiesIngested {
+    param(
+        [string]$BearerToken,
+        [int]$ExpectedCount = 18,
+        [int]$MaxSeconds = 60
+    )
+    Write-Log Info "k1s0-* エンティティの取り込み完了を待機中 (期待値 $ExpectedCount 件、最大 $MaxSeconds 秒)..."
+    $headers = @{ Authorization = "Bearer $BearerToken" }
+    $deadline = (Get-Date).AddSeconds($MaxSeconds)
+    $last = -1
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $resp = Invoke-RestMethod -Uri "$BackstageUrl/api/catalog/entities?limit=1000" -Headers $headers -TimeoutSec 5
+            $mine = @($resp | Where-Object { $_.metadata.name -match '^k1s0-' })
+            if ($mine.Count -ne $last) {
+                Write-Log Info "現在 $($mine.Count) 件取り込み済み..."
+                $last = $mine.Count
+            }
+            if ($mine.Count -ge $ExpectedCount) {
+                Write-Log Ok "$($mine.Count) 件取り込み完了 (期待値 $ExpectedCount に到達)"
+                return $mine
+            }
+        } catch {
+            # 一時的なエラーはリトライ
+        }
+        Start-Sleep -Seconds 3
+    }
+    Write-Log Fail "$MaxSeconds 秒以内に $ExpectedCount 件に到達しませんでした (最終 $last 件)"
+    return @()
+}
+
+# ConfigFile モードのメインフロー
+function Invoke-ConfigFileMode {
+    # 全実行結果用ストップウォッチ
+    $totalSw = [System.Diagnostics.Stopwatch]::StartNew()
+    # ヘッダ表示
+    Write-Log Info "Method       : ConfigFile"
+    Write-Log Info "AppConfig    : $AppConfig"
+    Write-Log Info "ServiceName  : $ServiceName"
+    Write-Log Info "SkipRestart  : $SkipRestart"
+    Write-Log Info "BackstageUrl : $BackstageUrl"
+    Write-Log Info "CatalogRoot  : $CatalogRoot"
+    Write-Log Info "LogFile      : $(if ($script:LogFilePath) { $script:LogFilePath } else { '(none)' })"
+
+    # 1. 前提確認
+    if (-not (Test-Path -Path $AppConfig -PathType Leaf)) {
+        throw "app-config.yaml が見つかりません: $AppConfig"
+    }
+    $isAdmin = Test-IsAdmin
+    Write-Log Info "現在の権限: $(if ($isAdmin) { '管理者' } else { '一般ユーザー (Restart-Service には管理者権限が必要)' })"
+    if (-not $isAdmin -and -not $SkipRestart) {
+        throw "サービス再起動には管理者権限が必要です。管理者 PowerShell から再実行するか、-SkipRestart で再起動を後回しにしてください。"
+    }
+
+    # 2. バックアップ
+    Write-Log Info "app-config.yaml をバックアップ中..."
+    $backupPath = Backup-AppConfig -Path $AppConfig
+    Write-Log Ok "バックアップ作成: $backupPath"
+
+    # 3. YAML マージ (python ヘルパー呼び出し)
+    Write-Log Info "register-locations.py で 17 件を catalog.locations にマージ中..."
+    $relPaths = $Locations | ForEach-Object { $_.RelPath -replace '\\','/' }
+    $mergeResult = Invoke-LocationMerge -AppConfigPath $AppConfig -CatalogRootPath $CatalogRoot -RelPaths $relPaths
+    Write-Log Ok ("マージ結果: added={0} skipped={1} rules_added=[{2}] total_locations_after={3}" -f `
+        $mergeResult.added, $mergeResult.skipped, ($mergeResult.rules_added -join ','), $mergeResult.total_locations_after)
+
+    # 4. サービス再起動 + ready 待ち
+    if ($SkipRestart) {
+        Write-Log Skip "サービス再起動をスキップ (-SkipRestart)。手動で 'Restart-Service $ServiceName' を実行してください。"
+    } else {
+        Restart-BackstageService -Name $ServiceName
+        if (-not (Wait-BackstageReady -MaxSeconds 120)) {
+            throw "Backstage の起動完了を確認できませんでした。サービスログ ($env:ProgramData\DevPortal\backstage\logs) を確認してください。"
+        }
+    }
+
+    # 5. 取り込み検証 (guest トークン取得 → エンティティ列挙)
+    if (-not $SkipRestart) {
+        Write-Log Info "guest トークンを取得して取り込み確認中..."
+        $token = Get-GuestToken
+        if (-not $token) {
+            Write-Log Fail "guest トークン取得失敗。検証スキップ (catalog UI で手動確認してください)"
+        } else {
+            $ingested = Wait-EntitiesIngested -BearerToken $token -ExpectedCount 18 -MaxSeconds 90
+            if ($ingested.Count -gt 0) {
+                # kind 別件数を表示
+                $byKind = $ingested | Group-Object kind | Sort-Object Name
+                foreach ($g in $byKind) { Write-Log Ok ("  {0,-10} {1} 件" -f $g.Name, $g.Count) }
+            }
+        }
+    }
+
+    $totalSw.Stop()
+    Write-Log Info ("Total: {0}  (added={1} / skipped={2})" -f $totalSw.Elapsed.ToString("hh\:mm\:ss\.ff"), $mergeResult.added, $mergeResult.skipped)
+    # ConfigFile モードでは added > 0 が成功条件 (skipped 全件でも idempotent OK)
+    return 0
+}
+
+# ===== ConfigFile モード専用ヘルパー (end) =====
 
 # Backstage の guest トークンを取得する (permission framework 有効時の認証回避用)
 function Get-GuestToken {
@@ -450,6 +668,19 @@ function Invoke-RoundParallel {
     return $roundResults
 }
 
+# Method=ConfigFile の場合はここで分岐して専用フローへ (以降の ApiPost 専用処理はスキップ)
+if ($Method -eq "ConfigFile") {
+    try {
+        $exit = Invoke-ConfigFileMode
+        exit $exit
+    } catch {
+        Write-Log Fail "ConfigFile モードで例外: $($_.Exception.Message)"
+        exit 1
+    }
+}
+
+# ===== 以降は -Method ApiPost (既存の REST API POST フロー) =====
+
 # 集計用 (成功 / スキップ / 失敗の件数を集計する)
 $summary = @{ OK = 0; SKIP = 0; FAIL = 0 }
 # 失敗した location 名を控えるリスト
@@ -461,6 +692,7 @@ $totalSw = [System.Diagnostics.Stopwatch]::StartNew()
 
 try {
     # ヘッダー情報を表示
+    Write-Log Info "Method       : ApiPost"
     Write-Log Info "BackstageUrl : $BackstageUrl"
     Write-Log Info "CatalogRoot  : $CatalogRoot"
     Write-Log Info "LocationType : $LocationType"

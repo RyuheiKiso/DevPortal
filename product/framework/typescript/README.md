@@ -203,38 +203,58 @@ API リファレンスや使用例は各パッケージ配下の README を参�
 
 `react` / `react-native` 版 Component は `spec.dependsOn` で同ドメインの `core` を参照しているため、Backstage UI の「Dependency Graph」タブで `core → react / react-native` の矢印が表示されます。
 
-### 登録手順 (推奨: バッチ一発)
+### 登録手順 (推奨: バッチ一発 + 管理者権限)
 
-`publish-all.bat` と同じ要領で、`register-all.bat` 一発で 17 ファイルを Catalog REST API (`POST /api/catalog/locations`) 経由で一括登録できます。サービス再起動も管理者権限も不要です。
+`publish-all.bat` と同じ要領で、`register-all.bat` 一発で 17 ファイルを Backstage の `app-config.yaml` に追記し、サービスを自動再起動して取り込みまで完了させます。
 
 ```cmd
 cd C:\work\github\DevPortal\product\framework\typescript
+:: 管理者 PowerShell で実行 (サービス再起動に必要)
 register-all.bat
 ```
 
 これだけで以下が自動実行されます。
 
-1. Backstage (`http://localhost:7007/api/catalog/health`) の死活確認
-2. 既存 location 一覧を取得 (重複検出用)
-3. 第 1 ラウンドで `owners.yaml` + 4 System を並列 POST (既定 4 並列、`-MaxParallel` で変更可)
-4. 第 2 ラウンドで 12 Component を並列 POST
-5. 集計結果 (location ごとの所要時間 + トータル) を OK / SKIP / FAIL の色付きで表示
-6. `component:k1s0-ts-config-core` を 1 件取得して取り込み完了を sanity check
+1. **前提確認**: 管理者権限、`app-config.yaml` 存在、Python + PyYAML の利用可否
+2. **バックアップ**: `app-config.yaml.bak.YYYYMMDD-HHMMSS` にコピー
+3. **YAML マージ** (`register-locations.py`): `catalog.locations` に 17 件の `type: file` エントリ追記、`catalog.rules[0].allow` に `Group` / `Domain` 追加 (重複は SKIP)
+4. **サービス再起動**: `Restart-Service DevPortal-Backstage`
+5. **起動待ち**: `/api/auth/guest/refresh` の 200 を最大 120 秒ポーリング
+6. **取り込み確認**: guest トークンで `/api/catalog/entities` を取得し、`k1s0-*` 18 件 (Group 1 / Domain 1 / System 4 / Component 12) が見えるまで最大 90 秒ポーリング
 
-終了コードは「FAIL が 1 件でもあれば 1、それ以外 0」です。再実行時は既存 location が SKIP 扱いになるので idempotent です。
+実測値: 初回 約 36 秒、再実行時は added=0 / skipped=17 で idempotent。終了コードは ConfigFile モードでは 0 (成功) のみ、例外発生時 1。
+
+> **管理者権限について**: `app-config.yaml` (`%ProgramData%\DevPortal\backstage\app\`) の上書きと `Restart-Service` に必要です。`Start-Process powershell -Verb RunAs` で UAC 経由実行も可能。
+
+### 別方式: REST API POST モード (GitHub raw URL 用)
+
+リポジトリを GitHub に push 済みで、HTTP URL 経由で別マシン Backstage に登録したい場合は ApiPost モードを使います:
+
+```cmd
+register-all.bat -Method ApiPost ^
+                 -BackstageUrl http://192.168.0.10:7007 ^
+                 -LocationType url ^
+                 -UrlBase https://raw.githubusercontent.com/myorg/DevPortal/main/product/framework/typescript
+```
+
+ApiPost モードは `POST /api/catalog/locations` 経由で動作し、ローカルファイルパス (file://) は default の Backstage backend が読めないため使えません。**ローカル開発では ConfigFile モード (デフォルト) を使ってください。**
 
 #### オプション
 
-| パラメータ | 既定値 | 説明 |
-|---|---|---|
-| `-BackstageUrl` | `http://localhost:7007` | 登録先 Backstage の baseUrl |
-| `-LocationType` | `file` | location type (`file` = backend filesystem パス / `url` = HTTP URL) |
-| `-UrlBase` | (なし) | `url` モード時の必須 base URL。各 `RelPath` を `{UrlBase}/{RelPath}` に結合して target にする |
-| `-OnConflict` | `refresh` | 既存 location の挙動 (`refresh` / `reject`) |
-| `-Token` | (なし) | permission framework 有効時の Bearer トークン |
-| `-DryRun` | (なし) | 指定時は `?dryRun=true` を付与し DB に書かずバリデーションのみ |
-| `-MaxParallel` | `4` | 1 ラウンド内の並列度 (1〜16) |
-| `-LogFile` | (なし) | タイムスタンプ付きで全イベントを追記出力 |
+| パラメータ | 既定値 | 適用モード | 説明 |
+|---|---|---|---|
+| `-Method` | `ConfigFile` | 共通 | `ConfigFile` (app-config.yaml 編集 + 再起動) / `ApiPost` (REST API POST) |
+| `-BackstageUrl` | `http://localhost:7007` | 共通 | Backstage の baseUrl |
+| `-AppConfig` | `%ProgramData%\DevPortal\backstage\app\app-config.yaml` | ConfigFile | 編集対象の app-config.yaml |
+| `-ServiceName` | `DevPortal-Backstage` | ConfigFile | 再起動する Windows サービス名 |
+| `-SkipRestart` | (なし) | ConfigFile | サービス再起動をスキップ (手動で `Restart-Service` する場合) |
+| `-LocationType` | `file` | ApiPost | `file` (backend filesystem パス) / `url` (HTTP URL) |
+| `-UrlBase` | (なし) | ApiPost | `url` モード時の必須 base URL |
+| `-OnConflict` | `refresh` | ApiPost | 既存 location の挙動 (`refresh` / `reject`) |
+| `-Token` | (なし) | ApiPost | permission 有効時の Bearer トークン (未指定なら guest 自動取得) |
+| `-DryRun` | (なし) | ApiPost | 実 POST せず SKIP 表示のみ |
+| `-MaxParallel` | `4` | ApiPost | 1 ラウンド内の並列度 (1〜16) |
+| `-LogFile` | (なし) | 共通 | タイムスタンプ付きで全イベントを追記出力 |
 
 ```cmd
 :: ローカルファイル直接 (デフォルト、同一マシンに Backstage がある場合)
