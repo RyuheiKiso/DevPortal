@@ -1,7 +1,7 @@
 // core から型を取り込み
 import type { AuthTokenSet, TokenStore } from "@k1s0-ts-auth/core";
-// メモリ TokenStore を取り込み（SSR / 利用不能環境のフォールバックに使う）
-import { createMemoryTokenStore } from "@k1s0-ts-auth/core";
+// メモリ TokenStore と zod スキーマを取り込み (フォールバック用 / 実行時検証用)
+import { authTokenSetSchema, createMemoryTokenStore } from "@k1s0-ts-auth/core";
 
 // Web の Storage 系 API（localStorage / sessionStorage）と互換な最小契約
 export interface WebKeyValueStorage {
@@ -13,12 +13,17 @@ export interface WebKeyValueStorage {
   removeItem(key: string): void;
 }
 
+// 破損データ検出時に呼ばれるコールバック (テレメトリ・観測用)
+export type WebTokenStoreCorruptHandler = (raw: string, error: unknown) => void;
+
 // createWebTokenStore に渡せるオプション
 export interface WebTokenStoreOptions {
   // 保存先 Storage（既定値: window.localStorage、利用不能時はメモリ）
   storage?: WebKeyValueStorage;
   // 保存キー（既定値: "k1s0.auth.tokens"）
   key?: string;
+  // 破損データ検出時のコールバック (optional、observability 用)
+  onCorrupt?: WebTokenStoreCorruptHandler;
 }
 
 // 既定で利用する保存キー
@@ -42,20 +47,31 @@ function resolveDefaultStorage(): WebKeyValueStorage | undefined {
   }
 }
 
-// 受け取った文字列を AuthTokenSet として復元する（壊れていれば undefined）
-function parseTokens(raw: string): AuthTokenSet | undefined {
-  // 不正な JSON や非オブジェクトを安全に弾く
+// 受け取った文字列を AuthTokenSet として復元する（壊れていれば undefined を返し onCorrupt を呼ぶ）
+function parseTokens(raw: string, onCorrupt?: WebTokenStoreCorruptHandler): AuthTokenSet | undefined {
+  // JSON パース段階の例外を捕捉する
+  let parsed: unknown;
+  // 不正な JSON を安全に弾く
   try {
     // 復元を試みる
-    const parsed = JSON.parse(raw) as unknown;
-    // null / 非オブジェクトなら破損扱い
-    if (parsed === null || typeof parsed !== "object") return undefined;
-    // AuthTokenSet として返す（型は呼び出し側責任）
-    return parsed as AuthTokenSet;
-  } catch {
-    // パース不能なら破損扱い
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    // パース不能なら observability コールバックを呼ぶ
+    onCorrupt?.(raw, error);
+    // 破損扱いで undefined を返す
     return undefined;
   }
+  // zod スキーマで実行時検証する (型不一致や余剰フィールドを拒否)
+  const result = authTokenSetSchema.safeParse(parsed);
+  // 検証失敗時は observability コールバックを呼んで破棄する
+  if (!result.success) {
+    // 失敗理由 (ZodError) を渡す
+    onCorrupt?.(raw, result.error);
+    // 破損扱いで undefined を返す
+    return undefined;
+  }
+  // 検証済みデータを返す
+  return result.data;
 }
 
 // Web 環境向け TokenStore を作る
@@ -64,6 +80,8 @@ export function createWebTokenStore(options: WebTokenStoreOptions = {}): TokenSt
   const key = options.key ?? DEFAULT_KEY;
   // Storage を解決する（明示指定が優先、未指定なら window.localStorage）
   const storage = options.storage ?? resolveDefaultStorage();
+  // observability コールバックを取り出す
+  const onCorrupt = options.onCorrupt;
   // Storage が利用不能ならメモリ実装にフォールバックする（SSR 安全）
   if (storage === undefined) {
     // メモリ TokenStore を返す
@@ -78,7 +96,7 @@ export function createWebTokenStore(options: WebTokenStoreOptions = {}): TokenSt
       // 未保存なら undefined
       if (raw === null) return undefined;
       // 復元できなかった場合は破損データを掃除して undefined を返す
-      const parsed = parseTokens(raw);
+      const parsed = parseTokens(raw, onCorrupt);
       // 破損していれば掃除する
       if (parsed === undefined) {
         // 破損データを削除して整合性を保つ

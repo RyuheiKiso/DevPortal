@@ -143,4 +143,43 @@ describe("createKeychainBackend (singleService mode)", () => {
     const directLookup = await km.getGenericPassword({ service: "my-vault" });
     expect(directLookup).not.toBe(false);
   });
+
+  // JSON は valid だが値型違反のレコードは silently 空マップ扱い
+  it("値型が string でないレコードは空マップ扱いで silently drop される", async () => {
+    const km = createKeychainMock();
+    // 値が数値のレコードを仕込む (改ざんシナリオ)
+    await km.setGenericPassword(
+      "bundle",
+      JSON.stringify({ a: 123, b: "ok" }),
+      { service: "k1s0-storage-bundle" },
+    );
+    const store = createKeychainBackend(km, { mode: "singleService" });
+    // 検証失敗で空マップ扱いとなり、すべて undefined
+    await expect(store.get("a")).resolves.toBeUndefined();
+    await expect(store.get("b")).resolves.toBeUndefined();
+  });
+
+  // JSON は valid だが配列の場合も空マップ扱い
+  it("JSON が配列の場合も空マップ扱いになる", async () => {
+    const km = createKeychainMock();
+    // 配列を仕込む
+    await km.setGenericPassword(
+      "bundle",
+      JSON.stringify(["x", "y"]),
+      { service: "k1s0-storage-bundle" },
+    );
+    const store = createKeychainBackend(km, { mode: "singleService" });
+    // 取得は空マップとして undefined
+    await expect(store.get("0")).resolves.toBeUndefined();
+  });
+
+  // JSON は valid だが null の場合も空マップ扱い
+  it("JSON が null の場合も空マップ扱いになる", async () => {
+    const km = createKeychainMock();
+    // null を仕込む
+    await km.setGenericPassword("bundle", "null", { service: "k1s0-storage-bundle" });
+    const store = createKeychainBackend(km, { mode: "singleService" });
+    // 取得は空マップとして undefined
+    await expect(store.get("k")).resolves.toBeUndefined();
+  });
 });

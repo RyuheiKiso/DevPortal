@@ -63,6 +63,79 @@ describe("withEncryption", () => {
     }
     expect(thrown).toBeInstanceOf(Error);
   });
+  // エンベロープのフィールド欠落は throw (改ざん検知)
+  it("throws when envelope is missing required fields", async () => {
+    const inner = createMemoryStore<string>();
+    // iv フィールドが欠落しているエンベロープを直接書き込む
+    await inner.set("k", JSON.stringify({ v: 1, ct: "AAEC" }));
+    const wrapped = withEncryption<string>({ provider: createMockProvider() })(inner);
+    let thrown: unknown;
+    try {
+      await wrapped.get("k");
+    } catch (e) {
+      thrown = e;
+    }
+    // 検証エラーで throw されること
+    expect(thrown).toBeInstanceOf(Error);
+    // メッセージに「Invalid encryption envelope」を含むこと
+    expect((thrown as Error).message).toMatch(/Invalid encryption envelope/);
+  });
+  // エンベロープの型違反は throw (v が文字列)
+  it("throws when envelope v is not a number", async () => {
+    const inner = createMemoryStore<string>();
+    // v が文字列のエンベロープを直接書き込む
+    await inner.set("k", JSON.stringify({ v: "1", iv: "AAEC", ct: "AAEC" }));
+    const wrapped = withEncryption<string>({ provider: createMockProvider() })(inner);
+    let thrown: unknown;
+    try {
+      await wrapped.get("k");
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+  });
+  // エンベロープの型違反は throw (iv が非 string)
+  it("throws when envelope iv is not a string", async () => {
+    const inner = createMemoryStore<string>();
+    // iv が数値のエンベロープを直接書き込む
+    await inner.set("k", JSON.stringify({ v: 1, iv: 42, ct: "AAEC" }));
+    const wrapped = withEncryption<string>({ provider: createMockProvider() })(inner);
+    let thrown: unknown;
+    try {
+      await wrapped.get("k");
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+  });
+  // エンベロープの型違反は throw (ct が非 string)
+  it("throws when envelope ct is not a string", async () => {
+    const inner = createMemoryStore<string>();
+    // ct が数値のエンベロープを直接書き込む
+    await inner.set("k", JSON.stringify({ v: 1, iv: "AAEC", ct: 99 }));
+    const wrapped = withEncryption<string>({ provider: createMockProvider() })(inner);
+    let thrown: unknown;
+    try {
+      await wrapped.get("k");
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+  });
+  // JSON.parse は成功するが null だった場合も throw
+  it("throws when envelope JSON is null", async () => {
+    const inner = createMemoryStore<string>();
+    // null を直接書き込む
+    await inner.set("k", "null");
+    const wrapped = withEncryption<string>({ provider: createMockProvider() })(inner);
+    let thrown: unknown;
+    try {
+      await wrapped.get("k");
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+  });
   // AAD あり経路
   it("passes AAD when aadFromKey is true", async () => {
     const inner = createMemoryStore<string>();
