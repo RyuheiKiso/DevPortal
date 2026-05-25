@@ -1,11 +1,11 @@
 // 公開型を取り込み
 import type {
+  AppNotification,
   ConfirmInput,
   ConfirmNotification,
   DialogInput,
   DialogNotification,
   DialogResult,
-  Notification,
   NotificationEvent,
   NotificationKind,
   NotificationListener,
@@ -64,7 +64,7 @@ function freezeMeta(
   return Object.freeze({ ...meta });
 }
 
-function freezeNotification<T extends Notification>(notification: T): T {
+function freezeNotification<T extends AppNotification>(notification: T): T {
   return Object.freeze(notification) as T;
 }
 
@@ -86,7 +86,7 @@ export function createNotificationManager(
   const maxQueueSize = validatedConfig.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE;
 
   // 通知キュー（add 順）
-  let queue: Notification[] = [];
+  let queue: AppNotification[] = [];
   // 購読中の listener 群
   const listeners: Set<NotificationListener> = new Set();
   // 自動 dismiss 用のタイマーハンドル（toast id → handle）
@@ -128,7 +128,7 @@ export function createNotificationManager(
 
   // 通知をキューから消す（イベントは type:"remove" で発火）
   // 戻り値は実際に削除された通知（無ければ undefined）
-  const removeFromQueue = (id: string): Notification | undefined => {
+  const removeFromQueue = (id: string): AppNotification | undefined => {
     // 対象 index を探す
     const index = queue.findIndex((n) => n.id === id);
     // 見つからなければ何もしない

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { act, create } from "react-test-renderer";
 // core の Manager 生成関数を取り込み
 import { createNotificationManager } from "@k1s0-ts-notification/core";
-import type { Notification } from "@k1s0-ts-notification/core";
+import type { AppNotification } from "@k1s0-ts-notification/core";
 // テスト対象とその依存
 import { NotificationProvider } from "./NotificationProvider.js";
 import { useNotificationStream } from "./streamHooks.js";
@@ -14,7 +14,7 @@ vi.mock("react-native", () => ({
 }));
 
 // useNotificationStream の戻り値を観測する小さなコンポーネント
-function StreamProbe({ onItems }: { onItems: (items: readonly Notification[]) => void }): null {
+function StreamProbe({ onItems }: { onItems: (items: readonly AppNotification[]) => void }): null {
   // hook 経由で現在のキューを取得
   const items = useNotificationStream();
   // 受け取り側に渡す（render ごとに呼ばれる）
@@ -29,10 +29,10 @@ describe("useNotificationStream (react-native)", () => {
     // 外部 manager を用意して直接 toast を呼べるようにする
     const manager = createNotificationManager();
     // 受信履歴
-    const renders: readonly Notification[][] = [];
-    const onItems = (items: readonly Notification[]): void => {
+    const renders: readonly AppNotification[][] = [];
+    const onItems = (items: readonly AppNotification[]): void => {
       // 配列のスナップショットを保持
-      (renders as Notification[][]).push(items.slice() as Notification[]);
+      (renders as AppNotification[][]).push(items.slice() as AppNotification[]);
     };
     // マウント
     act(() => {
@@ -58,7 +58,7 @@ describe("useNotificationStream (react-native)", () => {
   it("unmount 後の通知発行は state を変えない", () => {
     const manager = createNotificationManager();
     const renders: number[] = [];
-    const onItems = (items: readonly Notification[]): void => {
+    const onItems = (items: readonly AppNotification[]): void => {
       renders.push(items.length);
     };
     // マウント
@@ -86,9 +86,9 @@ describe("useNotificationStream (react-native)", () => {
     const second = createNotificationManager();
     first.toast({ message: "old" });
     second.toast({ message: "new" });
-    const renders: readonly Notification[][] = [];
-    const onItems = (items: readonly Notification[]): void => {
-      (renders as Notification[][]).push(items.slice() as Notification[]);
+    const renders: readonly AppNotification[][] = [];
+    const onItems = (items: readonly AppNotification[]): void => {
+      (renders as AppNotification[][]).push(items.slice() as AppNotification[]);
     };
 
     let renderer: ReturnType<typeof create> | undefined;

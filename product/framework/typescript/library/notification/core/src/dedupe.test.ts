@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 // テスト対象
 import { findByDedupeKey } from "./dedupe.js";
 // テスト用の型
-import type { Notification } from "./types.js";
+import type { AppNotification } from "./types.js";
 
 // テスト用の最小 toast 生成
-function toast(id: string, dedupeKey?: string): Notification {
+function toast(id: string, dedupeKey?: string): AppNotification {
   return {
     id,
     kind: "toast",

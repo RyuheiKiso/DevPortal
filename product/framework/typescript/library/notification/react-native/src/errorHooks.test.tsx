@@ -41,8 +41,8 @@ describe("useHttpErrorHandler (react-native)", () => {
         </NotificationProvider>,
       );
     });
-    // 503 を投げる
-    handler!({ message: "down", status: 503 });
+    // 503 を投げる（retryable は HttpError 正典の brand check として必須）
+    handler!({ message: "down", status: 503, retryable: false });
     // toast 呼び出しと level が error
     expect(toastSpy).toHaveBeenCalledTimes(1);
     expect(toastSpy.mock.calls[0]?.[0].level).toBe("error");
@@ -159,14 +159,14 @@ describe("useHttpErrorHandler (react-native)", () => {
     act(() => {
       create(<Outer />);
     });
-    // 最初は duration=1000
-    handler!({ message: "x", status: 500 });
+    // 最初は duration=1000（retryable は brand check として必須）
+    handler!({ message: "x", status: 500, retryable: false });
     expect(toastSpy.mock.calls[0]?.[0].duration).toBe(1000);
     // duration を 2000 に変える
     act(() => {
       triggerRerender!({ duration: 2000 });
     });
-    handler!({ message: "y", status: 500 });
+    handler!({ message: "y", status: 500, retryable: false });
     expect(toastSpy.mock.calls[1]?.[0].duration).toBe(2000);
   });
 });

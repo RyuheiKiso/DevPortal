@@ -1,8 +1,8 @@
 import { Alert, type AlertButton, type AlertOptions } from "react-native";
 import type {
+  AppNotification,
   ConfirmNotification,
   DialogNotification,
-  Notification,
   NotificationManager,
 } from "@k1s0-ts-notification/core";
 
@@ -59,7 +59,7 @@ export function createAlertConfirmAdapter(
 
   const shownIds: Set<string> = new Set();
 
-  const showIfNeeded = (notification: Notification): void => {
+  const showIfNeeded = (notification: AppNotification): void => {
     if (notification.kind === "confirm" && handleConfirm && !shownIds.has(notification.id)) {
       shownIds.add(notification.id);
       const alertOptions: AlertOptions = {

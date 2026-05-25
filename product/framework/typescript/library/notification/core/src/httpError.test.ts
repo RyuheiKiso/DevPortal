@@ -20,15 +20,38 @@ describe("isHttpErrorLike", () => {
   });
 
   it("returns false when status and code are both missing", () => {
-    expect(isHttpErrorLike({ message: "x" })).toBe(false);
+    // retryable があっても status / code が無ければ http error とは判定しない
+    expect(isHttpErrorLike({ message: "x", retryable: false })).toBe(false);
   });
 
-  it("accepts message with status", () => {
-    expect(isHttpErrorLike({ message: "x", status: 500 })).toBe(true);
+  // HttpError 正典との brand check として retryable: boolean を要求する
+  it("returns false when retryable is missing", () => {
+    expect(isHttpErrorLike({ message: "x", status: 500 })).toBe(false);
+    expect(isHttpErrorLike({ message: "x", code: "NETWORK" })).toBe(false);
   });
 
-  it("accepts message with code", () => {
-    expect(isHttpErrorLike({ message: "x", code: "NETWORK" })).toBe(true);
+  // retryable が boolean 以外（文字列など）の場合も拒否
+  it("returns false when retryable is not boolean", () => {
+    expect(isHttpErrorLike({ message: "x", status: 500, retryable: "yes" })).toBe(false);
+    expect(isHttpErrorLike({ message: "x", status: 500, retryable: 1 })).toBe(false);
+    expect(isHttpErrorLike({ message: "x", status: 500, retryable: null })).toBe(false);
+  });
+
+  // 真の HttpError 形状（message + retryable + status）は accept
+  it("accepts message with status and retryable", () => {
+    expect(isHttpErrorLike({ message: "x", status: 500, retryable: false })).toBe(true);
+  });
+
+  // 真の HttpError 形状（message + retryable + code）も accept
+  it("accepts message with code and retryable", () => {
+    expect(isHttpErrorLike({ message: "x", code: "NETWORK", retryable: true })).toBe(true);
+  });
+
+  // finding 5 の本丸: Node の errno error 等 `code: string` を持つ非 HTTP error を拒否
+  it("rejects Node-style errno errors that only have code without retryable", () => {
+    // ENOENT のような Node の Error は retryable を持たない
+    const fsError = Object.assign(new Error("ENOENT: file missing"), { code: "ENOENT" });
+    expect(isHttpErrorLike(fsError)).toBe(false);
   });
 });
 

@@ -1,18 +1,18 @@
 // React の hook を取り込み
 import { useMemo, useSyncExternalStore } from "react";
 // core の型を取り込み
-import type { Notification, NotificationManager } from "@k1s0-ts-notification/core";
+import type { AppNotification, NotificationManager } from "@k1s0-ts-notification/core";
 // 既存の hook を取り込み（manager 取得用）
 import { useNotification } from "./hooks.js";
 
 interface NotificationStoreSnapshot {
-  getSnapshot: () => readonly Notification[];
+  getSnapshot: () => readonly AppNotification[];
   subscribe: (onStoreChange: () => void) => () => void;
 }
 
 function createStoreSnapshot(manager: NotificationManager): NotificationStoreSnapshot {
   let snapshot = manager.getAll();
-  const getSnapshot = (): readonly Notification[] => snapshot;
+  const getSnapshot = (): readonly AppNotification[] => snapshot;
   const subscribe = (onStoreChange: () => void): (() => void) =>
     manager.subscribe(() => {
       snapshot = manager.getAll();
@@ -23,7 +23,7 @@ function createStoreSnapshot(manager: NotificationManager): NotificationStoreSna
 
 // 現在の通知キューを state として購読する hook
 // UI 側で <Toast /> や <Dialog /> を描画する際に使う
-export function useNotificationStream(): readonly Notification[] {
+export function useNotificationStream(): readonly AppNotification[] {
   // Manager を取得（Provider 外なら throw）
   const manager = useNotification();
   const store = useMemo(() => createStoreSnapshot(manager), [manager]);

@@ -8,6 +8,8 @@ export type {
   ToastNotification,
   DialogNotification,
   ConfirmNotification,
+  AppNotification,
+  // @deprecated 旧名互換 alias（AppNotification と等価、次メジャーで削除予定）
   Notification,
   ToastInput,
   DialogInput,
@@ -29,6 +31,9 @@ export { createDefaultIdFactory, fallbackId } from "./id.js";
 
 // dedupe ヘルパを公開
 export { findByDedupeKey } from "./dedupe.js";
+
+// 環境判定ヘルパを公開（Provider 等の dev-only 警告判定で使う）
+export { getNodeEnv, isDevelopment, isProduction } from "./env.js";
 
 // Manager 本体を公開
 export { createNotificationManager } from "./manager.js";

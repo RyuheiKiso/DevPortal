@@ -78,7 +78,16 @@ export interface ConfirmNotification extends BaseNotification {
 }
 
 // 公開する通知ユニオン型
-export type Notification = ToastNotification | DialogNotification | ConfirmNotification;
+// ブラウザ標準の `Notification` API（Notifications API のクラス）との名前衝突を避けるため AppNotification を採用
+export type AppNotification = ToastNotification | DialogNotification | ConfirmNotification;
+
+/**
+ * @deprecated 次のメジャーバージョンで削除予定。
+ * ブラウザ標準の `Notification` API との名前衝突を避けるため、新規コードでは {@link AppNotification} を使用してください。
+ * 旧名 `Notification` を import している既存 consumer の breaking change を緩和するための互換 alias として暫定提供しています。
+ */
+// 旧名互換用の type alias（AppNotification と等価）
+export type Notification = AppNotification;
 
 // toast を出すための入力（id/kind/createdAt は内部で補完）
 export interface ToastInput {
@@ -152,7 +161,7 @@ export interface NotificationEvent {
   // 種別
   type: NotificationEventType;
   // 対象の通知（remove 時も直前の値を渡す）
-  notification: Notification;
+  notification: AppNotification;
 }
 
 // subscribe に登録するリスナの型
@@ -197,7 +206,7 @@ export interface NotificationManager {
   // confirm を boolean 値で解決する（UI 側のボタン押下用）
   resolveConfirm(id: string, value: boolean): void;
   // 現在の通知一覧のスナップショットを取得（UI 初期表示用）
-  getAll(): readonly Notification[];
+  getAll(): readonly AppNotification[];
   // 通知イベントの購読を登録する。戻り値で購読解除
   subscribe(listener: NotificationListener): () => void;
   // 全タイマーの停止と pending な resolver の解決（false / undefined reason）。Manager のクリーンアップ
