@@ -118,23 +118,23 @@ $script:LogFilePath = if ([string]::IsNullOrWhiteSpace($LogFile)) { $null } else
 $Locations = @(
     # Round 1: 依存先となる Group / Domain / System を先に投入する
     [pscustomobject]@{ Name = "owners";                       RelPath = "owners.yaml";                          Round = 1 }
-    [pscustomobject]@{ Name = "system:k1s0-ts-config";        RelPath = "config\catalog-info.yaml";             Round = 1 }
-    [pscustomobject]@{ Name = "system:k1s0-ts-http";          RelPath = "http\catalog-info.yaml";               Round = 1 }
-    [pscustomobject]@{ Name = "system:k1s0-ts-logger";        RelPath = "logger\catalog-info.yaml";             Round = 1 }
-    [pscustomobject]@{ Name = "system:k1s0-ts-notification";  RelPath = "notification\catalog-info.yaml";       Round = 1 }
+    [pscustomobject]@{ Name = "system:k1s0-ts-config";        RelPath = "library\config\catalog-info.yaml";             Round = 1 }
+    [pscustomobject]@{ Name = "system:k1s0-ts-http";          RelPath = "library\http\catalog-info.yaml";               Round = 1 }
+    [pscustomobject]@{ Name = "system:k1s0-ts-logger";        RelPath = "library\logger\catalog-info.yaml";             Round = 1 }
+    [pscustomobject]@{ Name = "system:k1s0-ts-notification";  RelPath = "library\notification\catalog-info.yaml";       Round = 1 }
     # Round 2: Component (Group/System 解決後に投入)
-    [pscustomobject]@{ Name = "component:k1s0-ts-config-core";              RelPath = "config\core\catalog-info.yaml";              Round = 2 }
-    [pscustomobject]@{ Name = "component:k1s0-ts-config-react";             RelPath = "config\react\catalog-info.yaml";             Round = 2 }
-    [pscustomobject]@{ Name = "component:k1s0-ts-config-react-native";      RelPath = "config\react-native\catalog-info.yaml";      Round = 2 }
-    [pscustomobject]@{ Name = "component:k1s0-ts-http-core";                RelPath = "http\core\catalog-info.yaml";                Round = 2 }
-    [pscustomobject]@{ Name = "component:k1s0-ts-http-react";               RelPath = "http\react\catalog-info.yaml";               Round = 2 }
-    [pscustomobject]@{ Name = "component:k1s0-ts-http-react-native";        RelPath = "http\react-native\catalog-info.yaml";        Round = 2 }
-    [pscustomobject]@{ Name = "component:k1s0-ts-logger-core";              RelPath = "logger\core\catalog-info.yaml";              Round = 2 }
-    [pscustomobject]@{ Name = "component:k1s0-ts-logger-react";             RelPath = "logger\react\catalog-info.yaml";             Round = 2 }
-    [pscustomobject]@{ Name = "component:k1s0-ts-logger-react-native";      RelPath = "logger\react-native\catalog-info.yaml";      Round = 2 }
-    [pscustomobject]@{ Name = "component:k1s0-ts-notification-core";        RelPath = "notification\core\catalog-info.yaml";        Round = 2 }
-    [pscustomobject]@{ Name = "component:k1s0-ts-notification-react";       RelPath = "notification\react\catalog-info.yaml";       Round = 2 }
-    [pscustomobject]@{ Name = "component:k1s0-ts-notification-react-native";RelPath = "notification\react-native\catalog-info.yaml";Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-config-core";              RelPath = "library\config\core\catalog-info.yaml";              Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-config-react";             RelPath = "library\config\react\catalog-info.yaml";             Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-config-react-native";      RelPath = "library\config\react-native\catalog-info.yaml";      Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-http-core";                RelPath = "library\http\core\catalog-info.yaml";                Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-http-react";               RelPath = "library\http\react\catalog-info.yaml";               Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-http-react-native";        RelPath = "library\http\react-native\catalog-info.yaml";        Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-logger-core";              RelPath = "library\logger\core\catalog-info.yaml";              Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-logger-react";             RelPath = "library\logger\react\catalog-info.yaml";             Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-logger-react-native";      RelPath = "library\logger\react-native\catalog-info.yaml";      Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-notification-core";        RelPath = "library\notification\core\catalog-info.yaml";        Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-notification-react";       RelPath = "library\notification\react\catalog-info.yaml";       Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-notification-react-native";RelPath = "library\notification\react-native\catalog-info.yaml";Round = 2 }
 )
 
 # ログレベルからコンソール色を導出する

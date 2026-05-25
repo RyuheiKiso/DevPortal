@@ -20,23 +20,23 @@ spec:
   targets:
     # 所有者 (Group + Domain)
     - ./owners.yaml
-    # config ドメイン: System + Component 3 種
-    - ./config/catalog-info.yaml
-    - ./config/core/catalog-info.yaml
-    - ./config/react/catalog-info.yaml
-    - ./config/react-native/catalog-info.yaml
-    # http ドメイン: System + Component 3 種
-    - ./http/catalog-info.yaml
-    - ./http/core/catalog-info.yaml
-    - ./http/react/catalog-info.yaml
-    - ./http/react-native/catalog-info.yaml
-    # logger ドメイン: System + Component 3 種
-    - ./logger/catalog-info.yaml
-    - ./logger/core/catalog-info.yaml
-    - ./logger/react/catalog-info.yaml
-    - ./logger/react-native/catalog-info.yaml
-    # notification ドメイン: System + Component 3 種
-    - ./notification/catalog-info.yaml
-    - ./notification/core/catalog-info.yaml
-    - ./notification/react/catalog-info.yaml
-    - ./notification/react-native/catalog-info.yaml
+    # config ドメイン: System + Component 3 種 (library/ サブフォルダ配下)
+    - ./library/config/catalog-info.yaml
+    - ./library/config/core/catalog-info.yaml
+    - ./library/config/react/catalog-info.yaml
+    - ./library/config/react-native/catalog-info.yaml
+    # http ドメイン: System + Component 3 種 (library/ サブフォルダ配下)
+    - ./library/http/catalog-info.yaml
+    - ./library/http/core/catalog-info.yaml
+    - ./library/http/react/catalog-info.yaml
+    - ./library/http/react-native/catalog-info.yaml
+    # logger ドメイン: System + Component 3 種 (library/ サブフォルダ配下)
+    - ./library/logger/catalog-info.yaml
+    - ./library/logger/core/catalog-info.yaml
+    - ./library/logger/react/catalog-info.yaml
+    - ./library/logger/react-native/catalog-info.yaml
+    # notification ドメイン: System + Component 3 種 (library/ サブフォルダ配下)
+    - ./library/notification/catalog-info.yaml
+    - ./library/notification/core/catalog-info.yaml
+    - ./library/notification/react/catalog-info.yaml
+    - ./library/notification/react-native/catalog-info.yaml

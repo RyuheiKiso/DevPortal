@@ -6,18 +6,18 @@ DevPortal の TypeScript 共通基盤ライブラリ群を格納するディレ�
 
 | ディレクトリ | パッケージ名 | 用途 |
 |---|---|---|
-| `config/core` | `@k1s0-ts-config/core` | 設定管理コア (環境変数 / JSON / バリデーション) |
-| `config/react` | `@k1s0-ts-config/react` | React 向け設定 Provider / Hook |
-| `config/react-native` | `@k1s0-ts-config/react-native` | React Native 向け設定 Provider / Hook |
-| `logger/core` | `@k1s0-ts-logger/core` | ロガーコア (level / transport / 構造化ログ) |
-| `logger/react` | `@k1s0-ts-logger/react` | React 向けロガー Provider / Hook |
-| `logger/react-native` | `@k1s0-ts-logger/react-native` | React Native 向けロガー Provider / Hook |
-| `http/core` | `@k1s0-ts-http/core` | HTTP クライアントコア (REST / gRPC-web / retry / requestId) |
-| `http/react` | `@k1s0-ts-http/react` | React 向け HTTP Hooks (Query / Mutation) |
-| `http/react-native` | `@k1s0-ts-http/react-native` | React Native 向け HTTP Hooks (NetInfo 連携) |
-| `notification/core` | `@k1s0-ts-notification/core` | 通知コア (headless / toast / dialog / confirm / HttpError 連携) |
-| `notification/react` | `@k1s0-ts-notification/react` | React 向け通知 Provider / Hook |
-| `notification/react-native` | `@k1s0-ts-notification/react-native` | React Native 向け通知 Provider / Hook |
+| `library/config/core` | `@k1s0-ts-config/core` | 設定管理コア (環境変数 / JSON / バリデーション) |
+| `library/config/react` | `@k1s0-ts-config/react` | React 向け設定 Provider / Hook |
+| `library/config/react-native` | `@k1s0-ts-config/react-native` | React Native 向け設定 Provider / Hook |
+| `library/logger/core` | `@k1s0-ts-logger/core` | ロガーコア (level / transport / 構造化ログ) |
+| `library/logger/react` | `@k1s0-ts-logger/react` | React 向けロガー Provider / Hook |
+| `library/logger/react-native` | `@k1s0-ts-logger/react-native` | React Native 向けロガー Provider / Hook |
+| `library/http/core` | `@k1s0-ts-http/core` | HTTP クライアントコア (REST / gRPC-web / retry / requestId) |
+| `library/http/react` | `@k1s0-ts-http/react` | React 向け HTTP Hooks (Query / Mutation) |
+| `library/http/react-native` | `@k1s0-ts-http/react-native` | React Native 向け HTTP Hooks (NetInfo 連携) |
+| `library/notification/core` | `@k1s0-ts-notification/core` | 通知コア (headless / toast / dialog / confirm / HttpError 連携) |
+| `library/notification/react` | `@k1s0-ts-notification/react` | React 向け通知 Provider / Hook |
+| `library/notification/react-native` | `@k1s0-ts-notification/react-native` | React Native 向け通知 Provider / Hook |
 
 依存関係は `react` / `react-native` が同グループの `core` を参照する形です (`file:../core` 開発参照 → publish 時に `^<version>` に自動書き換え)。
 
@@ -181,10 +181,10 @@ publish 済みパッケージを別アプリから利用するには、利用側
 
 API リファレンスや使用例は各パッケージ配下の README を参照してください。
 
-- [config/core/README.md](config/core/README.md)
-- [logger/core/README.md](logger/core/README.md)
-- [http/core/README.md](http/core/README.md)
-- [notification/core/README.md](notification/core/README.md)
+- [config/core/README.md](library/config/core/README.md)
+- [logger/core/README.md](library/logger/core/README.md)
+- [http/core/README.md](library/http/core/README.md)
+- [notification/core/README.md](library/notification/core/README.md)
 
 `react` / `react-native` 版の README もそれぞれのディレクトリ直下にあります。
 
