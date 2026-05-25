@@ -135,3 +135,11 @@ createRoot(document.getElementById("root")!).render(
   </LoggerProvider>,
 );
 ```
+
+## ビルド & テスト
+
+- `npm install` — 初回のみ依存解決
+- `npm run typecheck` — `tsconfig.typecheck.json`（sibling `@k1s0-ts-logger/core` を `paths` で直結）
+- `npm run test` / `npm run test:coverage` — Vitest + react-test-renderer + jsdom（coverage **statements/branches/functions/lines = 100% 強制**、`autoUpdate: false`）
+- `npm run build` — ESM 出力（`dist/`）
+

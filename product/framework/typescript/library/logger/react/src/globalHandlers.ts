@@ -68,6 +68,9 @@ export function installGlobalHandlers(
     window.removeEventListener("error", handleError);
     window.removeEventListener("unhandledrejection", handleRejection);
     // WeakMap から自身を削除（自分が最新なら）
+    // 単一スレッド JS では再 install 時の prev() 実行中も WeakMap は前回の uninstall を保持しているため
+    // この比較は常に真となるが、将来の並行モデル変更や手動マップ操作に備えた防衛的チェック
+    /* v8 ignore next 3 */
     if (activeUninstall.get(logger) === uninstall) {
       activeUninstall.delete(logger);
     }
