@@ -45,8 +45,18 @@ export function isHttpErrorLike(value: unknown): value is HttpErrorLike {
   );
 }
 
+// fromHttpError に渡せる追加オプション（normalize 側の includeCause を反映するための受け口）
+export interface FromHttpErrorOptions {
+  // cause を保持するか（false で破棄して循環参照やシリアライズ不能値を避ける）
+  includeCause?: boolean;
+}
+
 // HTTP エラー風オブジェクトから AppError を生成する
-export function fromHttpError(error: HttpErrorLike, context?: ErrorContext): AppError {
+export function fromHttpError(
+  error: HttpErrorLike,
+  context?: ErrorContext,
+  options?: FromHttpErrorOptions,
+): AppError {
   // response が record のときだけ取り出す
   const response = isRecord(error.response) ? error.response : undefined;
   // response.status を有限数として取り出す（無ければ undefined）
@@ -70,7 +80,9 @@ export function fromHttpError(error: HttpErrorLike, context?: ErrorContext): App
   const issuesSource = response?.body ?? response?.data ?? error;
   // extractValidationIssues は配列を返す（issues 構造が無ければ空配列）
   const validationIssues = extractValidationIssues(issuesSource);
-  // 上で集めた値で AppError を生成（cause は明示渡しのみ採用し、自己参照は作らない）
+  // includeCause は明示 false 指定のときだけ破棄、未指定は true 扱い（既存呼び出し側の挙動を破壊しない）
+  const includeCause = options?.includeCause !== false;
+  // 上で集めた値で AppError を生成（cause は元 error.cause のみ採用し、自己参照は作らない）
   return createAppError({
     kind,
     message: error.message ?? `HTTP request failed${typeof status === "number" ? ` with status ${status}` : ""}`,
@@ -79,7 +91,8 @@ export function fromHttpError(error: HttpErrorLike, context?: ErrorContext): App
     requestId,
     traceId,
     details,
-    cause: error.cause,
+    // includeCause=false なら error.cause も含めて undefined に揃え、循環参照や非 JSON 化値を抑止する
+    cause: includeCause ? error.cause : undefined,
     // 空配列は意味が無いので undefined に正規化する
     validationIssues: validationIssues.length > 0 ? validationIssues : undefined,
     context,

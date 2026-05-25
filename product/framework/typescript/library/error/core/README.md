@@ -68,10 +68,10 @@ try {
 
 | kind | status 未指定 | status=408/409/429/5xx | その他の status |
 | --- | --- | --- | --- |
-| `network` / `timeout` | true | true | true |
+| `network` / `timeout` / `conflict` | true | true | true |
 | その他 | false | true | false |
 
-> **注**: `defaultRetryable("conflict")` 単独 (status 未指定) は `false` を返します。HTTP 409 経由で正規化された場合のみ `retryable=true` になります。
+> **注**: `conflict` は楽観ロック / バージョン衝突の自動再試行を想定し、kind 単独（status 未指定）でも `defaultRetryable("conflict") === true` を返します。HTTP 409 経由で正規化された場合も同じく `retryable=true` のままです。`business` / `validation` / `auth` / `permission` / `notFound` は kind 単独では `false` ですが、HTTP セマンティクス上リトライ可能な status (408 / 409 / 429 / 5xx) を渡せば `true` に切り替わります。
 
 ## API
 

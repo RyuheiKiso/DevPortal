@@ -43,15 +43,27 @@ export function extractValidationIssues(value: unknown): readonly ValidationIssu
     .filter((issue): issue is ValidationIssue => issue !== null);
 }
 
+// fromValidationError に渡せる追加オプション（normalize 側の includeCause を反映するための受け口）
+export interface FromValidationErrorOptions {
+  // cause を保持するか（false で破棄して循環参照やシリアライズ不能値を避ける）
+  includeCause?: boolean;
+}
+
 // 検証エラー風オブジェクトから AppError を生成する
 // userMessage は最初の issue のメッセージを採用（フォーム単位の表示に有用）
-export function fromValidationError(error: unknown, context?: ErrorContext): AppError {
+export function fromValidationError(
+  error: unknown,
+  context?: ErrorContext,
+  options?: FromValidationErrorOptions,
+): AppError {
   // 入力から issues を抽出
   const issues = extractValidationIssues(error);
   // 先頭 issue を取り出し（userMessage の元として利用）
   const firstIssue = issues[0];
   // 内部 message は元の error.message を流用、無ければ汎用文言
   const message = isRecord(error) && typeof error.message === "string" ? error.message : "Validation failed";
+  // includeCause は明示 false 指定のときだけ破棄、未指定は true 扱い（既存呼び出し側の挙動を破壊しない）
+  const includeCause = options?.includeCause !== false;
   return createAppError({
     // validation kind 固定
     kind: "validation",
@@ -61,8 +73,8 @@ export function fromValidationError(error: unknown, context?: ErrorContext): App
     userMessage: firstIssue?.message ?? "Please check the entered values.",
     // details に元の error をそのまま保持
     details: error,
-    // cause も元の error を保持（循環参照を避けたい場合は normalize 側で includeCause:false を使う）
-    cause: error,
+    // cause は includeCause が true のときだけ元の error を保持（false なら undefined にして循環参照を回避）
+    cause: includeCause ? error : undefined,
     // 検証エラーはユーザー入力起因なので運用監視への通報は不要
     reportable: false,
     // issues が 1 件以上あれば配列を保持

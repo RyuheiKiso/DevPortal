@@ -89,12 +89,14 @@ export function normalizeError(error: unknown, options: NormalizeOptions = {}): 
 
   // HTTP エラー風オブジェクトは HTTP 由来の AppError として処理（issues 併設は fromHttpError 内で対応）
   if (isHttpErrorLike(error)) {
-    return fromHttpError(error, context);
+    // includeCause を明示渡しすることで HTTP 経路でも cause 破棄が効くようにする
+    return fromHttpError(error, context, { includeCause });
   }
 
   // HTTP 形状を持たない zod 風 issues コンテナは検証エラーとして処理
   if (extractValidationIssues(error).length > 0) {
-    return fromValidationError(error, context);
+    // includeCause を明示渡しすることで validation 経路でも cause 破棄が効くようにする
+    return fromValidationError(error, context, { includeCause });
   }
 
   // 標準 Error instance は cause / code を引き継いで正規化

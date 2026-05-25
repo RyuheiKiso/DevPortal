@@ -255,4 +255,62 @@ describe("normalizeError", () => {
     const normalized = normalizeError("plain", { includeCause: true });
     expect(normalized.cause).toBe("plain");
   });
+
+  // validation コンテナ経路: includeCause:false で cause が破棄される（Bug 1 回帰防止）
+  it("drops cause for Zod-like containers when includeCause is false", () => {
+    // zod 風 issues コンテナを normalize にかける
+    const thrown = { issues: [{ message: "Name is required" }] };
+    const normalized = normalizeError(thrown, { includeCause: false });
+    // includeCause:false により cause は明示的に undefined になる
+    expect(normalized.cause).toBeUndefined();
+    // validation 経路として正しく分類されていることも併せて確認
+    expect(normalized.kind).toBe("validation");
+  });
+
+  // validation コンテナ経路: includeCause を省略するとデフォルトで cause を保持する
+  it("keeps cause for Zod-like containers by default", () => {
+    // 同じ入力を引数省略で渡す
+    const thrown = { issues: [{ message: "Name is required" }] };
+    const normalized = normalizeError(thrown);
+    // 省略時は元の error 自体を cause に保持する従来挙動
+    expect(normalized.cause).toBe(thrown);
+  });
+
+  // HTTP-like 経路: includeCause:false で cause が破棄される（Bug 1 回帰防止）
+  it("drops cause for HTTP-like errors when includeCause is false", () => {
+    // HTTP-like + 元 error の cause も持つ複合ケース
+    const inner = new Error("inner");
+    const thrown = { status: 500, cause: inner };
+    const normalized = normalizeError(thrown, { includeCause: false });
+    // includeCause:false により error.cause も含めて破棄される
+    expect(normalized.cause).toBeUndefined();
+  });
+
+  // HTTP-like 経路: includeCause を省略すると error.cause を保持する（従来挙動）
+  it("keeps error.cause for HTTP-like errors by default", () => {
+    // HTTP-like で error.cause を明示指定
+    const inner = new Error("inner");
+    const thrown = { status: 500, cause: inner };
+    const normalized = normalizeError(thrown);
+    // 元 error.cause がそのまま採用される（self-reference は作らない）
+    expect(normalized.cause).toBe(inner);
+  });
+
+  // HTTP-like + body.issues 併設ケースでも includeCause:false が効く（複合経路の回帰防止）
+  it("drops cause for HTTP-like with body.issues when includeCause is false", () => {
+    // 422 + body.issues に zod 風 issues を載せた複合ケース
+    const inner = new Error("inner");
+    const thrown = {
+      status: 422,
+      cause: inner,
+      response: { body: { issues: [{ message: "Name is required" }] } },
+    };
+    const normalized = normalizeError(thrown, { includeCause: false });
+    // HTTP 経路で正規化され validation 分類になる
+    expect(normalized.kind).toBe("validation");
+    // includeCause:false により cause は undefined
+    expect(normalized.cause).toBeUndefined();
+    // validationIssues は併設されたまま
+    expect(normalized.validationIssues?.[0]?.message).toBe("Name is required");
+  });
 });

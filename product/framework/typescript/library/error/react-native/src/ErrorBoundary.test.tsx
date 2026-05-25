@@ -65,6 +65,69 @@ describe("ErrorBoundary (react-native)", () => {
 
     expect(capturedError?.context?.component).toBe("ErrorBoundary");
     expect(onError.mock.calls[0]?.[0]).toBe(capturedError);
+    // 未指定経路では onError は最終 AppError で 1 回だけ呼ばれる（Bug 2 回帰防止）
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  // normalizeOptions に component キーが無いとき、既定値 "ErrorBoundary" が維持される（Bug 3 回帰防止）
+  it("preserves default component name when normalizeOptions has no component key", () => {
+    let capturedError: AppError | null = null;
+    const onError = vi.fn();
+
+    function FallbackProbe(props: ErrorBoundaryFallbackProps): null {
+      capturedError = props.error;
+      return null;
+    }
+
+    act(() => {
+      create(
+        <ErrorBoundary
+          fallback={FallbackProbe}
+          onError={onError}
+          normalizeOptions={{ operation: "save", defaultKind: "business" }}
+        >
+          <ThrowingView />
+        </ErrorBoundary>,
+      );
+    });
+
+    // component は既定値のまま、operation は normalizeOptions 由来
+    expect(capturedError?.context?.component).toBe("ErrorBoundary");
+    expect(capturedError?.context?.operation).toBe("save");
+    // defaultKind も反映される
+    expect(capturedError?.kind).toBe("business");
+    // onError 引数も最終的な AppError と一致する
+    expect(onError.mock.calls[0]?.[0]).toBe(capturedError);
+    // onError は 1 回だけ呼ばれる
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  // normalizeOptions.component が指定されている場合はユーザー指定が勝つ（既定値より優先）
+  it("lets normalizeOptions.component override the default component name", () => {
+    let capturedError: AppError | null = null;
+    const onError = vi.fn();
+
+    function FallbackProbe(props: ErrorBoundaryFallbackProps): null {
+      capturedError = props.error;
+      return null;
+    }
+
+    act(() => {
+      create(
+        <ErrorBoundary
+          fallback={FallbackProbe}
+          onError={onError}
+          normalizeOptions={{ component: "CustomBoundary" }}
+        >
+          <ThrowingView />
+        </ErrorBoundary>,
+      );
+    });
+
+    // ユーザー指定値が勝つ
+    expect(capturedError?.context?.component).toBe("CustomBoundary");
+    expect(onError.mock.calls[0]?.[0]).toBe(capturedError);
+    expect(onError).toHaveBeenCalledTimes(1);
   });
 
   // fallback が ReactNode (null) のまま素通し描画

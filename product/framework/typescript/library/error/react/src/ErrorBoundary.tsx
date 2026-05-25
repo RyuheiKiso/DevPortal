@@ -44,8 +44,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   override componentDidCatch(caught: unknown, info: ErrorInfo): void {
     // props.normalizeOptions が指定されていれば、それを反映した AppError で state を上書き
     if (this.props.normalizeOptions !== undefined) {
-      const refined = normalizeError(caught, this.props.normalizeOptions);
+      // component 既定値を先に置き、props.normalizeOptions に component キーが無ければ "ErrorBoundary" が維持される
+      // ユーザーが normalizeOptions.component を指定していればそちらが勝つ（spread の上書き順による）
+      const refined = normalizeError(caught, {
+        component: "ErrorBoundary",
+        ...this.props.normalizeOptions,
+      });
+      // 反映済み AppError で state を更新する（normalizeOptions 指定時のみ二度目の commit が発生）
       this.setState({ error: refined });
+      // onError には最終的な AppError を渡す
       this.props.onError?.(refined, info);
       return;
     }
