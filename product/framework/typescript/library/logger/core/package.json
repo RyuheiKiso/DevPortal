@@ -29,6 +29,7 @@
     "prepublishOnly": "npm run clean && npm run build && npm run test:coverage"
   },
   "dependencies": {
+    "@k1s0-ts-storage/core": "file:../../storage/core",
     "zod": "^3.23.0"
   },
   "devDependencies": {

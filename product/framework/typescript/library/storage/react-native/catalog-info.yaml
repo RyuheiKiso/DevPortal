@@ -1,0 +1,31 @@
+# Backstage Software Catalog - Component: @k1s0-ts-storage/react-native
+
+# Backstage Catalog のスキーマバージョン
+apiVersion: backstage.io/v1alpha1
+# エンティティ種別 (Component)
+kind: Component
+# エンティティ自身を識別するメタデータ
+metadata:
+  # Component の一意な名前
+  name: k1s0-ts-storage-react-native
+  # UI 表示用の説明文
+  description: "DevPortal React Native bindings for the unified KV storage framework (AsyncStorage / expo-secure-store / react-native-keychain / MMKV adapters, StorageProvider, hooks)."
+  # 検索・フィルタ用タグ
+  tags:
+    - typescript
+    - library
+    - storage
+    - react-native
+# Component 固有の仕様
+spec:
+  # 種別 (再利用ライブラリ)
+  type: library
+  # ライフサイクル (本番利用可)
+  lifecycle: production
+  # 所有者 (owners.yaml で定義した Group)
+  owner: k1s0-framework-team
+  # 所属する System (storage ドメイン)
+  system: k1s0-ts-storage
+  # core パッケージに依存する
+  dependsOn:
+    - component:default/k1s0-ts-storage-core

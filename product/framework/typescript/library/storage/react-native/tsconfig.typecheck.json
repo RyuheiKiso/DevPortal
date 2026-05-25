@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "..",
+    "baseUrl": ".",
+    "paths": {
+      "@k1s0-ts-storage/core": ["../core/src/index.ts"]
+    },
+    "lib": ["ES2022", "DOM"]
+  }
+}

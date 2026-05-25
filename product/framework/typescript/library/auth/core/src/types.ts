@@ -77,14 +77,10 @@ export interface AuthAdapter {
 }
 
 // トークンの保存先を差し替えるための契約
-export interface TokenStore {
-  // 現在保存されているトークン集合を取得する
-  get(): Promise<AuthTokenSet | undefined>;
-  // 新しいトークン集合を保存する
-  set(tokens: AuthTokenSet): Promise<void>;
-  // 保存されているトークン集合を削除する
-  clear(): Promise<void>;
-}
+// @k1s0-ts-storage/core の TypedSlot<AuthTokenSet> の別名 (型の互換性は完全に維持)
+// 将来は storage パッケージの暗号化や監査ミドルウェアを直接合成できる
+import type { TypedSlot } from "@k1s0-ts-storage/core";
+export type TokenStore = TypedSlot<AuthTokenSet>;
 
 // 権限要件の評価方式
 export type AccessMode = "all" | "any";

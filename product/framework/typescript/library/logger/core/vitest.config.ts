@@ -3,6 +3,12 @@ import { defineConfig } from "vitest/config";
 
 // vitest 実行設定をエクスポート
 export default defineConfig({
+  // 解決エイリアス: storage/core を sibling の src から直接参照する
+  resolve: {
+    alias: {
+      "@k1s0-ts-storage/core": new URL("../../storage/core/src/index.ts", import.meta.url).pathname,
+    },
+  },
   // テストランナー本体に渡す設定群
   test: {
     // 対象ファイルパターン（src 配下の *.test.ts のみを実行）

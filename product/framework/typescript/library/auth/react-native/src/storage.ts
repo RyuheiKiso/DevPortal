@@ -1,43 +1,30 @@
-// core から型を取り込み
+// storage パッケージから合成可能な部品を取り込み
+import { createTypedSlot, jsonCodec, withCodec } from "@k1s0-ts-storage/core";
+// AsyncStorage 互換アダプタと型を取り込み
+import { createAsyncStorageBackend } from "@k1s0-ts-storage/react-native";
+// 後方互換のため storage パッケージの型を re-export する
+import type { NativeKeyValueStorage as StorageNativeKeyValueStorage } from "@k1s0-ts-storage/react-native";
+// auth core の型を取り込み
 import type { AuthTokenSet, TokenStore } from "@k1s0-ts-auth/core";
 
-// React Native の各種 storage 実装に合わせる最小契約
-export interface NativeKeyValueStorage {
-  // 指定キーの文字列値を取得する
-  getItem(key: string): string | null | Promise<string | null>;
-  // 指定キーへ文字列値を保存する
-  setItem(key: string, value: string): void | Promise<void>;
-  // 指定キーの値を削除する
-  removeItem(key: string): void | Promise<void>;
-}
+// 後方互換のための NativeKeyValueStorage 型 (storage パッケージの同名型と構造的に互換)
+export type NativeKeyValueStorage = StorageNativeKeyValueStorage;
 
 // React Native 向け TokenStore を作る
+// 内部実装は @k1s0-ts-storage の合成 (AsyncStorage adapter → JSON codec → TypedSlot)
+// JSON シリアライズの振る舞い・既定キーは旧実装と完全互換
 export function createNativeTokenStore(
-  // SecureStore / AsyncStorage / Keychain wrapper など
+  // SecureStore / AsyncStorage / Keychain wrapper など (NativeKeyValueStorage 形を実装するもの)
   storage: NativeKeyValueStorage,
-  // 保存キー
+  // 保存キー (既定: 旧実装と同じ "k1s0.auth.tokens")
   key = "k1s0.auth.tokens",
 ): TokenStore {
-  // TokenStore 契約を返す
-  return {
-    // 保存済みトークンを取得する
-    async get(): Promise<AuthTokenSet | undefined> {
-      // storage から文字列を取得する
-      const raw = await storage.getItem(key);
-      // 未保存なら undefined
-      if (raw === null) return undefined;
-      // JSON を AuthTokenSet として復元する
-      return JSON.parse(raw) as AuthTokenSet;
-    },
-    // トークンを保存する
-    async set(tokens: AuthTokenSet): Promise<void> {
-      // JSON 文字列として保存する
-      await storage.setItem(key, JSON.stringify(tokens));
-    },
-    // トークンを削除する
-    async clear(): Promise<void> {
-      // storage から削除する
-      await storage.removeItem(key);
-    },
-  };
+  // storage を統一非同期 KvStore<string> に正規化
+  const backend = createAsyncStorageBackend(storage);
+  // JSON codec で AuthTokenSet を文字列にエンコード
+  const codec = jsonCodec<AuthTokenSet>();
+  // codec を被せて KvStore<AuthTokenSet> へ昇格
+  const decorated = withCodec<string, AuthTokenSet>(codec)(backend);
+  // 指定キーを TypedSlot として公開 (= TokenStore alias)
+  return createTypedSlot(decorated, key);
 }

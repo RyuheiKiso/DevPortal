@@ -9,6 +9,8 @@ export default defineConfig({
     alias: {
       // auth core は sibling の src を直接参照する
       "@k1s0-ts-auth/core": new URL("../core/src/index.ts", import.meta.url).pathname,
+      // auth core が依存する storage core も src を直接参照する
+      "@k1s0-ts-storage/core": new URL("../../storage/core/src/index.ts", import.meta.url).pathname,
     },
   },
   // テストランナー本体に渡す設定群

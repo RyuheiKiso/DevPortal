@@ -9,6 +9,12 @@ export default defineConfig({
     alias: {
       // auth core の公開 entry を参照する
       "@k1s0-ts-auth/core": new URL("../core/src/index.ts", import.meta.url).pathname,
+      // storage core / react-native の公開 entry を参照する
+      "@k1s0-ts-storage/core": new URL("../../storage/core/src/index.ts", import.meta.url).pathname,
+      "@k1s0-ts-storage/react-native": new URL(
+        "../../storage/react-native/src/index.ts",
+        import.meta.url,
+      ).pathname,
     },
   },
   // テストランナー本体に渡す設定群

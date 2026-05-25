@@ -64,6 +64,7 @@ $Packages = @(
     [pscustomobject]@{ Name = "@k1s0-ts-logger/core";       Path = "library\logger\core";              Round = 1 }
     [pscustomobject]@{ Name = "@k1s0-ts-http/core";         Path = "library\http\core";                Round = 1 }
     [pscustomobject]@{ Name = "@k1s0-ts-notification/core"; Path = "library\notification\core";        Round = 1 }
+    [pscustomobject]@{ Name = "@k1s0-ts-storage/core";      Path = "library\storage\core";             Round = 1 }
     # react / react-native パッケージ群 (core を file:../core で参照しているため後発で publish)
     [pscustomobject]@{ Name = "@k1s0-ts-auth/react";                Path = "library\auth\react";               Round = 2 }
     [pscustomobject]@{ Name = "@k1s0-ts-auth/react-native";         Path = "library\auth\react-native";        Round = 2 }
@@ -77,6 +78,8 @@ $Packages = @(
     [pscustomobject]@{ Name = "@k1s0-ts-http/react-native";         Path = "library\http\react-native";        Round = 2 }
     [pscustomobject]@{ Name = "@k1s0-ts-notification/react";        Path = "library\notification\react";       Round = 2 }
     [pscustomobject]@{ Name = "@k1s0-ts-notification/react-native"; Path = "library\notification\react-native";Round = 2 }
+    [pscustomobject]@{ Name = "@k1s0-ts-storage/react";             Path = "library\storage\react";            Round = 2 }
+    [pscustomobject]@{ Name = "@k1s0-ts-storage/react-native";      Path = "library\storage\react-native";     Round = 2 }
 )
 
 # ログレベルからコンソール色を導出する

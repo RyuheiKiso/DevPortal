@@ -83,14 +83,10 @@ export interface Logger {
 }
 
 // 永続化系トランスポート用の抽象 KV ストア
-export interface StorageAdapter {
-  // 値の取得（同期/非同期どちらでも可）
-  getItem(key: string): string | null | Promise<string | null>;
-  // 値の保存
-  setItem(key: string, value: string): void | Promise<void>;
-  // 値の削除
-  removeItem(key: string): void | Promise<void>;
-}
+// @k1s0-ts-storage/core の SyncStorage の別名 (構造的に同等、optional な key/length を許容)
+// 既存のユーザー実装はそのまま受け入れられる (Structural Typing)
+import type { SyncStorage } from "@k1s0-ts-storage/core";
+export type StorageAdapter = SyncStorage;
 
 // Logger 生成時の設定
 export interface LoggerConfig {

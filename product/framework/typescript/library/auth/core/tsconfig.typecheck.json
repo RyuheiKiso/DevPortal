@@ -1,6 +1,11 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "noEmit": true
+    "noEmit": true,
+    "rootDir": "../..",
+    "baseUrl": ".",
+    "paths": {
+      "@k1s0-ts-storage/core": ["../../storage/core/src/index.ts"]
+    }
   }
 }
