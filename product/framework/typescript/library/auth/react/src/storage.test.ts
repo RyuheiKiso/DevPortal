@@ -219,4 +219,73 @@ describe("createWebTokenStore", () => {
     // removeItem が呼ばれていること
     expect(removeSpy).toHaveBeenCalledTimes(1);
   });
+
+  // zod schema による型不一致は破損扱いになること
+  it("JSON は valid だがスキーマ型不一致なら破損扱いで undefined を返す", async () => {
+    // fake storage に型不一致 JSON を仕込む (accessToken が数値)
+    const storage = createFakeStorage();
+    // 直接 backing に型違反値を入れる
+    storage.backing.set("k1s0.auth.tokens", JSON.stringify({ accessToken: 123 }));
+    // store を作る
+    const store = createWebTokenStore({ storage });
+    // get は undefined を返すこと
+    expect(await store.get()).toBeUndefined();
+    // 破損データは削除されていること
+    expect(storage.backing.has("k1s0.auth.tokens")).toBe(false);
+  });
+
+  // 余剰フィールドは strict モードで破損扱いになること
+  it("余剰フィールド付き JSON は strict で破損扱いになる", async () => {
+    // 余剰フィールドを含むペイロード
+    const storage = createFakeStorage();
+    // 直接 backing に extraField を含む値を入れる
+    storage.backing.set(
+      "k1s0.auth.tokens",
+      JSON.stringify({ accessToken: "a", extraField: "x" }),
+    );
+    // store を作る
+    const store = createWebTokenStore({ storage });
+    // get は undefined を返すこと (strict で拒否)
+    expect(await store.get()).toBeUndefined();
+    // 破損データは削除されていること
+    expect(storage.backing.has("k1s0.auth.tokens")).toBe(false);
+  });
+
+  // onCorrupt callback が JSON.parse 失敗時に呼ばれること
+  it("JSON.parse 失敗時に onCorrupt callback が呼ばれる", async () => {
+    // 壊れた JSON を仕込む
+    const storage = createFakeStorage();
+    storage.backing.set("k1s0.auth.tokens", "{not-json");
+    // onCorrupt スパイを用意する
+    const onCorrupt = vi.fn();
+    // store を作る
+    const store = createWebTokenStore({ storage, onCorrupt });
+    // get を呼ぶ
+    await store.get();
+    // onCorrupt が呼ばれていること
+    expect(onCorrupt).toHaveBeenCalledTimes(1);
+    // 第 1 引数が raw 文字列であること
+    expect(onCorrupt.mock.calls[0]?.[0]).toBe("{not-json");
+    // 第 2 引数が Error インスタンスであること (JSON.parse 例外)
+    expect(onCorrupt.mock.calls[0]?.[1]).toBeInstanceOf(Error);
+  });
+
+  // onCorrupt callback がスキーマ検証失敗時に呼ばれること
+  it("スキーマ検証失敗時に onCorrupt callback が呼ばれる", async () => {
+    // 型不一致 JSON を仕込む
+    const storage = createFakeStorage();
+    storage.backing.set("k1s0.auth.tokens", JSON.stringify({ accessToken: 123 }));
+    // onCorrupt スパイを用意する
+    const onCorrupt = vi.fn();
+    // store を作る
+    const store = createWebTokenStore({ storage, onCorrupt });
+    // get を呼ぶ
+    await store.get();
+    // onCorrupt が 1 回呼ばれていること
+    expect(onCorrupt).toHaveBeenCalledTimes(1);
+    // 第 1 引数が raw 文字列
+    expect(onCorrupt.mock.calls[0]?.[0]).toBe(JSON.stringify({ accessToken: 123 }));
+    // 第 2 引数は zod のエラー (object であれば良い)
+    expect(onCorrupt.mock.calls[0]?.[1]).toBeDefined();
+  });
 });

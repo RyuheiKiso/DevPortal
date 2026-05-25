@@ -49,6 +49,23 @@ function base64ToBytes(b64: string): Uint8Array {
 // 暗号化エンベロープのバージョン番号 (将来のフォーマット変更検知用)
 const ENVELOPE_VERSION = 1;
 
+// JSON.parse 結果が暗号化エンベロープ形式であることを実行時検証する
+// 改ざん検知の観点で、フィールド欠落 / 型違反は明示的に拒否する
+function isEnvelope(value: unknown): value is { v: number; iv: string; ct: string } {
+  // null / 非オブジェクトは不正
+  if (value === null || typeof value !== "object") return false;
+  // 各フィールドの型を個別に検証する
+  const obj = value as { v?: unknown; iv?: unknown; ct?: unknown };
+  // v は number 必須
+  if (typeof obj.v !== "number") return false;
+  // iv は string 必須
+  if (typeof obj.iv !== "string") return false;
+  // ct は string 必須
+  if (typeof obj.ct !== "string") return false;
+  // すべて満たせば正当なエンベロープ
+  return true;
+}
+
 // inner KvStore<string> に暗号化エンベロープを格納し、外側 KvStore<T> として公開する
 // 内部フォーマット: JSON({ v: 1, iv: base64, ct: base64 })
 export function withEncryption<T>(
@@ -76,7 +93,14 @@ export function withEncryption<T>(
         // 未保存はそのまま undefined
         if (raw === undefined) return undefined;
         // JSON をパース (壊れた値は例外伝播)
-        const envelope = JSON.parse(raw) as { v: number; iv: string; ct: string };
+        const parsed = JSON.parse(raw) as unknown;
+        // エンベロープ形式の実行時検証 (改ざん検知のため失敗時は throw)
+        if (!isEnvelope(parsed)) {
+          // 開発者が即気付くようなメッセージで投げる
+          throw new Error("Invalid encryption envelope: missing or wrong-typed fields");
+        }
+        // 検証済みのエンベロープを取得する
+        const envelope = parsed;
         // バージョン不一致は明示的に例外 (フォーマット変更を検知)
         if (envelope.v !== ENVELOPE_VERSION) {
           // 開発者が即気付くようなメッセージで投げる

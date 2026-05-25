@@ -3,6 +3,20 @@ import type { KvStore } from "@k1s0-ts-storage/core";
 // ローカル型を取り込み
 import type { KeychainModule } from "./types.js";
 
+// JSON.parse 結果が Record<string, string> であることを実行時検証する
+// 改ざんされた Keychain データが任意型として後段に流入することを防ぐ
+function isStringRecord(value: unknown): value is Record<string, string> {
+  // null / 非オブジェクト / 配列を拒否する
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  // 各値が string であることを確認する
+  for (const v of Object.values(value as Record<string, unknown>)) {
+    // 非 string が混じっていれば不正
+    if (typeof v !== "string") return false;
+  }
+  // すべて string なら true
+  return true;
+}
+
 // createKeychainBackend のオプション
 export interface CreateKeychainBackendOptions {
   // キーから service 名を組み立てる際の prefix (perKey モードで使う)
@@ -65,15 +79,19 @@ export function createKeychainBackend(
     // 未保存なら空マップ
     if (result === false) return {};
     // JSON パース (壊れていれば空マップで耐える)
+    let parsed: unknown;
     try {
-      // 任意の JSON を Record<string, string> として受ける
-      const parsed = JSON.parse(result.password) as Record<string, string>;
-      // 結果を返す
-      return parsed;
+      // パースを試みる
+      parsed = JSON.parse(result.password);
     } catch {
       // 壊れた値は空マップで起動継続
       return {};
     }
+    // 実行時検証で Record<string, string> でないものは silently 空マップにする
+    // (改ざんされた任意型データが上位コードに流入しないようにする)
+    if (!isStringRecord(parsed)) return {};
+    // 検証済みのマップを返す
+    return parsed;
   };
   // 書き込みヘルパ (マップ全体を JSON 化して保存)
   const writeMap = async (map: Record<string, string>): Promise<void> => {

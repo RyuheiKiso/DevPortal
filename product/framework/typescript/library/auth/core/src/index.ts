@@ -42,3 +42,6 @@ export {
 
 // AuthManager ファクトリ
 export { createAuthManager } from "./manager.js";
+
+// zod スキーマ (AuthTokenSet の実行時検証)
+export { authTokenSetSchema } from "./schema.js";
