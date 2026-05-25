@@ -43,19 +43,19 @@ function App() {
 }
 ```
 
-## ビルド構成
+## ビルド & テスト
 
 dual build（ESM + CJS）で出力します。
 
-- `dist/esm/`: ESM + `.d.ts`（バンドラ経由・型解決用）
-- `dist/cjs/`: CJS（Metro / Jest が `require()` で取得する経路）
-
-`package.json` の `type` フィールドは **意図的に未指定**。これにより `.js` がデフォルト CJS 扱いされ、Metro が `main` フィールド経由でロードする際にトラブルが起きない構成です。
+- `dist/esm/`: ESM + `.d.ts`（バンドラ経由・型解決用、`package.json` の `"type": "module"` で `.js` を ESM 解決）
+- `dist/cjs/`: CJS（Metro / Jest が `require()` で取得する経路、ビルド時に `dist/cjs/package.json` へ `{"type":"commonjs"}` を書き出して CJS 解決に切替）
 
 ```bash
-npm install
-npm run typecheck
-npm run build
+npm install                      # 初回のみ依存解決
+npm run typecheck                # tsconfig.typecheck.json（sibling core を paths で直結）
+npm run test                     # Vitest + react-test-renderer
+npm run test:coverage            # statements/branches/functions/lines = 100% 強制（autoUpdate: false）
+npm run build                    # esm + cjs を生成（dist/cjs/package.json も自動生成）
 ```
 
 ## scaffold へのローカル統合
