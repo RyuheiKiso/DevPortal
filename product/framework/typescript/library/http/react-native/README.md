@@ -64,11 +64,18 @@ If `@react-native-community/netinfo` is not installed, `createNetInfoAware()` re
 
 ## Build And Test
 
+dual build（ESM + CJS）で出力します。
+
+- `dist/esm/`: ESM + `.d.ts`（`package.json` の `"type": "module"` で `.js` を ESM 解決）
+- `dist/cjs/`: CJS（Metro / Jest が `require()` で取得、ビルド時に `dist/cjs/package.json` へ `{"type":"commonjs"}` を書き出し）
+
 ```bash
-npm install
-npm run typecheck
-npm run build
-npm test
+npm install                      # 初回のみ依存解決
+npm run typecheck                # tsconfig.typecheck.json（sibling core を paths で直結）
+npm run test                     # Vitest + react-test-renderer
+npm run test:coverage            # statements/branches/functions/lines = 100% 強制（autoUpdate: false）
+npm run build                    # esm + cjs を生成
 ```
 
-The package emits ESM under `dist/esm`, CommonJS under `dist/cjs`, declarations, and source maps.
+- `react-native` の `Platform` は各テストで `vi.mock("react-native", ...)` で差し替え（rollup が実物の `index.js.flow` を解析できないため必須）
+- `@react-native-community/netinfo` は `vi.mock` で fake 化し、`fetch` / `addEventListener` の挙動を制御
