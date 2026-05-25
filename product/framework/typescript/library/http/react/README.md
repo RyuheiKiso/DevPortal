@@ -52,11 +52,9 @@ const file = useHttpQuery<ArrayBuffer>({ url: "/export.bin" }, { parseAs: "array
 
 ## Build And Test
 
-```bash
-npm install
-npm run typecheck
-npm run build
-npm test
-```
+- `npm install` — 初回のみ依存解決
+- `npm run typecheck` — `tsconfig.typecheck.json`（sibling `@k1s0-ts-http/core` を `paths` で直結）
+- `npm run test` / `npm run test:coverage` — Vitest + react-test-renderer（coverage **statements/branches/functions/lines = 100% 強制**、`autoUpdate: false`）
+- `npm run build` — ESM 出力（`dist/`）
 
 The package emits ESM declarations and source maps under `dist/`.
