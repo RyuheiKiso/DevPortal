@@ -15,7 +15,16 @@ import { RequireAuth } from "./RequireAuth.js";
 // 表示ガードを取り込み
 import { RequirePermission } from "./RequirePermission.js";
 // hooks を取り込み
-import { useCurrentUser, useIsAuthenticated, usePermission, useRole } from "./hooks.js";
+import {
+  useAccess,
+  useAuth,
+  useAuthContext,
+  useAuthSession,
+  useCurrentUser,
+  useIsAuthenticated,
+  usePermission,
+  useRole,
+} from "./hooks.js";
 
 // 認証済み adapter を作る
 function createAdapter(): AuthAdapter {
@@ -127,5 +136,73 @@ describe("auth react hooks", () => {
     await manager.setSession({ status: "anonymous", user: null });
     // 通知されること
     expect(listener).toHaveBeenCalled();
+  });
+
+  // useAuth / useAuthSession / useAuthContext / useAccess を一通り呼べること
+  it("Provider 配下で各種 hook が manager と整合した値を返す", async () => {
+    // manager を作る
+    const manager = createAuthManager(createAdapter());
+    // 事前ロード
+    await manager.getSession();
+    // captured
+    const captured: Partial<Record<string, unknown>> = {};
+    // Probe
+    function Probe(): React.JSX.Element {
+      // Context 全体
+      const ctx = useAuthContext();
+      // captured に詰める
+      captured.manager = useAuth();
+      // session
+      captured.session = useAuthSession();
+      // access decision
+      captured.access = useAccess({ roles: ["admin"] });
+      // 同 ctx の manager と一致すること（参照同一性）
+      captured.sameManager = ctx.manager === captured.manager;
+      // 描画は空
+      return <>{null}</>;
+    }
+    // 描画する
+    act(() => {
+      // Provider 配下
+      create(
+        <AuthProvider manager={manager}>
+          <Probe />
+        </AuthProvider>,
+      );
+    });
+    // manager が同一参照であること
+    expect(captured.sameManager).toBe(true);
+    // session が認証済みであること
+    expect((captured.session as { status: string }).status).toBe("authenticated");
+    // access が allowed=true であること
+    expect((captured.access as { allowed: boolean }).allowed).toBe(true);
+  });
+
+  // Provider 外で hook を呼ぶと例外になること（ensureContext のエラー分岐）
+  it("Provider 外で useAuthContext を呼ぶと明示エラー", () => {
+    // 例外を補足する Probe
+    let captured: unknown;
+    // Probe コンポーネント
+    function Probe(): React.JSX.Element {
+      // try で囲って中身を補足
+      try {
+        // Provider 外で呼ぶ
+        useAuthContext();
+      } catch (error) {
+        // 補足する
+        captured = error;
+      }
+      // 描画は空
+      return <>{null}</>;
+    }
+    // 描画する
+    act(() => {
+      // Provider なしで Probe を配置
+      create(<Probe />);
+    });
+    // Error 型であること
+    expect(captured).toBeInstanceOf(Error);
+    // メッセージが想定通りであること
+    expect((captured as Error).message).toMatch(/AuthProvider/);
   });
 });

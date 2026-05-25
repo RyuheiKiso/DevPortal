@@ -1,19 +1,19 @@
 // vitest の設定ヘルパを取り込み（型補完と推論を効かせるため）
 import { defineConfig } from "vitest/config";
 
-// auth react binding のテスト設定をエクスポート
+// auth react-native binding のテスト設定をエクスポート
 export default defineConfig({
-  // ローカル core ソースを参照してテストする
+  // sibling の core 実装を直接参照してローカル変更を即時検証する
   resolve: {
-    // パッケージ名の解決先を上書きする
+    // package 名解決を src に差し替える
     alias: {
-      // auth core は sibling の src を直接参照する
+      // auth core の公開 entry を参照する
       "@k1s0-ts-auth/core": new URL("../core/src/index.ts", import.meta.url).pathname,
     },
   },
   // テストランナー本体に渡す設定群
   test: {
-    // 対象ファイルパターン
+    // 対象は src 配下の test ファイル（.ts と .tsx 両方）
     include: ["src/**/*.test.{ts,tsx}"],
     // React 19 の act 環境フラグと既知の boundary ノイズを抑制する setup
     setupFiles: ["src/testSetup.ts"],

@@ -1,7 +1,15 @@
 // vitest DSL を取り込み
 import { describe, expect, it } from "vitest";
 // テスト対象を取り込み
-import { canAccess, hasAllRoles, hasAnyPermission, hasPermission, hasRole } from "./permissions.js";
+import {
+  canAccess,
+  hasAllPermissions,
+  hasAllRoles,
+  hasAnyPermission,
+  hasAnyRole,
+  hasPermission,
+  hasRole,
+} from "./permissions.js";
 // セッション型を取り込み
 import type { AuthSession } from "./types.js";
 
@@ -19,6 +27,8 @@ const session: AuthSession = {
     permissions: ["invoice:read", "invoice:write"],
   },
 };
+// 匿名セッション（user = null）
+const anonymousSession: AuthSession = { status: "anonymous", user: null };
 
 // 単純判定系のテスト
 describe("role and permission helpers", () => {
@@ -28,6 +38,14 @@ describe("role and permission helpers", () => {
     expect(hasRole(session.user, "admin")).toBe(true);
     // auditor ロールは false
     expect(hasRole(session.user, "auditor")).toBe(false);
+  });
+
+  // user が null の場合は常に false を返すこと
+  it("user が null のとき hasRole / hasPermission は常に false", () => {
+    // null user
+    expect(hasRole(null, "admin")).toBe(false);
+    // null user
+    expect(hasPermission(null, "invoice:read")).toBe(false);
   });
 
   // 権限有無を判定できること
@@ -42,8 +60,36 @@ describe("role and permission helpers", () => {
   it("all / any の複数要件を判定する", () => {
     // admin と operator はすべて満たす
     expect(hasAllRoles(session.user, ["admin", "operator"])).toBe(true);
+    // 一部 lack
+    expect(hasAllRoles(session.user, ["admin", "auditor"])).toBe(false);
     // invoice:delete は持たないが invoice:read は持つ
     expect(hasAnyPermission(session.user, ["invoice:delete", "invoice:read"])).toBe(true);
+    // どの権限も持たない
+    expect(hasAnyPermission(session.user, ["invoice:delete"])).toBe(false);
+    // すべて持つ
+    expect(hasAllPermissions(session.user, ["invoice:read", "invoice:write"])).toBe(true);
+    // いずれかのロールを持つ
+    expect(hasAnyRole(session.user, ["auditor", "admin"])).toBe(true);
+  });
+
+  // user が null かつ要求が空配列なら true、非空なら false になること
+  it("user が null のとき all/any 系は要求が空のときだけ true を返す", () => {
+    // 空要求
+    expect(hasAllRoles(null, [])).toBe(true);
+    // 空要求
+    expect(hasAnyRole(null, [])).toBe(true);
+    // 空要求
+    expect(hasAllPermissions(null, [])).toBe(true);
+    // 空要求
+    expect(hasAnyPermission(null, [])).toBe(true);
+    // 非空要求
+    expect(hasAllRoles(null, ["admin"])).toBe(false);
+    // 非空要求
+    expect(hasAnyRole(null, ["admin"])).toBe(false);
+    // 非空要求
+    expect(hasAllPermissions(null, ["x"])).toBe(false);
+    // 非空要求
+    expect(hasAnyPermission(null, ["x"])).toBe(false);
   });
 });
 
@@ -62,12 +108,24 @@ describe("canAccess", () => {
     });
     // 許可されること
     expect(decision.allowed).toBe(true);
+    // 不足ロール無し
+    expect(decision.missingRoles).toEqual([]);
+    // 不足権限無し
+    expect(decision.missingPermissions).toEqual([]);
+  });
+
+  // 要件が空なら allowed=true を返すこと
+  it("要件が空（mode=all 既定）なら許可する", () => {
+    // 空要件
+    const decision = canAccess(session, {});
+    // 許可されること
+    expect(decision.allowed).toBe(true);
   });
 
   // 匿名には認証必須を拒否すること
   it("匿名に認証必須要件を拒否する", () => {
     // 匿名セッションで認証必須を要求する
-    const decision = canAccess({ status: "anonymous", user: null }, { authenticated: true });
+    const decision = canAccess(anonymousSession, { authenticated: true });
     // 拒否されること
     expect(decision.allowed).toBe(false);
     // 理由が anonymous であること
@@ -89,6 +147,31 @@ describe("canAccess", () => {
     expect(decision.missingRoles).toEqual(["auditor"]);
     // 不足権限を返すこと
     expect(decision.missingPermissions).toEqual(["invoice:delete"]);
+    // ロール不足が優先理由として返ること
+    expect(decision.reason).toBe("missing-role");
+  });
+
+  // all モードでロールは満たすが権限が不足する場合は missing-permission を返すこと
+  it("all モードでロールは満たすが権限が不足する場合は missing-permission を返す", () => {
+    // 権限のみ不足
+    const decision = canAccess(session, {
+      // 既存のロールのみ要求
+      roles: ["admin"],
+      // 不足する権限を要求
+      permissions: ["invoice:delete"],
+    });
+    // 拒否
+    expect(decision.allowed).toBe(false);
+    // 理由は権限不足
+    expect(decision.reason).toBe("missing-permission");
+  });
+
+  // all モードで user=null かつ要件が空配列のときは許可されること
+  it("all モードで user=null かつ要件が空のとき allowed=true", () => {
+    // authenticated:false（既定）で空要件
+    const decision = canAccess(anonymousSession, {});
+    // 許可
+    expect(decision.allowed).toBe(true);
   });
 
   // any モードでどちらかが一致すれば許可すること
@@ -104,5 +187,47 @@ describe("canAccess", () => {
     });
     // 許可されること
     expect(decision.allowed).toBe(true);
+  });
+
+  // any モードで要件が空配列なら許可すること
+  it("any モードで要件が空のとき allowed=true", () => {
+    // any モードで空要件
+    const decision = canAccess(session, { mode: "any" });
+    // 許可
+    expect(decision.allowed).toBe(true);
+  });
+
+  // any モードでロールも権限も一致しない場合は missing-role を返すこと（ロール要件がある場合）
+  it("any モードでロール要件があり一致しない場合は missing-role", () => {
+    // どちらも一致しない（ただしロール要件あり）
+    const decision = canAccess(session, {
+      // any モード
+      mode: "any",
+      // 存在しないロール
+      roles: ["auditor"],
+      // 存在しない権限
+      permissions: ["invoice:delete"],
+    });
+    // 拒否
+    expect(decision.allowed).toBe(false);
+    // ロール不足が理由
+    expect(decision.reason).toBe("missing-role");
+  });
+
+  // user=null のときの missingRoles / missingPermissions は要件配列そのまま
+  it("user=null のとき missing 一覧は要件配列そのまま", () => {
+    // 認証必須を外し、要件で拒否させる
+    const decision = canAccess(anonymousSession, {
+      // ロール要件あり
+      roles: ["admin"],
+      // 権限要件あり
+      permissions: ["invoice:read"],
+    });
+    // 拒否
+    expect(decision.allowed).toBe(false);
+    // 要件配列がそのまま不足として返る
+    expect(decision.missingRoles).toEqual(["admin"]);
+    // 要件配列がそのまま不足として返る
+    expect(decision.missingPermissions).toEqual(["invoice:read"]);
   });
 });

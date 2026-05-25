@@ -130,11 +130,6 @@ export function canAccess(session: AuthSession, requirement: AccessRequirement):
     // 許可結果を返す
     return { allowed: true, missingRoles: [], missingPermissions: [] };
   }
-  // ロール要件がある場合はロール不足を理由にする
-  if (roles.length > 0) {
-    // ロール不足の詳細を返す
-    return { allowed: false, missingRoles, missingPermissions, reason: "missing-role" };
-  }
-  // 権限不足の詳細を返す
-  return { allowed: false, missingRoles, missingPermissions, reason: "missing-permission" };
+  // ここに到達するのは roles 要件がありロールがすべて不一致のケース（roles=[] なら hasAnyRole が常に true となり ここに来ない）
+  return { allowed: false, missingRoles, missingPermissions, reason: "missing-role" };
 }

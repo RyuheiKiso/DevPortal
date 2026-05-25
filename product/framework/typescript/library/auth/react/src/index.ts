@@ -23,3 +23,7 @@ export { RequireAuth } from "./RequireAuth.js";
 export type { RequireAuthProps } from "./RequireAuth.js";
 export { RequirePermission } from "./RequirePermission.js";
 export type { RequirePermissionProps } from "./RequirePermission.js";
+
+// Web 環境向け TokenStore を公開する
+export { createWebTokenStore } from "./storage.js";
+export type { WebKeyValueStorage, WebTokenStoreOptions } from "./storage.js";
