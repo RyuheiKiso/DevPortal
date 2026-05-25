@@ -1,33 +1,40 @@
-// vitest の設定ヘルパーを読み込む
+// vitest の設定ヘルパを取り込み（型補完と推論を効かせるため）
 import { defineConfig } from "vitest/config";
 
-// error core のテスト設定を公開する
+// error core のテスト設定をエクスポート
 export default defineConfig({
-  // テストランナー設定
+  // テストランナー本体に渡す設定群
   test: {
-    // core 配下の単体テストを対象にする
+    // 対象ファイルパターン（src 配下の *.test.ts のみを実行）
     include: ["src/**/*.test.ts"],
-    // カバレッジ設定
+    // カバレッジ計測の設定
     coverage: {
-      // v8 coverage を使う
+      // v8 ネイティブカバレッジを利用（istanbul より低オーバーヘッド）
       provider: "v8",
-      // console と HTML の両方を出す
+      // ターミナル向け text と、ローカル確認用 html を出力
       reporter: ["text", "html"],
-      // src 配下の TypeScript 実装を対象にする
+      // 計測対象は src 配下の TypeScript ファイル
       include: ["src/**/*.ts"],
-      // re-export と型だけのファイルは除外する
-      exclude: ["src/**/*.test.ts", "src/index.ts", "src/types.ts"],
-      // 基盤パッケージとして現在の水準を維持する品質ゲートを置く
+      // 除外: テスト本体、型定義のみのファイル、re-export のみの index
+      exclude: [
+        // テストコード自身はカバレッジ対象外
+        "src/**/*.test.ts",
+        // 型エイリアス／インターフェースのみで JS コードが生成されない
+        "src/types.ts",
+        // 純粋な re-export のみのバレル
+        "src/index.ts",
+      ],
+      // 閾値: いずれかが 100% を下回ったら CI で失敗させる（後退検知）
       thresholds: {
-        // statements の下限
-        statements: 95,
-        // branches の下限
-        branches: 90,
-        // functions の下限
+        // 全実行可能ステートメント
+        statements: 100,
+        // 分岐網羅
+        branches: 100,
+        // 関数網羅
         functions: 100,
-        // lines の下限
-        lines: 95,
-        // しきい値は手動で管理する
+        // 行網羅
+        lines: 100,
+        // 計測実値に応じて閾値を自動更新しない
         autoUpdate: false,
       },
     },

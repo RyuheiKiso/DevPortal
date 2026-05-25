@@ -1,155 +1,90 @@
-// vitest のテスト API を読み込む
+// vitest のテスト API を取り込み
 import { describe, expect, it } from "vitest";
-// 公開 API をまとめて検証する
-import {
-  appErrorInputSchema,
-  classifyErrorCode,
-  classifyHttpStatus,
-  createAppError,
-  defaultReportable,
-  defaultRetryable,
-  defaultSeverity,
-  defaultUserMessage,
-  extractValidationIssues,
-  fromHttpError,
-  fromValidationError,
-  isAppError,
-  isHttpErrorLike,
-  isRecord,
-  normalizeError,
-  serializeError,
-  toLogRecord,
-  toNotification,
-  validateAppErrorInput,
-} from "./index.js";
+// 公開 API 経由で normalize と関連関数を取り込み
+import { createAppError, isAppError, normalizeError } from "./index.js";
 
-// core の公開 API と主要分岐を検証する
-describe("error core", () => {
-  // HTTP status から AppErrorKind への変換を検証する
-  it("classifies common HTTP status codes", () => {
-    // network / timeout 系を検証する
-    expect(classifyHttpStatus(0)).toBe("network");
-    expect(classifyHttpStatus(408)).toBe("timeout");
-    expect(classifyHttpStatus(504)).toBe("timeout");
-    // 業務アプリでよく扱う status を検証する
-    expect(classifyHttpStatus(400)).toBe("validation");
-    expect(classifyHttpStatus(422)).toBe("validation");
-    expect(classifyHttpStatus(401)).toBe("auth");
-    expect(classifyHttpStatus(403)).toBe("permission");
-    expect(classifyHttpStatus(404)).toBe("notFound");
-    expect(classifyHttpStatus(409)).toBe("conflict");
-    expect(classifyHttpStatus(412)).toBe("conflict");
-    expect(classifyHttpStatus(500)).toBe("system");
-    expect(classifyHttpStatus(418)).toBe("http");
+// normalizeError オーケストレーションの分岐網羅
+describe("normalizeError", () => {
+  // 既存 AppError はそのまま返す（context / request id / trace id を必要時のみ補完）
+  it("preserves AppError as-is and fills missing context", () => {
+    const original = createAppError({ kind: "business", message: "Rule rejected" });
+    const normalized = normalizeError(original, { operation: "approve", requestId: "req-1" });
+
+    expect(isAppError(normalized)).toBe(true);
+    expect(normalized.context?.operation).toBe("approve");
+    expect(normalized.requestId).toBe("req-1");
   });
 
-  // error code から AppErrorKind への変換を検証する
-  it("classifies common error code patterns", () => {
-    // 未指定 code は分類しない
-    expect(classifyErrorCode(undefined)).toBeUndefined();
-    // 通信系 code を検証する
-    expect(classifyErrorCode("ETIMEDOUT")).toBe("timeout");
-    expect(classifyErrorCode("NETWORK_ERROR")).toBe("network");
-    expect(classifyErrorCode("ECONNREFUSED")).toBe("network");
-    expect(classifyErrorCode("ENOTFOUND")).toBe("network");
-    // 入力・認証・認可・競合・未検出を検証する
-    expect(classifyErrorCode("VALIDATION_FAILED")).toBe("validation");
-    expect(classifyErrorCode("INVALID_INPUT")).toBe("validation");
-    expect(classifyErrorCode("UNAUTHORIZED")).toBe("auth");
-    expect(classifyErrorCode("PERMISSION_DENIED")).toBe("permission");
-    expect(classifyErrorCode("FORBIDDEN")).toBe("permission");
-    expect(classifyErrorCode("VERSION_CONFLICT")).toBe("conflict");
-    expect(classifyErrorCode("CUSTOMER_NOT_FOUND")).toBe("notFound");
-    // 未知 code は分類しない
-    expect(classifyErrorCode("SOME_BUSINESS_RULE")).toBeUndefined();
+  // 既存 AppError の context は上書きされない（既存値が勝つ shallow merge）
+  it("does not overwrite existing AppError context", () => {
+    const original = createAppError({ kind: "business", context: { operation: "original" } });
+    const normalized = normalizeError(original, { operation: "next", traceId: "trace-2" });
+
+    // 既存キー (operation) は勝つ
+    expect(normalized.context?.operation).toBe("original");
+    // トップレベル traceId は欠落補完される
+    expect(normalized.traceId).toBe("trace-2");
   });
 
-  // AppError の default 値を検証する
-  it("creates AppError with safe defaults", () => {
-    // validation はユーザー修正可能な warning として扱う
-    const validation = createAppError({ kind: "validation" });
-    expect(validation.userMessage).toBe(defaultUserMessage("validation"));
-    expect(validation.severity).toBe(defaultSeverity("validation"));
-    expect(validation.retryable).toBe(defaultRetryable("validation"));
-    expect(validation.reportable).toBe(defaultReportable("validation"));
-    // 5xx は retryable として扱う
-    const system = createAppError({ kind: "system", status: 503 });
-    expect(system.retryable).toBe(true);
-    expect(system.reportable).toBe(true);
-  });
-
-  // HTTP 風 object の正規化を検証する
-  it("normalizes HttpError-like objects", () => {
-    // 422 は validation に分類される
-    const error = normalizeError({
-      message: "Request failed",
-      status: 422,
-      code: "INVALID_CUSTOMER",
-      requestId: "req-1",
-      details: { field: "name" },
+  // shallowMerge (既定): 既存 context に無いキーは options 由来で補完される
+  it("shallow-merges options-derived context into existing AppError context", () => {
+    const original = createAppError({ kind: "business", context: { operation: "existing" } });
+    const normalized = normalizeError(original, {
+      operation: "ignored",
+      tags: ["urgent"],
+      requestId: "req-from-options",
     });
 
-    expect(error.kind).toBe("validation");
-    expect(error.status).toBe(422);
-    expect(error.requestId).toBe("req-1");
-    expect(error.reportable).toBe(false);
+    // 既存 operation は勝つ
+    expect(normalized.context?.operation).toBe("existing");
+    // tags は既存に無いので補完される
+    expect(normalized.context?.tags).toEqual(["urgent"]);
+    // requestId は context にも欠落 → 補完
+    expect(normalized.context?.requestId).toBe("req-from-options");
+    // requestId のトップレベル補完
+    expect(normalized.requestId).toBe("req-from-options");
   });
 
-  // response headers から requestId / traceId を拾う経路を検証する
-  it("normalizes response headers and response data", () => {
-    // Headers 互換の plain object を使って requestId と traceId を渡す
-    const error = fromHttpError({
-      statusCode: 429,
-      response: {
-        headers: {
-          "x-request-id": "req-from-header",
-          traceparent: "trace-from-header",
-        },
-        data: { reason: "rate limit" },
-      },
+  // contextStrategy="preserveExisting" は旧挙動を再現する（既存 context があれば options 由来は採用しない）
+  it("preserves existing context only when contextStrategy is 'preserveExisting'", () => {
+    const original = createAppError({ kind: "business", context: { operation: "existing" } });
+    const normalized = normalizeError(original, {
+      operation: "ignored",
+      tags: ["urgent"],
+      contextStrategy: "preserveExisting",
     });
 
-    expect(error.kind).toBe("http");
-    expect(error.status).toBe(429);
-    expect(error.retryable).toBe(true);
-    expect(error.requestId).toBe("req-from-header");
-    expect(error.traceId).toBe("trace-from-header");
-    expect(error.details).toEqual({ reason: "rate limit" });
+    // 既存 context が完全採用される（options 由来は反映されない）
+    expect(normalized.context?.operation).toBe("existing");
+    expect(normalized.context?.tags).toBeUndefined();
   });
 
-  // Headers class を使う環境でも header を読めることを検証する
-  it("reads Web Headers when available", () => {
-    // DOM Headers を使って大小文字違いの lookup を検証する
-    const headers = new Headers({ "X-Request-Id": "req-web", traceparent: "trace-web" });
-    const error = fromHttpError({
-      response: {
-        status: 504,
-        headers,
-        body: { message: "gateway timeout" },
-      },
+  // 既存 AppError に context が無く preserveExisting → options 由来を採用
+  it("falls back to options-derived context when preserveExisting and existing is undefined", () => {
+    const original = createAppError({ kind: "business" });
+    const normalized = normalizeError(original, {
+      operation: "next",
+      contextStrategy: "preserveExisting",
     });
-
-    expect(error.kind).toBe("timeout");
-    expect(error.requestId).toBe("req-web");
-    expect(error.traceId).toBe("trace-web");
-    expect(error.details).toEqual({ message: "gateway timeout" });
+    expect(normalized.context?.operation).toBe("next");
   });
 
-  // HTTP error 判定が広すぎないことを検証する
-  it("detects only explicit HTTP-like errors", () => {
-    // status があれば HTTP 系として扱う
-    expect(isHttpErrorLike({ status: 500 })).toBe(true);
-    // response があれば HTTP 系として扱う
-    expect(isHttpErrorLike({ response: { status: 404 } })).toBe(true);
-    // requestId だけでは HTTP 系として扱わない
-    expect(isHttpErrorLike({ requestId: "req-only" })).toBe(false);
-    // object 以外は HTTP 系として扱わない
-    expect(isHttpErrorLike("boom")).toBe(false);
+  // 既存 AppError に context があり options 由来 context が無いとき shallow merge は既存をそのまま採用
+  it("returns existing context unchanged when no options context (shallowMerge)", () => {
+    const original = createAppError({ kind: "business", context: { operation: "existing" } });
+    const normalized = normalizeError(original, { contextStrategy: "shallowMerge" });
+    expect(normalized.context?.operation).toBe("existing");
   });
 
-  // validation issue の抽出と正規化を検証する
-  it("normalizes validation issue containers", () => {
-    // Zod 風 issues を AppError に変換する
+  // 既存 AppError にも options にも context が無いとき shallow merge は undefined
+  it("returns undefined context when both existing and options are missing (shallowMerge)", () => {
+    const original = createAppError({ kind: "business" });
+    const normalized = normalizeError(original, { contextStrategy: "shallowMerge" });
+    expect(normalized.context).toBeUndefined();
+  });
+
+  // Zod 風 issues を持つ object は validation 経路
+  it("normalizes Zod-like validation containers", () => {
     const error = normalizeError({
       issues: [{ path: ["customer", "name"], code: "too_small", message: "Name is required" }],
     });
@@ -157,61 +92,98 @@ describe("error core", () => {
     expect(error.kind).toBe("validation");
     expect(error.userMessage).toBe("Name is required");
     expect(error.validationIssues).toHaveLength(1);
+    expect(error.reportable).toBe(false);
   });
 
-  // validation issue の不正要素を捨てることを検証する
-  it("filters invalid validation issue entries", () => {
-    // message を持たない issue は公開しない
-    const issues = extractValidationIssues({
-      issues: [{ path: ["x"], code: "bad" }, null, { message: "Valid issue", path: [0] }],
+  // HTTP 風 object は HTTP 経路
+  it("normalizes HTTP-like objects", () => {
+    const error = normalizeError({
+      message: "Request failed",
+      status: 422,
+      code: "INVALID",
+      requestId: "req-1",
     });
 
-    expect(issues).toEqual([{ path: [0], code: undefined, message: "Valid issue" }]);
-    expect(fromValidationError(new Error("invalid")).validationIssues).toBeUndefined();
+    expect(error.kind).toBe("validation");
+    expect(error.status).toBe(422);
+    expect(error.requestId).toBe("req-1");
   });
 
-  // 既存 AppError の正規化を検証する
-  it("keeps AppError values stable and adds missing context", () => {
-    // context が未設定なら options 由来の context を補う
-    const original = createAppError({ kind: "business", message: "Rule rejected" });
-    const normalized = normalizeError(original, { operation: "approve" });
+  // HTTP-like + body.issues は HTTP 経路で処理しつつ validationIssues も併設される
+  // status / requestId / traceId が失われずに validation 情報を保持できる
+  it("normalizes HTTP-like with body.issues and keeps HTTP metadata", () => {
+    const error = normalizeError({
+      status: 422,
+      requestId: "req-1",
+      response: { body: { issues: [{ message: "Name is required" }] } },
+    });
 
-    expect(isAppError(normalized)).toBe(true);
-    expect(normalized.context?.operation).toBe("approve");
+    // status 由来で kind=validation
+    expect(error.kind).toBe("validation");
+    expect(error.status).toBe(422);
+    expect(error.requestId).toBe("req-1");
+    // body 内の issues が validationIssues に併設される
+    expect(error.validationIssues).toHaveLength(1);
+    expect(error.validationIssues?.[0]?.message).toBe("Name is required");
   });
 
-  // 既存 AppError の context を壊さないことを検証する
-  it("does not overwrite existing AppError context", () => {
-    // 既存 context が優先される
-    const original = createAppError({ kind: "business", context: { operation: "original" } });
-    const normalized = normalizeError(original, { operation: "next", requestId: "req-2" });
-
-    expect(normalized.context?.operation).toBe("original");
-    expect(normalized.requestId).toBe("req-2");
-  });
-
-  // Error instance の正規化を検証する
-  it("normalizes Error instances and honors options", () => {
-    // cause と code を持つ Error を作る
-    const error = new Error("Timed out", { cause: new Error("socket") }) as Error & { code?: string };
+  // Error instance + code: code から kind 推定
+  it("normalizes Error instances using code for classification", () => {
+    const error = new Error("Timed out") as Error & { code?: string };
     error.code = "ETIMEDOUT";
 
-    // defaultUserMessage と includeCause=false を検証する
-    const normalized = normalizeError(error, {
-      defaultUserMessage: "Please retry later.",
-      includeCause: false,
-      component: "SaveButton",
-    });
+    const normalized = normalizeError(error, { component: "SaveButton" });
 
     expect(normalized.kind).toBe("timeout");
-    expect(normalized.userMessage).toBe("Please retry later.");
-    expect(normalized.cause).toBeUndefined();
     expect(normalized.context?.component).toBe("SaveButton");
+    expect(normalized.cause).toBe(error);
   });
 
-  // 非 Error object の正規化を検証する
-  it("normalizes thrown objects without treating requestId-only objects as HTTP", () => {
-    // requestId だけの object は unknown object として扱う
+  // Error instance / includeCause=false → cause を破棄
+  it("drops cause when includeCause is false", () => {
+    const inner = new Error("inner cause");
+    const error = new Error("outer", { cause: inner });
+
+    const normalized = normalizeError(error, { includeCause: false });
+
+    expect(normalized.cause).toBeUndefined();
+  });
+
+  // Error instance / cause を明示保持
+  it("keeps Error cause when present", () => {
+    const inner = new Error("inner");
+    const error = new Error("outer", { cause: inner });
+
+    const normalized = normalizeError(error);
+
+    expect(normalized.cause).toBe(inner);
+  });
+
+  // Error instance / defaultUserMessage と defaultKind を採用
+  it("honors defaultKind and defaultUserMessage for unclassified Error instances", () => {
+    const error = new Error("opaque");
+
+    const normalized = normalizeError(error, {
+      defaultKind: "business",
+      defaultUserMessage: "Please retry later.",
+    });
+
+    expect(normalized.kind).toBe("business");
+    expect(normalized.userMessage).toBe("Please retry later.");
+  });
+
+  // Error instance / code が string 以外なら code は採用しない
+  it("ignores non-string code on Error instances", () => {
+    const error = new Error("with bad code") as Error & { code?: unknown };
+    error.code = 123;
+
+    const normalized = normalizeError(error);
+
+    expect(normalized.code).toBeUndefined();
+  });
+
+  // plain object (HTTP でも validation でもない) → unknown 系として扱う
+  it("normalizes thrown plain objects without HTTP markers", () => {
     const normalized = normalizeError({ requestId: "req-only", code: "CUSTOM_CODE" });
 
     expect(normalized.kind).toBe("unknown");
@@ -219,50 +191,68 @@ describe("error core", () => {
     expect(normalized.details).toEqual({ requestId: "req-only", code: "CUSTOM_CODE" });
   });
 
-  // primitive thrown value の正規化を検証する
-  it("normalizes primitive thrown values", () => {
-    // string は message として扱う
+  // plain object に message があれば採用
+  it("uses message from thrown record when present", () => {
+    const normalized = normalizeError({ message: "explicit", foo: 1 });
+    expect(normalized.message).toBe("explicit");
+  });
+
+  // plain object / includeCause=false → cause を破棄
+  it("drops cause for plain objects when includeCause is false", () => {
+    const normalized = normalizeError({ message: "x" }, { includeCause: false });
+    expect(normalized.cause).toBeUndefined();
+  });
+
+  // plain object / classifyErrorCode で kind を上書き
+  it("uses code-based classification for plain objects", () => {
+    const normalized = normalizeError({ code: "NETWORK_DOWN", message: "x" });
+    expect(normalized.kind).toBe("network");
+  });
+
+  // string thrown は message として採用
+  it("normalizes string thrown values", () => {
     expect(normalizeError("plain failure").message).toBe("plain failure");
-    // null は unknown thrown value として扱う
+  });
+
+  // null / undefined / number thrown は generic message
+  it("normalizes primitive thrown values to generic message", () => {
     expect(normalizeError(null, { defaultKind: "system" }).kind).toBe("system");
-    // 空 options では context を付けない
-    expect(normalizeError("plain failure").context).toBeUndefined();
+    expect(normalizeError(null).message).toBe("Unknown thrown value");
+    expect(normalizeError(42).message).toBe("Unknown thrown value");
   });
 
-  // adapter と serialize を検証する
-  it("creates log and notification adapter payloads", () => {
-    // system error を log / notification / serialized payload に変換する
-    const error = normalizeError(new Error("boom"), { defaultKind: "system", operation: "save" });
-    const log = toLogRecord(error);
-    const notification = toNotification(error);
-    const serialized = serializeError(error);
-
-    expect(log.kind).toBe("system");
-    expect(log.context?.operation).toBe("save");
-    expect(notification.level).toBe("error");
-    expect(serialized.name).toBe("AppError");
+  // primitive / includeCause=false → cause 破棄
+  it("drops cause for primitives when includeCause is false", () => {
+    expect(normalizeError("plain", { includeCause: false }).cause).toBeUndefined();
   });
 
-  // notification level の分岐を検証する
-  it("maps severity to notification levels", () => {
-    // info severity は info toast にする
-    expect(toNotification(createAppError({ kind: "business", severity: "info" })).level).toBe("info");
-    // warning severity は warning toast にする
-    expect(toNotification(createAppError({ kind: "validation" })).level).toBe("warning");
-    // validation は入力エラータイトルにする
-    expect(toNotification(createAppError({ kind: "validation" })).title).toBe("Input error");
+  // options 完全省略 → context は undefined
+  it("returns no context when no context fields were provided", () => {
+    expect(normalizeError("plain").context).toBeUndefined();
   });
 
-  // 型 guard と schema を検証する
-  it("validates guards and schemas", () => {
-    // object 判定を検証する
-    expect(isRecord({})).toBe(true);
-    expect(isRecord(null)).toBe(false);
-    // AppError 判定を検証する
-    expect(isAppError(createAppError({ kind: "unknown" }))).toBe(true);
-    expect(isAppError({ name: "AppError" })).toBe(false);
-    // schema parse を検証する
-    expect(validateAppErrorInput({ kind: "business", message: "Rejected" }).kind).toBe("business");
-    expect(() => appErrorInputSchema.parse({ kind: "bad" })).toThrow();
+  // options に tags / metadata のみ → context が組み立てられる
+  it("builds context from any single ErrorContext field", () => {
+    const normalized = normalizeError("plain", { tags: ["urgent"], metadata: { key: "v" } });
+    expect(normalized.context).toEqual({
+      operation: undefined,
+      component: undefined,
+      requestId: undefined,
+      traceId: undefined,
+      tags: ["urgent"],
+      metadata: { key: "v" },
+    });
+  });
+
+  // options を何も渡さなくても動く (default 引数経路)
+  it("works without any options argument", () => {
+    const normalized = normalizeError("plain");
+    expect(normalized.kind).toBe("unknown");
+  });
+
+  // includeCause=true 明示でも cause は保持
+  it("keeps cause when includeCause is true", () => {
+    const normalized = normalizeError("plain", { includeCause: true });
+    expect(normalized.cause).toBe("plain");
   });
 });

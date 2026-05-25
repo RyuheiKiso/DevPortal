@@ -1,9 +1,9 @@
-// vitest の設定ヘルパーを読み込む
+// vitest の設定ヘルパを取り込み
 import { defineConfig } from "vitest/config";
 
-// error react binding のテスト設定を公開する
+// error react binding のテスト設定をエクスポート
 export default defineConfig({
-  // sibling の core 実装を直接参照してローカル変更を検証する
+  // sibling の core 実装を直接参照してローカル変更を即時検証する
   resolve: {
     // package 名解決を src に差し替える
     alias: {
@@ -11,31 +11,35 @@ export default defineConfig({
       "@k1s0-ts-error/core": new URL("../core/src/index.ts", import.meta.url).pathname,
     },
   },
-  // テストランナー設定
+  // テストランナー本体に渡す設定群
   test: {
-    // TypeScript / TSX のテストを対象にする
+    // 対象は src 配下の test ファイル（.ts と .tsx 両方）
     include: ["src/**/*.test.{ts,tsx}"],
-    // カバレッジ設定
+    // React 19 の act 環境フラグと既知の boundary ノイズを抑制する setup
+    setupFiles: ["src/testSetup.ts"],
+    // カバレッジ計測の設定
     coverage: {
-      // v8 coverage を使う
+      // v8 ネイティブカバレッジ
       provider: "v8",
-      // console と HTML の両方を出す
+      // ターミナル向け text と、ローカル確認用 html を出力
       reporter: ["text", "html"],
-      // src 配下の実装を対象にする
+      // 計測対象は src 配下の TypeScript / TSX ファイル
       include: ["src/**/*.{ts,tsx}"],
-      // re-export とテストは除外する
-      exclude: ["src/**/*.test.{ts,tsx}", "src/index.ts"],
-      // 基盤パッケージとして現在の水準を維持する品質ゲートを置く
+      // 除外: テスト本体、setupFiles、re-export のみの index
+      exclude: [
+        // テストコード自身
+        "src/**/*.test.{ts,tsx}",
+        // テストランナー設定
+        "src/testSetup.ts",
+        // 純粋な re-export
+        "src/index.ts",
+      ],
+      // 閾値: いずれかが 100% を下回ったら CI で失敗させる
       thresholds: {
-        // statements の下限
-        statements: 90,
-        // branches の下限
-        branches: 80,
-        // functions の下限
-        functions: 90,
-        // lines の下限
-        lines: 95,
-        // しきい値は手動で管理する
+        statements: 100,
+        branches: 100,
+        functions: 100,
+        lines: 100,
         autoUpdate: false,
       },
     },

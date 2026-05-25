@@ -5,6 +5,7 @@
   "license": "UNLICENSED",
   "private": false,
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
   "react-native": "./dist/esm/index.js",
@@ -48,11 +49,11 @@
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
-    "@types/react-test-renderer": "^19.1.0",
+    "@types/react-test-renderer": "^19.0.0",
     "@vitest/coverage-v8": "^4.1.7",
     "react": "^19.2.0",
-    "react-test-renderer": "^19.2.0",
     "react-native": "^0.84.0",
+    "react-test-renderer": "^19.2.0",
     "typescript": "~5.8.3",
     "vitest": "^4.1.7"
   },
