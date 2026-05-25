@@ -1,0 +1,15 @@
+# Backstage Software Catalog - Component: @k1s0-ts-error/core
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: k1s0-ts-error-core
+  description: "DevPortal shared application error normalization, classification, serialization, and UI/log adapter utilities."
+  tags:
+    - typescript
+    - library
+    - error
+spec:
+  type: library
+  lifecycle: production
+  owner: k1s0-framework-team
+  system: k1s0-ts-error

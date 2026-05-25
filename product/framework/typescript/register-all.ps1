@@ -1,12 +1,12 @@
 ﻿<#
 .SYNOPSIS
-    product/framework/typescript 配下の 17 個の catalog-info.yaml を社内 Backstage に一括登録する。
+    product/framework/typescript 配下の 25 個の catalog-info.yaml を社内 Backstage に一括登録する。
 
 .DESCRIPTION
     setup ツールで導入された Backstage (http://localhost:7007) の Catalog REST API
     (POST /api/catalog/locations) を使って、framework/typescript 配下の Location ファイル
-    群 (owners.yaml + 4 System + 12 Component) を登録する。
-    依存解決の都合で Round 1 (Group/Domain + 4 System) → Round 2 (12 Component) の
+    群 (owners.yaml + 6 System + 18 Component) を登録する。
+    依存解決の都合で Round 1 (Group/Domain + 6 System) → Round 2 (18 Component) の
     順に投入し、ラウンド内では並列実行する。既存 location との重複は SKIP する。
 
 .PARAMETER Method
@@ -28,7 +28,7 @@
     ConfigFile モードでサービス再起動をスキップする (手動で再起動したい場合用)。
 
 .PARAMETER CatalogRoot
-    17 ファイル探索のルート (既定: スクリプト自身のあるディレクトリ = framework/typescript)。
+    25 ファイル探索のルート (既定: スクリプト自身のあるディレクトリ = framework/typescript)。
 
 .PARAMETER LocationType
     Backstage の location type (file または url、既定: file)。
@@ -114,18 +114,26 @@ if ([string]::IsNullOrWhiteSpace($AppConfig)) {
 # ログファイルパスをスクリプトスコープで Write-Log から参照できるよう保持する
 $script:LogFilePath = if ([string]::IsNullOrWhiteSpace($LogFile)) { $null } else { [System.IO.Path]::GetFullPath($LogFile) }
 
-# 登録対象 location 一覧 (Round 1 = owners + 4 System、Round 2 = 12 Component)
+# 登録対象 location 一覧 (Round 1 = owners + 6 System、Round 2 = 18 Component)
 $Locations = @(
     # Round 1: 依存先となる Group / Domain / System を先に投入する
     [pscustomobject]@{ Name = "owners";                       RelPath = "owners.yaml";                          Round = 1 }
+    [pscustomobject]@{ Name = "system:k1s0-ts-auth";          RelPath = "library\auth\catalog-info.yaml";               Round = 1 }
     [pscustomobject]@{ Name = "system:k1s0-ts-config";        RelPath = "library\config\catalog-info.yaml";             Round = 1 }
+    [pscustomobject]@{ Name = "system:k1s0-ts-error";         RelPath = "library\error\catalog-info.yaml";              Round = 1 }
     [pscustomobject]@{ Name = "system:k1s0-ts-http";          RelPath = "library\http\catalog-info.yaml";               Round = 1 }
     [pscustomobject]@{ Name = "system:k1s0-ts-logger";        RelPath = "library\logger\catalog-info.yaml";             Round = 1 }
     [pscustomobject]@{ Name = "system:k1s0-ts-notification";  RelPath = "library\notification\catalog-info.yaml";       Round = 1 }
     # Round 2: Component (Group/System 解決後に投入)
+    [pscustomobject]@{ Name = "component:k1s0-ts-auth-core";                RelPath = "library\auth\core\catalog-info.yaml";                Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-auth-react";               RelPath = "library\auth\react\catalog-info.yaml";               Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-auth-react-native";        RelPath = "library\auth\react-native\catalog-info.yaml";        Round = 2 }
     [pscustomobject]@{ Name = "component:k1s0-ts-config-core";              RelPath = "library\config\core\catalog-info.yaml";              Round = 2 }
     [pscustomobject]@{ Name = "component:k1s0-ts-config-react";             RelPath = "library\config\react\catalog-info.yaml";             Round = 2 }
     [pscustomobject]@{ Name = "component:k1s0-ts-config-react-native";      RelPath = "library\config\react-native\catalog-info.yaml";      Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-error-core";               RelPath = "library\error\core\catalog-info.yaml";               Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-error-react";              RelPath = "library\error\react\catalog-info.yaml";              Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-error-react-native";       RelPath = "library\error\react-native\catalog-info.yaml";       Round = 2 }
     [pscustomobject]@{ Name = "component:k1s0-ts-http-core";                RelPath = "library\http\core\catalog-info.yaml";                Round = 2 }
     [pscustomobject]@{ Name = "component:k1s0-ts-http-react";               RelPath = "library\http\react\catalog-info.yaml";               Round = 2 }
     [pscustomobject]@{ Name = "component:k1s0-ts-http-react-native";        RelPath = "library\http\react-native\catalog-info.yaml";        Round = 2 }
@@ -282,7 +290,7 @@ function Wait-BackstageReady {
 function Wait-EntitiesIngested {
     param(
         [string]$BearerToken,
-        [int]$ExpectedCount = 18,
+        [int]$ExpectedCount = 22,
         [int]$MaxSeconds = 60
     )
     Write-Log Info "k1s0-* エンティティの取り込み完了を待機中 (期待値 $ExpectedCount 件、最大 $MaxSeconds 秒)..."
@@ -339,7 +347,7 @@ function Invoke-ConfigFileMode {
     Write-Log Ok "バックアップ作成: $backupPath"
 
     # 3. YAML マージ (python ヘルパー呼び出し)
-    Write-Log Info "register-locations.py で 17 件を catalog.locations にマージ中..."
+    Write-Log Info "register-locations.py で 25 件を catalog.locations にマージ中..."
     $relPaths = $Locations | ForEach-Object { $_.RelPath -replace '\\','/' }
     $mergeResult = Invoke-LocationMerge -AppConfigPath $AppConfig -CatalogRootPath $CatalogRoot -RelPaths $relPaths
     Write-Log Ok ("マージ結果: added={0} skipped={1} rules_added=[{2}] total_locations_after={3}" -f `
@@ -362,7 +370,7 @@ function Invoke-ConfigFileMode {
         if (-not $token) {
             Write-Log Fail "guest トークン取得失敗。検証スキップ (catalog UI で手動確認してください)"
         } else {
-            $ingested = Wait-EntitiesIngested -BearerToken $token -ExpectedCount 18 -MaxSeconds 90
+            $ingested = Wait-EntitiesIngested -BearerToken $token -ExpectedCount 22 -MaxSeconds 90
             if ($ingested.Count -gt 0) {
                 # kind 別件数を表示
                 $byKind = $ingested | Group-Object kind | Sort-Object Name

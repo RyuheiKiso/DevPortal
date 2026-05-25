@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     setup GUI で導入された Verdaccio (http://localhost:4873, htpasswd 認証) に対して、
-    config / logger / http / notification 配下の core → react / react-native の順で
+    auth / config / error / logger / http / notification 配下の core → react / react-native の順で
     依存関係を壊さないように publish を実施する。
     同一バージョンが既に存在する場合はスキップし、ラウンド内では並列実行する。
 
@@ -58,13 +58,19 @@ $script:LogFilePath = if ([string]::IsNullOrWhiteSpace($LogFile)) { $null } else
 # publish 対象パッケージ一覧 (Round 1 が core 群、Round 2 が react / react-native 群)
 $Packages = @(
     # core パッケージ群 (react / react-native の依存元なので必ず先行 publish)
+    [pscustomobject]@{ Name = "@k1s0-ts-auth/core";         Path = "library\auth\core";                Round = 1 }
     [pscustomobject]@{ Name = "@k1s0-ts-config/core";       Path = "library\config\core";              Round = 1 }
+    [pscustomobject]@{ Name = "@k1s0-ts-error/core";        Path = "library\error\core";               Round = 1 }
     [pscustomobject]@{ Name = "@k1s0-ts-logger/core";       Path = "library\logger\core";              Round = 1 }
     [pscustomobject]@{ Name = "@k1s0-ts-http/core";         Path = "library\http\core";                Round = 1 }
     [pscustomobject]@{ Name = "@k1s0-ts-notification/core"; Path = "library\notification\core";        Round = 1 }
     # react / react-native パッケージ群 (core を file:../core で参照しているため後発で publish)
+    [pscustomobject]@{ Name = "@k1s0-ts-auth/react";                Path = "library\auth\react";               Round = 2 }
+    [pscustomobject]@{ Name = "@k1s0-ts-auth/react-native";         Path = "library\auth\react-native";        Round = 2 }
     [pscustomobject]@{ Name = "@k1s0-ts-config/react";              Path = "library\config\react";             Round = 2 }
     [pscustomobject]@{ Name = "@k1s0-ts-config/react-native";       Path = "library\config\react-native";      Round = 2 }
+    [pscustomobject]@{ Name = "@k1s0-ts-error/react";               Path = "library\error\react";              Round = 2 }
+    [pscustomobject]@{ Name = "@k1s0-ts-error/react-native";        Path = "library\error\react-native";       Round = 2 }
     [pscustomobject]@{ Name = "@k1s0-ts-logger/react";              Path = "library\logger\react";             Round = 2 }
     [pscustomobject]@{ Name = "@k1s0-ts-logger/react-native";       Path = "library\logger\react-native";      Round = 2 }
     [pscustomobject]@{ Name = "@k1s0-ts-http/react";                Path = "library\http\react";               Round = 2 }

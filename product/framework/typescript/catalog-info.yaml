@@ -1,6 +1,6 @@
 # Backstage Software Catalog - framework/typescript ルート Location
 # このファイル 1 つを Backstage に登録すると、targets に列挙した
-# 17 ファイル (Group+Domain / 4 System / 12 Component) が一括で取り込まれる
+# 25 ファイル (Group+Domain / 6 System / 18 Component) が一括で取り込まれる
 
 # Backstage Catalog のスキーマバージョン
 apiVersion: backstage.io/v1alpha1
@@ -11,7 +11,7 @@ metadata:
   # Location 自身の一意な名前
   name: k1s0-ts-framework
   # UI 表示用の説明文
-  description: framework/typescript 配下の 17 個のカタログファイルを一括登録するエントリポイント
+  description: framework/typescript 配下の 25 個のカタログファイルを一括登録するエントリポイント
 # Location 固有の仕様
 spec:
   # 参照先タイプ (相対パスでも url 指定で動作)
@@ -20,11 +20,21 @@ spec:
   targets:
     # 所有者 (Group + Domain)
     - ./owners.yaml
+    # auth ドメイン: System + Component 3 種 (library/ サブフォルダ配下)
+    - ./library/auth/catalog-info.yaml
+    - ./library/auth/core/catalog-info.yaml
+    - ./library/auth/react/catalog-info.yaml
+    - ./library/auth/react-native/catalog-info.yaml
     # config ドメイン: System + Component 3 種 (library/ サブフォルダ配下)
     - ./library/config/catalog-info.yaml
     - ./library/config/core/catalog-info.yaml
     - ./library/config/react/catalog-info.yaml
     - ./library/config/react-native/catalog-info.yaml
+    # error ドメイン: System + Component 3 種 (library/ サブフォルダ配下)
+    - ./library/error/catalog-info.yaml
+    - ./library/error/core/catalog-info.yaml
+    - ./library/error/react/catalog-info.yaml
+    - ./library/error/react-native/catalog-info.yaml
     # http ドメイン: System + Component 3 種 (library/ サブフォルダ配下)
     - ./library/http/catalog-info.yaml
     - ./library/http/core/catalog-info.yaml

@@ -1,0 +1,18 @@
+# Backstage Software Catalog - Component: @k1s0-ts-error/react
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: k1s0-ts-error-react
+  description: "DevPortal React bindings for normalized application errors, error handling hooks, and ErrorBoundary."
+  tags:
+    - typescript
+    - library
+    - error
+    - react
+spec:
+  type: library
+  lifecycle: production
+  owner: k1s0-framework-team
+  system: k1s0-ts-error
+  dependsOn:
+    - component:k1s0-ts-error-core
