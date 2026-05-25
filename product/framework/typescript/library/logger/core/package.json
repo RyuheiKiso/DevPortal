@@ -1,0 +1,43 @@
+{
+  "name": "@k1s0-ts-logger/core",
+  "version": "0.1.0",
+  "description": "DevPortal 共通の構造化ロガー（コア機能：ログレベル・フィルタ・バッチ・複数トランスポート・zod validation）",
+  "license": "UNLICENSED",
+  "private": false,
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "prepublishOnly": "npm run clean && npm run build && npm run test:coverage"
+  },
+  "dependencies": {
+    "@k1s0-ts-storage/core": "file:../../storage/core",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^2.1.0",
+    "typescript": "~5.8.3",
+    "vitest": "^2.1.0"
+  },
+  "publishConfig": {
+    "access": "restricted"
+  }
+}

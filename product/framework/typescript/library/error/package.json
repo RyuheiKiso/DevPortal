@@ -1,0 +1,12 @@
+{
+  "name": "@k1s0-ts-error/workspace",
+  "private": true,
+  "scripts": {
+    "clean": "npm --prefix core run clean && npm --prefix react run clean && npm --prefix react-native run clean",
+    "build": "npm --prefix core run build && npm --prefix react run build && npm --prefix react-native run build",
+    "typecheck": "npm --prefix core run typecheck && npm --prefix react run typecheck && npm --prefix react-native run typecheck",
+    "test": "npm --prefix core test && npm --prefix react test && npm --prefix react-native test",
+    "test:coverage": "npm --prefix core run test:coverage && npm --prefix react run test:coverage && npm --prefix react-native run test:coverage",
+    "verify": "npm run typecheck && npm run build && npm run test:coverage"
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "name": "@k1s0-ts-config/react-native",
+  "version": "0.1.0",
+  "description": "DevPortal 設定管理ライブラリの React Native 連携（Provider・hooks・Platform 別マージ）",
+  "license": "UNLICENSED",
+  "private": false,
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "react-native": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/esm/index.d.ts",
+      "react-native": "./dist/esm/index.js",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json',JSON.stringify({type:'commonjs'},null,2)+'\\n')\"",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "prepublishOnly": "npm run clean && npm run build && npm test && node -e \"const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.dependencies['@k1s0-ts-config/core']=p.version;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\\n');\"",
+    "postpublish": "node -e \"const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.dependencies['@k1s0-ts-config/core']='file:../core';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\\n');\""
+  },
+  "dependencies": {
+    "@k1s0-ts-config/core": "file:../core"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-native": ">=0.73.0",
+    "@types/react": "*"
+  },
+  "peerDependenciesMeta": {
+    "@types/react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-test-renderer": "^19.0.0",
+    "@vitest/coverage-v8": "^4.1.7",
+    "react": "^19.2.0",
+    "react-native": "^0.84.0",
+    "react-test-renderer": "^19.2.0",
+    "typescript": "~5.8.3",
+    "vitest": "^4.1.7"
+  },
+  "publishConfig": {
+    "access": "restricted"
+  }
+}

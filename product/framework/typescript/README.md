@@ -6,24 +6,30 @@ DevPortal の TypeScript 共通基盤ライブラリ群を格納するディレ�
 
 | ディレクトリ | パッケージ名 | 用途 |
 |---|---|---|
-| `config/core` | `@k1s0-ts-config/core` | 設定管理コア (環境変数 / JSON / バリデーション) |
-| `config/react` | `@k1s0-ts-config/react` | React 向け設定 Provider / Hook |
-| `config/react-native` | `@k1s0-ts-config/react-native` | React Native 向け設定 Provider / Hook |
-| `logger/core` | `@k1s0-ts-logger/core` | ロガーコア (level / transport / 構造化ログ) |
-| `logger/react` | `@k1s0-ts-logger/react` | React 向けロガー Provider / Hook |
-| `logger/react-native` | `@k1s0-ts-logger/react-native` | React Native 向けロガー Provider / Hook |
-| `http/core` | `@k1s0-ts-http/core` | HTTP クライアントコア (REST / gRPC-web / retry / requestId) |
-| `http/react` | `@k1s0-ts-http/react` | React 向け HTTP Hooks (Query / Mutation) |
-| `http/react-native` | `@k1s0-ts-http/react-native` | React Native 向け HTTP Hooks (NetInfo 連携) |
-| `notification/core` | `@k1s0-ts-notification/core` | 通知コア (headless / toast / dialog / confirm / HttpError 連携) |
-| `notification/react` | `@k1s0-ts-notification/react` | React 向け通知 Provider / Hook |
-| `notification/react-native` | `@k1s0-ts-notification/react-native` | React Native 向け通知 Provider / Hook |
+| `library/auth/core` | `@k1s0-ts-auth/core` | 認証・認可コア (session / role / permission / token store / HTTP auth headers) |
+| `library/auth/react` | `@k1s0-ts-auth/react` | React 向け認証 Provider / Hook / 表示ガード |
+| `library/auth/react-native` | `@k1s0-ts-auth/react-native` | React Native 向け認証 Provider / Hook / native token store |
+| `library/config/core` | `@k1s0-ts-config/core` | 設定管理コア (環境変数 / JSON / バリデーション) |
+| `library/config/react` | `@k1s0-ts-config/react` | React 向け設定 Provider / Hook |
+| `library/config/react-native` | `@k1s0-ts-config/react-native` | React Native 向け設定 Provider / Hook |
+| `library/logger/core` | `@k1s0-ts-logger/core` | ロガーコア (level / transport / 構造化ログ) |
+| `library/logger/react` | `@k1s0-ts-logger/react` | React 向けロガー Provider / Hook |
+| `library/logger/react-native` | `@k1s0-ts-logger/react-native` | React Native 向けロガー Provider / Hook |
+| `library/http/core` | `@k1s0-ts-http/core` | HTTP クライアントコア (REST / gRPC-web / retry / requestId) |
+| `library/http/react` | `@k1s0-ts-http/react` | React 向け HTTP Hooks (Query / Mutation) |
+| `library/http/react-native` | `@k1s0-ts-http/react-native` | React Native 向け HTTP Hooks (NetInfo 連携) |
+| `library/notification/core` | `@k1s0-ts-notification/core` | 通知コア (headless / toast / dialog / confirm / HttpError 連携) |
+| `library/notification/react` | `@k1s0-ts-notification/react` | React 向け通知 Provider / Hook |
+| `library/notification/react-native` | `@k1s0-ts-notification/react-native` | React Native 向け通知 Provider / Hook |
+| `library/storage/core` | `@k1s0-ts-storage/core` | KV ストレージコア (合成可能ミドルウェア / TypedSlot / 機密度別 Registry / 暗号化) |
+| `library/storage/react` | `@k1s0-ts-storage/react` | React 向け Storage Provider / Hook / アダプタ (localStorage / sessionStorage / IndexedDB / cookie) / cross-tab 同期 |
+| `library/storage/react-native` | `@k1s0-ts-storage/react-native` | React Native 向け Storage Provider / Hook / アダプタ (AsyncStorage / SecureStore / Keychain / MMKV) |
 
 依存関係は `react` / `react-native` が同グループの `core` を参照する形です (`file:../core` 開発参照 → publish 時に `^<version>` に自動書き換え)。
 
 ## publish スクリプト
 
-このディレクトリには 12 パッケージを Verdaccio へ一括 publish するためのスクリプトを同梱しています。
+このディレクトリには 18 パッケージを Verdaccio へ一括 publish するためのスクリプトを同梱しています。
 
 | ファイル | 役割 |
 |---|---|
@@ -169,6 +175,7 @@ publish 済みパッケージを別アプリから利用するには、利用側
 
 ```ini
 @k1s0-ts-config:registry=http://localhost:4873/
+@k1s0-ts-auth:registry=http://localhost:4873/
 @k1s0-ts-logger:registry=http://localhost:4873/
 @k1s0-ts-http:registry=http://localhost:4873/
 @k1s0-ts-notification:registry=http://localhost:4873/
@@ -181,10 +188,11 @@ publish 済みパッケージを別アプリから利用するには、利用側
 
 API リファレンスや使用例は各パッケージ配下の README を参照してください。
 
-- [config/core/README.md](config/core/README.md)
-- [logger/core/README.md](logger/core/README.md)
-- [http/core/README.md](http/core/README.md)
-- [notification/core/README.md](notification/core/README.md)
+- [config/core/README.md](library/config/core/README.md)
+- [auth/core/README.md](library/auth/core/README.md)
+- [logger/core/README.md](library/logger/core/README.md)
+- [http/core/README.md](library/http/core/README.md)
+- [notification/core/README.md](library/notification/core/README.md)
 
 `react` / `react-native` 版の README もそれぞれのディレクトリ直下にあります。
 
@@ -192,20 +200,20 @@ API リファレンスや使用例は各パッケージ配下の README を参�
 
 このディレクトリ配下のパッケージ群は、社内 Backstage (DevPortal の setup ツールでインストール、`http://localhost:7007`) の Software Catalog に登録できる状態にしてあります。登録すると依存関係グラフや所有者一覧が Backstage UI 上で可視化されます。
 
-### 登録される 18 エンティティの構成
+### 登録される 26 エンティティの構成
 
 | ファイル | 種別 | 名前 | 役割 |
 |---|---|---|---|
-| `catalog-info.yaml` | Location | `k1s0-ts-framework` | 配下 17 ファイルの一括取り込みエントリポイント |
+| `catalog-info.yaml` | Location | `k1s0-ts-framework` | 配下 25 ファイルの一括取り込みエントリポイント |
 | `owners.yaml` | Group + Domain | `k1s0-framework-team` / `k1s0-framework` | 所有チームとフレームワーク領域 |
-| `<domain>/catalog-info.yaml` | System | `k1s0-ts-<domain>` | 4 ドメイン (config / http / logger / notification) |
-| `<domain>/<platform>/catalog-info.yaml` | Component | `k1s0-ts-<domain>-<platform>` | 12 パッケージ (core / react / react-native) |
+| `<domain>/catalog-info.yaml` | System | `k1s0-ts-<domain>` | 7 ドメイン (auth / config / error / http / logger / notification / storage) |
+| `<domain>/<platform>/catalog-info.yaml` | Component | `k1s0-ts-<domain>-<platform>` | 21 パッケージ (core / react / react-native) |
 
 `react` / `react-native` 版 Component は `spec.dependsOn` で同ドメインの `core` を参照しているため、Backstage UI の「Dependency Graph」タブで `core → react / react-native` の矢印が表示されます。
 
 ### 登録手順 (推奨: バッチ一発 + 管理者権限)
 
-`publish-all.bat` と同じ要領で、`register-all.bat` 一発で 17 ファイルを Backstage の `app-config.yaml` に追記し、サービスを自動再起動して取り込みまで完了させます。
+`publish-all.bat` と同じ要領で、`register-all.bat` 一発で 21 ファイルを Backstage の `app-config.yaml` に追記し、サービスを自動再起動して取り込みまで完了させます。
 
 ```cmd
 cd C:\work\github\DevPortal\product\framework\typescript
@@ -217,12 +225,12 @@ register-all.bat
 
 1. **前提確認**: 管理者権限、`app-config.yaml` 存在、Python + PyYAML の利用可否
 2. **バックアップ**: `app-config.yaml.bak.YYYYMMDD-HHMMSS` にコピー
-3. **YAML マージ** (`register-locations.py`): `catalog.locations` に 17 件の `type: file` エントリ追記、`catalog.rules[0].allow` に `Group` / `Domain` 追加 (重複は SKIP)
+3. **YAML マージ** (`register-locations.py`): `catalog.locations` に 25 件の `type: file` エントリ追記、`catalog.rules[0].allow` に `Group` / `Domain` 追加 (重複は SKIP)
 4. **サービス再起動**: `Restart-Service DevPortal-Backstage`
 5. **起動待ち**: `/api/auth/guest/refresh` の 200 を最大 120 秒ポーリング
-6. **取り込み確認**: guest トークンで `/api/catalog/entities` を取得し、`k1s0-*` 18 件 (Group 1 / Domain 1 / System 4 / Component 12) が見えるまで最大 90 秒ポーリング
+6. **取り込み確認**: guest トークンで `/api/catalog/entities` を取得し、`k1s0-*` 26 件 (Group 1 / Domain 1 / System 7 / Component 17) が見えるまで最大 90 秒ポーリング
 
-実測値: 初回 約 36 秒、再実行時は added=0 / skipped=17 で idempotent。終了コードは ConfigFile モードでは 0 (成功) のみ、例外発生時 1。
+実測値: 初回 約 36 秒、再実行時は added=0 / skipped=21 で idempotent。終了コードは ConfigFile モードでは 0 (成功) のみ、例外発生時 1。
 
 > **管理者権限について**: `app-config.yaml` (`%ProgramData%\DevPortal\backstage\app\`) の上書きと `Restart-Service` に必要です。`Start-Process powershell -Verb RunAs` で UAC 経由実行も可能。
 
@@ -273,10 +281,10 @@ register-all.bat -BackstageUrl http://192.168.0.10:7007 ^
 
 | 項目 | publish-all | register-all |
 |---|---|---|
-| 対象 | 12 npm パッケージ | 17 catalog-info.yaml |
+| 対象 | 18 npm パッケージ | 25 catalog-info.yaml |
 | 送信先 | Verdaccio (`/-/ping`, npm publish) | Backstage (`/api/catalog/health`, `POST /locations`) |
 | 認証 | htpasswd Basic auth (`_auth=Base64`) | optional Bearer (permission 有効時のみ) |
-| Round 構造 | Round 1 = core 4 / Round 2 = react・react-native 8 | Round 1 = owners + 4 System / Round 2 = 12 Component |
+| Round 構造 | Round 1 = core 7 / Round 2 = react・react-native 14 | Round 1 = owners + 7 System / Round 2 = 21 Component |
 | 重複検出 | `npm view <name>@<ver>` で SKIP | 既存 locations の target 一致で SKIP / 409 を SKIP 扱い |
 
 ### 失敗時のトラブルシュート
