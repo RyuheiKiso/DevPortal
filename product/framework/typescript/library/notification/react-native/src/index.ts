@@ -31,4 +31,4 @@ export type {
 
 // React Native ErrorUtils 統合を公開
 export { installGlobalErrorNotifier } from "./globalErrorNotifier.js";
-export type { GlobalErrorNotifierOptions } from "./globalErrorNotifier.js";
+export type { GlobalErrorNotifierOptions, Logger } from "./globalErrorNotifier.js";
