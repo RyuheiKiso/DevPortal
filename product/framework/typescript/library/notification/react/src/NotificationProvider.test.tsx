@@ -93,4 +93,196 @@ describe("NotificationProvider", () => {
       });
     }).toThrow(/useNotification must be called inside/);
   });
+
+  // finding 12: 外部 manager が後付け（undefined → defined）された遷移で internal manager が dispose される
+  it("disposes the internal manager when an external manager is supplied later", () => {
+    // 初回マウントで internal を作る（manager prop 未指定）
+    let internalCaptured: NotificationManager | null = null;
+    let renderer: ReactTestRenderer | undefined;
+
+    act(() => {
+      renderer = create(
+        <NotificationProvider config={{ defaultDuration: 100 }}>
+          <ManagerProbe onReady={(m) => (internalCaptured = m)} />
+        </NotificationProvider>,
+      );
+    });
+    // internal が確保できている前提
+    expect(internalCaptured).not.toBeNull();
+    // 内部 manager の dispose を spy
+    const disposeSpy = vi.spyOn(internalCaptured!, "dispose");
+    // 外部 manager を準備
+    const external = createNotificationManager();
+
+    // external を後付けで渡す
+    act(() => {
+      renderer!.update(
+        <NotificationProvider manager={external}>
+          <ManagerProbe onReady={() => undefined} />
+        </NotificationProvider>,
+      );
+    });
+
+    // internal の dispose が呼ばれている
+    expect(disposeSpy).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      renderer?.unmount();
+    });
+  });
+
+  // config プロップの primitive 値が初回と異なるレンダリングでは dev 時に 1 回だけ console.warn が呼ばれる
+  // 同値の inline literal（参照は別、値は同じ）では警告を出さない
+  it("warns once in dev when the config prop values change after mount", () => {
+    // NODE_ENV を一時的に development 相当に切り替え
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "development";
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let renderer: ReactTestRenderer | undefined;
+
+    try {
+      act(() => {
+        renderer = create(
+          <NotificationProvider config={{ defaultDuration: 100 }}>
+            <ManagerProbe onReady={() => undefined} />
+          </NotificationProvider>,
+        );
+      });
+      // 同じ値の config（参照は別の inline literal）で再 render → 警告は出ない
+      act(() => {
+        renderer!.update(
+          <NotificationProvider config={{ defaultDuration: 100 }}>
+            <ManagerProbe onReady={() => undefined} />
+          </NotificationProvider>,
+        );
+      });
+      expect(warnSpy).not.toHaveBeenCalled();
+      // primitive 値を変えると 1 回だけ警告
+      act(() => {
+        renderer!.update(
+          <NotificationProvider config={{ defaultDuration: 200 }}>
+            <ManagerProbe onReady={() => undefined} />
+          </NotificationProvider>,
+        );
+      });
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const [message] = warnSpy.mock.calls[0] ?? [];
+      expect(message).toContain("config プロップは初回マウント時のみ評価されます");
+      // さらに値を変えても警告は増えない（1 回限り）
+      act(() => {
+        renderer!.update(
+          <NotificationProvider config={{ defaultDuration: 300 }}>
+            <ManagerProbe onReady={() => undefined} />
+          </NotificationProvider>,
+        );
+      });
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      act(() => {
+        renderer?.unmount();
+      });
+      warnSpy.mockRestore();
+      process.env.NODE_ENV = originalEnv;
+    }
+  });
+
+  // 同値 inline literal の連続更新では警告が出ない（README 例の idiomatic 用法を保護）
+  it("does not warn when config is a fresh literal but primitive values are equal", () => {
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "development";
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let renderer: ReactTestRenderer | undefined;
+
+    try {
+      // 毎回 inline literal を渡しても primitive 値が等しければ警告は出ない
+      act(() => {
+        renderer = create(
+          <NotificationProvider config={{ defaultDuration: 100, maxQueueSize: 50 }}>
+            <ManagerProbe onReady={() => undefined} />
+          </NotificationProvider>,
+        );
+      });
+      for (let i = 0; i < 3; i++) {
+        act(() => {
+          renderer!.update(
+            <NotificationProvider config={{ defaultDuration: 100, maxQueueSize: 50 }}>
+              <ManagerProbe onReady={() => undefined} />
+            </NotificationProvider>,
+          );
+        });
+      }
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      act(() => {
+        renderer?.unmount();
+      });
+      warnSpy.mockRestore();
+      process.env.NODE_ENV = originalEnv;
+    }
+  });
+
+  // production モードでは config 参照が変わっても警告を出さない
+  it("does not warn when NODE_ENV is production", () => {
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let renderer: ReactTestRenderer | undefined;
+
+    try {
+      act(() => {
+        renderer = create(
+          <NotificationProvider config={{ defaultDuration: 100 }}>
+            <ManagerProbe onReady={() => undefined} />
+          </NotificationProvider>,
+        );
+      });
+      act(() => {
+        renderer!.update(
+          <NotificationProvider config={{ defaultDuration: 200 }}>
+            <ManagerProbe onReady={() => undefined} />
+          </NotificationProvider>,
+        );
+      });
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      act(() => {
+        renderer?.unmount();
+      });
+      warnSpy.mockRestore();
+      process.env.NODE_ENV = originalEnv;
+    }
+  });
+
+  // 外部 manager が指定されている場合は config 警告ロジックの対象外（警告なし）
+  it("does not warn when an external manager is supplied", () => {
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "development";
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const external = createNotificationManager();
+    let renderer: ReactTestRenderer | undefined;
+
+    try {
+      act(() => {
+        renderer = create(
+          <NotificationProvider manager={external}>
+            <ManagerProbe onReady={() => undefined} />
+          </NotificationProvider>,
+        );
+      });
+      act(() => {
+        renderer!.update(
+          <NotificationProvider manager={external}>
+            <ManagerProbe onReady={() => undefined} />
+          </NotificationProvider>,
+        );
+      });
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      act(() => {
+        renderer?.unmount();
+      });
+      warnSpy.mockRestore();
+      process.env.NODE_ENV = originalEnv;
+    }
+  });
 });

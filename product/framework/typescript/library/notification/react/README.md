@@ -37,6 +37,12 @@ You can also pass an existing manager:
 
 If `manager` is later removed, the provider creates an internal manager instead of exposing a null context value.
 
+> **Note:** `config` is evaluated only on the initial mount. Changing the `config` prop on subsequent renders does **not** recreate the internal manager. To apply a different configuration, either remount the `NotificationProvider` (e.g. via `key`) or pass an externally constructed `manager` prop.
+>
+> In development a one-time `console.warn` is emitted when the **primitive values** of `config` change after mount (passing a fresh inline literal with the same values is fine and does **not** trigger the warning). Function fields (`now` / `idFactory` / `timer`) are compared by reference. The development check uses `process.env.NODE_ENV === "development"` or React Native's `__DEV__ === true`; if your bundler does not expose `process.env.NODE_ENV` at runtime (for example when the bundler statically replaces it but does not polyfill `process`), the runtime value may be `undefined`, in which case the warning is suppressed (we err on the side of silence to avoid noise in production).
+>
+> If the `manager` prop transitions from `undefined` to a defined manager after mount, the previously created internal manager is automatically disposed.
+
 ## Hooks
 
 ```tsx
