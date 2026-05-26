@@ -1,0 +1,13 @@
+{
+  "name": "@k1s0-ts-outbox/workspace",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Workspace root for @k1s0-ts-outbox/* packages (core / react / react-native).",
+  "scripts": {
+    "typecheck": "npm run typecheck --prefix core && npm run typecheck --prefix react && npm run typecheck --prefix react-native",
+    "build": "npm run build --prefix core && npm run build --prefix react && npm run build --prefix react-native",
+    "test": "npm test --prefix core && npm test --prefix react && npm test --prefix react-native",
+    "test:coverage": "npm run test:coverage --prefix core && npm run test:coverage --prefix react && npm run test:coverage --prefix react-native",
+    "verify": "npm run typecheck && npm run build && npm run test:coverage"
+  }
+}
