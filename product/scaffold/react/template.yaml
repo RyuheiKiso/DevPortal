@@ -48,17 +48,25 @@ spec:
           title: 説明 (任意)
           type: string
           description: 新規プロジェクトの簡単な説明
+          # 未入力時のデフォルト
+          default: "React 19 + TypeScript + Vite SPA"
   # 生成時に走らせるアクション (上から順に実行)
   steps:
-    # 雛形ファイル群を取得 (template.yaml と同じディレクトリ配下を一括コピー)
+    # skeleton 配下を取得し Nunjucks プレースホルダを展開する
     - id: fetch
       name: スターターファイルを取得
-      action: fetch:plain
+      action: fetch:template
       input:
-        # template.yaml の位置からの相対パス (./ で自ディレクトリ配下全部)
-        url: ./
+        # template.yaml の位置からの相対パス (../skeleton/react を fetch:template の対象とする)
+        url: ../skeleton/react
         # 出力先 (Backstage Scaffolder のワークスペース直下)
         targetPath: ./
+        # Nunjucks 展開時に参照される変数 (skeleton 内で ${{ values.x }} として読まれる)
+        values:
+          # プロジェクト名 (package.json の name / index.html の title 等で展開される)
+          name: ${{ parameters.name }}
+          # 説明文 (README に展開される)
+          description: ${{ parameters.description }}
   # 生成後に UI に表示する案内
   output:
     text:
@@ -68,8 +76,7 @@ spec:
 
           ## 次の手順
 
-          1. node_modules / dist / .vite キャッシュ等は scaffold dir からコピーされている場合があります。不要なものは削除してください。
-          2. `npm install` を実行して依存を解決
-          3. `npm run dev` で開発サーバ起動
+          1. `npm install` を実行して依存を解決
+          2. `npm run dev` で開発サーバ起動
 
           詳細は同梱の README.md を参照してください。

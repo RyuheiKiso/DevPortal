@@ -32,9 +32,10 @@ spec:
       # 入力必須項目の列挙
       required:
         - name
+        - packageName
       # フィールド定義
       properties:
-        # プロジェクト名 (必須)
+        # プロジェクト名 (必須、kebab-case)
         name:
           title: プロジェクト名
           type: string
@@ -48,17 +49,39 @@ spec:
           title: 説明 (任意)
           type: string
           description: 新規プロジェクトの簡単な説明
+          # 未入力時のデフォルト
+          default: "React Native 0.84 + Windows ネイティブアプリ"
+        # Android/iOS のパッケージ名 (reverse-DNS、必須)
+        packageName:
+          title: パッケージ名 (reverse-DNS)
+          type: string
+          description: "Android applicationId / iOS Bundle ID として利用 (例: com.example.myapp)"
+          # reverse-DNS の最小妥当性チェック (lower snake + dot 区切り 2 セグメント以上)
+          pattern: '^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$'
+          # 既定値はプロジェクト名から推定 (Nunjucks フィルタで '-' を '_' に変換)
+          default: "com.example.example"
   # 生成時に走らせるアクション (上から順に実行)
   steps:
-    # 雛形ファイル群を取得 (template.yaml と同じディレクトリ配下を一括コピー)
+    # skeleton 配下を取得し Nunjucks プレースホルダを展開する
     - id: fetch
       name: スターターファイルを取得
-      action: fetch:plain
+      action: fetch:template
       input:
-        # template.yaml の位置からの相対パス (./ で自ディレクトリ配下全部)
-        url: ./
+        # template.yaml の位置からの相対パス (../skeleton/react_native を fetch:template の対象とする)
+        url: ../skeleton/react_native
         # 出力先 (Backstage Scaffolder のワークスペース直下)
         targetPath: ./
+        # cookiecutter スタイルの構文サポートは不要、デフォルトの ${{ values.x }} を使う
+        # Nunjucks 展開時に参照される変数 (skeleton 内で ${{ values.x }} として読まれる)
+        values:
+          # プロジェクト名 (package.json / app.json / ios xcodeproj 名 等で展開される)
+          name: ${{ parameters.name }}
+          # 説明文 (README に展開される)
+          description: ${{ parameters.description }}
+          # Android applicationId / iOS Bundle ID
+          packageName: ${{ parameters.packageName }}
+          # Android Java パッケージのディレクトリ階層 (com.example.app → com/example/app)
+          packageNamePath: ${{ parameters.packageName | replace(".","/") }}
   # 生成後に UI に表示する案内
   output:
     text:
@@ -68,9 +91,12 @@ spec:
 
           ## 次の手順
 
-          1. node_modules / windows ビルド成果物 (.dll / .appx / .vcxproj.FileListAbsolute.txt 等) が scaffold dir からコピーされている場合があります。不要なものは削除してください。
-          2. `npm install` を実行して依存を解決
-          3. Visual Studio 2026 + Windows SDK が必要
-          4. `npx react-native run-windows` で起動
+          1. `npm install` を実行して依存を解決
+          2. Visual Studio 2026 を使う場合は `$env:MinimumVisualStudioVersion = "18.0"` を設定
+          3. `npx react-native run-windows` で Windows ネイティブアプリを起動
+
+          ## 既知の制約
+
+          - **Windows プロジェクト名は "ReactNative" 固定**: 構造上、windows/ 配下のプロジェクト名 / Identity は ReactNative のままです。Visual Studio は GUID で識別するため動作に支障はありません。
 
           詳細は同梱の README.md を参照してください。
