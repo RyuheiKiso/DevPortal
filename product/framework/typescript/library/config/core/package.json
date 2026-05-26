@@ -37,6 +37,7 @@
     "vitest": "^2.1.0"
   },
   "publishConfig": {
-    "access": "restricted"
+    "access": "restricted",
+    "registry": "http://localhost:4873/"
   }
 }

@@ -25,5 +25,15 @@ export { RequirePermission } from "./RequirePermission.js";
 export type { RequirePermissionProps } from "./RequirePermission.js";
 
 // React Native storage adapter を公開する
-export { createNativeTokenStore } from "./storage.js";
-export type { NativeKeyValueStorage } from "./storage.js";
+// createNativeTokenStore: 汎用 backend (AsyncStorage 互換) を受ける低レベル API
+// createKeychainTokenStore / createSecureStoreTokenStore: トークン用途の推奨パス
+export {
+  createKeychainTokenStore,
+  createNativeTokenStore,
+  createSecureStoreTokenStore,
+} from "./storage.js";
+export type {
+  CreateKeychainTokenStoreOptions,
+  CreateSecureStoreTokenStoreOptions,
+  NativeKeyValueStorage,
+} from "./storage.js";
