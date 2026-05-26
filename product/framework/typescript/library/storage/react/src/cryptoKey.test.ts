@@ -114,6 +114,70 @@ describe("loadOrCreateAesKey", () => {
     await expect(crypto.subtle.decrypt({ name: "AES-GCM", iv }, b, ciphertext)).rejects.toThrow();
   });
 
+  // 並行起動の鍵二重生成レースが起きないこと (Critical: 旧鍵で暗号化されたデータの復号不能を防ぐ)
+  it("並行呼び出しで同一鍵参照が返り generateKey が 1 回しか呼ばれない", async () => {
+    // 隔離 factory
+    const factory = new IDBFactory();
+    // generateKey を spy
+    const generateSpy = vi.spyOn(crypto.subtle, "generateKey");
+    // 同じ options で 10 並列に loadOrCreateAesKey を発火
+    const results = await Promise.all(
+      // 10 個の並列呼び出し配列を作る
+      Array.from({ length: 10 }, () => loadOrCreateAesKey({ keyName: "race", factory })),
+    );
+    // generateKey は in-flight 共有により 1 回のみ呼ばれているはず
+    expect(generateSpy).toHaveBeenCalledTimes(1);
+    // 全ての結果が同一参照 (= 同じ CryptoKey インスタンス) であること
+    for (const r of results) {
+      // 配列先頭との参照比較
+      expect(r).toBe(results[0]);
+    }
+    // spy を解除
+    generateSpy.mockRestore();
+  });
+
+  // throw 経路で in-flight Map が掃除され、次回呼び出しが新規生成で成功すること
+  it("途中の保存失敗で in-flight Map が掃除され、次回呼び出しは成功する", async () => {
+    // 隔離 factory
+    const factory = new IDBFactory();
+    // crypto.subtle.generateKey を 1 回だけ reject させる spy を仕込む
+    const generateSpy = vi.spyOn(crypto.subtle, "generateKey").mockRejectedValueOnce(new Error("boom"));
+    // 1 回目: 生成失敗を期待
+    await expect(loadOrCreateAesKey({ keyName: "recover", factory })).rejects.toThrow("boom");
+    // 2 回目: mock は 1 回のみだったので本物にフォールバックして成功するはず
+    // (in-flight Map に rejected Promise が残っていれば、ここでも reject されてしまう)
+    const key = await loadOrCreateAesKey({ keyName: "recover", factory });
+    // 復帰後は有効な AES-GCM 鍵が返ること
+    expect(key.algorithm.name).toBe("AES-GCM");
+    // 結果として generateKey は 2 回呼ばれている (1 回目失敗 + 2 回目成功)
+    expect(generateSpy).toHaveBeenCalledTimes(2);
+    // spy を解除
+    generateSpy.mockRestore();
+  });
+
+  // 異なる keyName での並行呼び出しが互いに干渉しないこと (合成キーが正しく分離されているか)
+  it("異なる keyName の並行呼び出しは互いに干渉しない", async () => {
+    // 隔離 factory
+    const factory = new IDBFactory();
+    // 2 つの異なる keyName を並列に発火
+    const [a, b] = await Promise.all([
+      // 鍵 A
+      loadOrCreateAesKey({ keyName: "alpha", factory }),
+      // 鍵 B
+      loadOrCreateAesKey({ keyName: "beta", factory }),
+    ]);
+    // 別インスタンスであること (参照比較)
+    expect(a).not.toBe(b);
+    // IV 12 バイトランダム
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    // 平文
+    const plaintext = new TextEncoder().encode("separate");
+    // 鍵 A で暗号化したものを鍵 B で復号しようとすると失敗すること (鍵が独立している証)
+    const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, a, plaintext);
+    // 別鍵での復号は AES-GCM のタグ検証で reject される
+    await expect(crypto.subtle.decrypt({ name: "AES-GCM", iv }, b, ciphertext)).rejects.toThrow();
+  });
+
   // dbName / storeName のカスタマイズが反映されること
   it("dbName と storeName のカスタマイズが反映される", async () => {
     // 隔離 factory
