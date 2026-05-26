@@ -141,6 +141,54 @@ describe("fromHttpError", () => {
     expect(error.requestId).toBeUndefined();
   });
 
+  // Web Headers が空文字列値を持つ場合は採用せず、context fallback に進む（B2 回帰防止）
+  it("treats empty Web Headers values as missing and falls back to context", () => {
+    // 空文字列ヘッダは「意味の無い値」として弾き、context.requestId に進めるべき
+    const headers = new Headers({ "x-request-id": "", traceparent: "" });
+    const error = fromHttpError(
+      { status: 500, response: { headers } },
+      { requestId: "ctx-req", traceId: "ctx-trace" },
+    );
+    expect(error.requestId).toBe("ctx-req");
+    expect(error.traceId).toBe("ctx-trace");
+  });
+
+  // plain object headers が空文字列値を持つ場合も同様にフォールバックする（B2 回帰防止）
+  it("treats empty plain header values as missing and falls back to context", () => {
+    const error = fromHttpError(
+      { status: 500, response: { headers: { "x-request-id": "", traceparent: "" } } },
+      { requestId: "ctx-req", traceId: "ctx-trace" },
+    );
+    expect(error.requestId).toBe("ctx-req");
+    expect(error.traceId).toBe("ctx-trace");
+  });
+
+  // error.requestId / error.traceId / error.code が空文字列の場合も弾く（B2 回帰防止）
+  it("treats empty top-level string fields as missing and falls back to headers/context", () => {
+    const error = fromHttpError(
+      {
+        status: 500,
+        // 上位プロパティはいずれも空文字列で「実質未指定」
+        requestId: "",
+        traceId: "",
+        code: "",
+        response: { headers: { "x-request-id": "hdr-req", traceparent: "hdr-trace" } },
+      },
+      { requestId: "ctx-req", traceId: "ctx-trace" },
+    );
+    // header 由来の値に進める
+    expect(error.requestId).toBe("hdr-req");
+    expect(error.traceId).toBe("hdr-trace");
+    // code は空文字列なら採用せず undefined のまま
+    expect(error.code).toBeUndefined();
+  });
+
+  // error.message が空文字列ならデフォルトテンプレに切り替える（B3 回帰防止）
+  it("falls back to default message template when error.message is an empty string", () => {
+    const error = fromHttpError({ message: "", status: 503 });
+    expect(error.message).toBe("HTTP request failed with status 503");
+  });
+
   // status 無し / code から kind 推定するパス
   it("uses code to classify kind when status is missing", () => {
     const error = fromHttpError({ code: "ETIMEDOUT" });

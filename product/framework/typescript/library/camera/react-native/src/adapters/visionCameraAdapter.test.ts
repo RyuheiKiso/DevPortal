@@ -293,6 +293,97 @@ describe("createVisionCameraAdapter", () => {
     ).rejects.toBeInstanceOf(ScannerError);
   });
 
+  it("stopRecording 前に onRecordingFinished が発火した場合は pendingResult を返す（H2）", async () => {
+    // finishedCb を保存して stop より先に呼ぶ
+    let finishedCb: ((v: { path: string; duration: number }) => void) | undefined;
+    const ref = makeRef({
+      startRecording: vi.fn((opts: { onRecordingFinished: typeof finishedCb }) => {
+        finishedCb = opts.onRecordingFinished;
+      }),
+    });
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => ref,
+    });
+    const h = await adapter.startPreview({});
+    const rec = await adapter.startRecording(h);
+    // stopRecording を呼ぶ前に finished を発火
+    finishedCb?.({ path: "/tmp/auto.mp4", duration: 5 });
+    // microtask 進行
+    await new Promise((r) => setTimeout(r, 0));
+    // 後続 stopRecording は pending を消費して返す
+    const result = await adapter.stopRecording(rec);
+    expect(result.media).toMatchObject({ kind: "filePath", path: "/tmp/auto.mp4" });
+  });
+
+  it("stopRecording 前に onRecordingError が発火した場合は pending error を投げる", async () => {
+    let errorCb: ((err: unknown) => void) | undefined;
+    const ref = makeRef({
+      startRecording: vi.fn((opts: { onRecordingError: typeof errorCb }) => {
+        errorCb = opts.onRecordingError;
+      }),
+    });
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => ref,
+    });
+    const h = await adapter.startPreview({});
+    const rec = await adapter.startRecording(h);
+    // stopRecording 前に error を発火
+    const err = new Error("device fail");
+    errorCb?.(err);
+    await new Promise((r) => setTimeout(r, 0));
+    // 後続 stopRecording は pending error を投げる
+    await expect(adapter.stopRecording(rec)).rejects.toBe(err);
+  });
+
+  it("自然完了で pending に残った結果は次の startRecording で確実にクリアされる", async () => {
+    // finishedCb を 1 回目と 2 回目で別の参照に
+    const finishedCbs: Array<(v: { path: string; duration: number }) => void> = [];
+    const ref = makeRef({
+      startRecording: vi.fn((opts: { onRecordingFinished: (v: { path: string; duration: number }) => void }) => {
+        finishedCbs.push(opts.onRecordingFinished);
+      }),
+    });
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => ref,
+    });
+    const h = await adapter.startPreview({});
+    // 1 回目 startRecording
+    await adapter.startRecording(h);
+    // 1 回目自然完了 → pending に保存（stop を呼ばない）
+    finishedCbs[0]?.({ path: "/tmp/old.mp4", duration: 2 });
+    await new Promise((r) => setTimeout(r, 0));
+    // 2 回目 startRecording → 冒頭で pending クリア
+    const rec2 = await adapter.startRecording(h);
+    // 2 回目自然完了で新 URI が pending に
+    finishedCbs[1]?.({ path: "/tmp/new.mp4", duration: 3 });
+    await new Promise((r) => setTimeout(r, 0));
+    // stopRecording は新 URI を返す（旧 URI が混入しない）
+    const result = await adapter.stopRecording(rec2);
+    expect(result.media).toMatchObject({ kind: "filePath", path: "/tmp/new.mp4" });
+  });
+
+  it("dispose で pending result がクリアされる", async () => {
+    let finishedCb: ((v: { path: string; duration: number }) => void) | undefined;
+    const ref = makeRef({
+      startRecording: vi.fn((opts: { onRecordingFinished: typeof finishedCb }) => {
+        finishedCb = opts.onRecordingFinished;
+      }),
+    });
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => ref,
+    });
+    const h = await adapter.startPreview({});
+    await adapter.startRecording(h);
+    finishedCb?.({ path: "/tmp/disposed.mp4", duration: 1 });
+    await new Promise((r) => setTimeout(r, 0));
+    // dispose で pending クリア（throw しない）
+    await expect(adapter.dispose()).resolves.toBeUndefined();
+  });
+
   it("dispose は state を解放", async () => {
     const adapter = createVisionCameraAdapter({
       library: makeLibrary(),

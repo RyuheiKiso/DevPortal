@@ -43,6 +43,54 @@ function App() {
 }
 ```
 
+## 利用上の注意
+
+### theme は事前に検証してから渡す
+
+`useTheme()` は `BaseConfig.theme` を `as Theme` でキャストするだけで、ランタイム検証は行いません。
+不正な theme を `ConfigProvider` に渡すとアクセス時に undefined エラーになります。
+**`ConfigProvider` に渡す前に `themeSchema.parse(theme)` で必ず検証してください**：
+
+```tsx
+import { themeSchema, validateConfig } from "@k1s0-ts-config/core";
+
+const safeTheme = validateConfig(themeSchema, rawTheme);
+const config = { env: "dev" as const, featureFlags: {}, theme: safeTheme };
+```
+
+### config は参照を安定させる（再レンダリングの抑制）
+
+`<ConfigProvider config={...}>` の `config` は React Context の value としてそのまま流れます。
+**親コンポーネントのレンダリングごとに新しい `config` オブジェクトを生成すると、配下の `useConfig` を使う全コンポーネントが再レンダリングされます**。
+モジュールレベル定数で持つか、`useMemo` で参照を安定させてください：
+
+```tsx
+// ✅ モジュールレベルで一度だけ構築
+const config = { env: "dev" as const, featureFlags: { newUi: true }, theme: safeTheme };
+
+// または ✅ useMemo で安定化
+const config = useMemo(
+  () => ({ env, featureFlags, theme: safeTheme }),
+  [env, featureFlags, safeTheme],
+);
+```
+
+### useFeatureFlag は型絞り込みできる
+
+`useFeatureFlag` はジェネリクスでフラグ名を絞り込めます。タイプミスをコンパイル時に検出するために、
+アプリ側で `Flags` 型を定義して指定するのを推奨します：
+
+```tsx
+type Flags = "newUi" | "betaSearch";
+const enabled = useFeatureFlag<Flags>("newUi");
+// useFeatureFlag<Flags>("typoName") // ← TypeScript エラー
+```
+
+### mergeEnvConfig / mergePlatformConfig は浅いマージ
+
+`mergeEnvConfig` (core) と `mergePlatformConfig` は浅いマージで、**ネストオブジェクトは map 側と参照を共有します**。
+返り値の `result.colors` を mutate すると `map.default.colors` も書き換わるので、必要なら呼び出し側で `structuredClone` してください。
+
 ## ビルド & テスト
 
 dual build（ESM + CJS）で出力します。

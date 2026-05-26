@@ -525,6 +525,55 @@ describe("createWebAdapter takePicture", () => {
     });
   });
 
+  it("createOffscreenVideo: readyState=0 で loadedmetadata 待ちパスを通る", async () => {
+    // listener を保持して外部から発火させる
+    let savedListener: (() => void) | undefined;
+    const removeSpy = vi.fn();
+    // canvas は通常通り、video は readyState=0 + addEventListener / removeEventListener を持つ
+    vi.stubGlobal("document", {
+      createElement: (tag: string) => {
+        if (tag === "canvas") {
+          return {
+            width: 0,
+            height: 0,
+            getContext: () => ({ drawImage: vi.fn() }),
+            toBlob: (cb: (b: Blob) => void, mime: string) => cb(new Blob([], { type: mime })),
+          };
+        }
+        // video: readyState=0 で metadata 待ち必須、play() は reject させて catch 分岐も同時にカバー
+        return {
+          srcObject: null,
+          videoWidth: 320,
+          videoHeight: 240,
+          readyState: 0,
+          play: () => Promise.reject(new Error("autoplay blocked")),
+          addEventListener: (event: string, cb: () => void): void => {
+            if (event === "loadedmetadata") {
+              savedListener = cb;
+            }
+          },
+          removeEventListener: removeSpy,
+        };
+      },
+    });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    // takePicture を呼ぶが、loadedmetadata がまだ発火していないので await が hang する
+    const takeP = adapter.takePicture(h);
+    // microtask を進めて createOffscreenVideo の addEventListener まで到達させる
+    await new Promise((r) => setTimeout(r, 0));
+    expect(savedListener).toBeDefined();
+    // 外部から loadedmetadata 発火 → onMeta が呼ばれて Promise resolve
+    savedListener?.();
+    // takePicture 完了
+    const result = await takeP;
+    // mock video の videoWidth=320, videoHeight=240 が結果に反映
+    expect(result.width).toBe(320);
+    expect(result.height).toBe(240);
+    // removeEventListener 経路も踏まれていること
+    expect(removeSpy).toHaveBeenCalledWith("loadedmetadata", expect.any(Function));
+  });
+
   it("target 指定後に document が破棄された場合、takePicture 直内の document check 経路", async () => {
     installFakeDocument();
     const adapter = createWebAdapter();
@@ -641,6 +690,99 @@ describe("createWebAdapter recording", () => {
     const rec = await adapter.startRecording(h);
     await expect(adapter.pauseRecording?.(rec)).rejects.toMatchObject({ reason: "PAUSE_FAILED" });
     await expect(adapter.resumeRecording?.(rec)).rejects.toMatchObject({ reason: "RESUME_FAILED" });
+  });
+
+  it("maxDurationMs 指定で setTimeout 経由の自動停止が走り、後続 stopRecording は pendingResult を返す", async () => {
+    // 偽タイマーでまず setTimeout を仕掛ける挙動を確認
+    vi.useFakeTimers();
+    try {
+      const instances = installFakeMediaRecorder();
+      const adapter = createWebAdapter();
+      const h = await adapter.startPreview({});
+      // maxDurationMs を指定すると timeslice 1000 で start が呼ばれ、setTimeout が仕込まれる
+      const rec = await adapter.startRecording(h, { maxDurationMs: 500 });
+      // 既存 instances に start が timeslice 1000 で呼ばれていることは型上保証されないため state のみ確認
+      expect(instances[0]?.state).toBe("recording");
+      // タイマーを進めて自動停止トリガを発火
+      vi.advanceTimersByTime(500);
+      // queueMicrotask の onstop を流すため fake timers を flush
+      await vi.runAllTimersAsync();
+      // 内部的に recorder.stop() が呼ばれて inactive になる
+      expect(instances[0]?.state).toBe("inactive");
+      // 後続の stopRecording は pendingResult を返す（自動停止で積まれた blob）
+      const result = await adapter.stopRecording(rec);
+      // ハンドル ID で書き換えられた id が一致
+      expect(result.id).toBe(rec.id);
+      // media は blob モード
+      expect(result.media.kind).toBe("blob");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("maxDurationMs 自動停止経路で recorder.stop が throw しても続行", async () => {
+    // failStop = true なら recorder.stop が throw を返す。setTimeout 内で握りつぶされること
+    vi.useFakeTimers();
+    try {
+      installFakeMediaRecorder({ failStop: true });
+      const adapter = createWebAdapter();
+      const h = await adapter.startPreview({});
+      const rec = await adapter.startRecording(h, { maxDurationMs: 100 });
+      // タイマー経過で stop が呼ばれるが throw する。pending の stop は無い段階なので例外伝播は起きない
+      vi.advanceTimersByTime(100);
+      await vi.runAllTimersAsync();
+      // 後続の明示的 stopRecording は STOP_FAILED になる（recorder.stop は依然 throw 設定）
+      await expect(adapter.stopRecording(rec)).rejects.toMatchObject({ reason: "STOP_FAILED" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("maxFileSizeBytes 超過で ondataavailable 経由の自動停止が走り pendingResult を返す", async () => {
+    // FakeMediaRecorder.start は queueMicrotask で 1 つの "x" Blob (size=1) を配信する
+    // maxFileSizeBytes=1 にすると 1 度の配信で閾値到達 → 自動 stop
+    const instances = installFakeMediaRecorder();
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    const rec = await adapter.startRecording(h, { maxFileSizeBytes: 1 });
+    // ondataavailable は microtask 経由で発火するため await で吸収
+    await new Promise((r) => setTimeout(r, 0));
+    // 自動 stop により inactive に遷移
+    expect(instances[0]?.state).toBe("inactive");
+    // 後続の stopRecording は pendingResult を返す
+    const result = await adapter.stopRecording(rec);
+    expect(result.id).toBe(rec.id);
+    // chunk が累積されていたので sizeBytes は 1 以上
+    expect((result.sizeBytes ?? 0)).toBeGreaterThanOrEqual(1);
+  });
+
+  it("maxFileSizeBytes 自動停止経路で recorder.stop が throw しても続行", async () => {
+    installFakeMediaRecorder({ failStop: true });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    const rec = await adapter.startRecording(h, { maxFileSizeBytes: 1 });
+    // 配信 microtask を流す（自動 stop 経路で throw が握りつぶされる）
+    await new Promise((r) => setTimeout(r, 0));
+    // failStop のため、後続 stopRecording も STOP_FAILED で失敗するのが期待挙動
+    await expect(adapter.stopRecording(rec)).rejects.toMatchObject({ reason: "STOP_FAILED" });
+  });
+
+  it("maxDurationMs を仕掛けた録画を明示的に stop すると clearTimeout で片付ける", async () => {
+    // 明示 stop で onstop が呼ばれ、durationTimer の clearTimeout 分岐を通過させる
+    vi.useFakeTimers();
+    try {
+      installFakeMediaRecorder();
+      const adapter = createWebAdapter();
+      const h = await adapter.startPreview({});
+      const rec = await adapter.startRecording(h, { maxDurationMs: 10000 });
+      // 明示 stop（onstop の中で clearTimeout 経路を踏ませる）
+      const stopP = adapter.stopRecording(rec);
+      await vi.runAllTimersAsync();
+      await expect(stopP).resolves.toMatchObject({ id: rec.id });
+      // 仮にタイマーが残っていれば run しても recorder.stop は 1 回しか呼ばれない（state がもう inactive）
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -896,6 +1038,48 @@ describe("createWebAdapter scanBarcode", () => {
     await new Promise((r) => setTimeout(r, 0));
     // 2 回目の scheduler.schedule は呼ばれない（cancelled で if(!cancelled) の else に入る）
     expect(calls).toBe(1);
+  });
+
+  it("for ループ中に cancel された場合は break で残りの onScan を抑止", async () => {
+    // 1 回目の cb で tick を走らせるだけのスケジューラ
+    let savedCb: (() => void) | undefined;
+    const scheduler = {
+      schedule: (cb: () => void) => {
+        savedCb = cb;
+        return 1;
+      },
+      cancel: vi.fn(),
+    };
+    // detect は 3 件返すので、cancel 後の break で 2 件目以降を捨てる経路を作る
+    const detectMock = vi.fn(async () => [
+      { format: "qr_code", rawValue: "A", boundingBox: undefined },
+      { format: "qr_code", rawValue: "B", boundingBox: undefined },
+      { format: "qr_code", rawValue: "C", boundingBox: undefined },
+    ]);
+    const adapter = createWebAdapter({
+      barcodeDetectorFactory: () => ({ detect: detectMock }),
+      scheduler,
+    });
+    const video = {
+      srcObject: null,
+      play: vi.fn().mockResolvedValue(undefined),
+    } as unknown as HTMLVideoElement;
+    const h = await adapter.startPreview({ target: video });
+    // onScan の 1 回目で cancel を呼んで以降の onScan を break させる
+    let cancelRef: (() => void) | undefined;
+    const onScan = vi.fn(() => {
+      cancelRef?.();
+    });
+    const cancel = await adapter.scanBarcode(h, { formats: ["qr_code"] }, onScan);
+    cancelRef = cancel;
+    // tick を起動
+    savedCb?.();
+    // microtask を消費
+    for (let i = 0; i < 5; i++) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    // 1 件目だけ onScan に渡り、2 件目以降は break で抑止される
+    expect(onScan).toHaveBeenCalledTimes(1);
   });
 
   it("二重 cancel は安全", async () => {

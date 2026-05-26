@@ -332,6 +332,103 @@ describe("createExpoCameraAdapter", () => {
     ).rejects.toBeInstanceOf(ScannerError);
   });
 
+  it("録画自然完了で pending に残った結果は次の startRecording 時にクリアされる（H1 リグレッション防止）", async () => {
+    // 1 回目の recordAsync を制御
+    let resolveRec1: (v: { uri: string }) => void = () => {};
+    let resolveRec2: (v: { uri: string }) => void = () => {};
+    let call = 0;
+    const ref = makeRef({
+      recordAsync: vi.fn(
+        () =>
+          new Promise<{ uri: string }>((resolve) => {
+            call++;
+            if (call === 1) {
+              resolveRec1 = resolve;
+            } else {
+              resolveRec2 = resolve;
+            }
+          }),
+      ),
+    });
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => ref,
+      permissionApi: makeApi(),
+    });
+    const h = await adapter.startPreview({});
+    // 1 回目 startRecording → 自然完了 → pending に保存（stopRecording を呼ばない）
+    await adapter.startRecording(h);
+    resolveRec1({ uri: "file:///tmp/old.mp4" });
+    await new Promise((r) => setTimeout(r, 0));
+    // 2 回目 startRecording を呼ぶ → 冒頭で pending クリアされるはず
+    const rec2 = await adapter.startRecording(h);
+    // 2 回目の recordAsync を別 URI で解決
+    resolveRec2({ uri: "file:///tmp/new.mp4" });
+    await new Promise((r) => setTimeout(r, 0));
+    // stopRecording で新セッションの URI が返ること（旧 URI が混入しない）
+    const result = await adapter.stopRecording(rec2);
+    expect(result.media).toMatchObject({ kind: "filePath", path: "file:///tmp/new.mp4" });
+  });
+
+  it("録画自然エラーで pending に残った error も次 startRecording でクリアされる", async () => {
+    // 1 回目は reject、2 回目は resolve
+    let rejectRec1: (err: unknown) => void = () => {};
+    let resolveRec2: (v: { uri: string }) => void = () => {};
+    let call = 0;
+    const ref = makeRef({
+      recordAsync: vi.fn(
+        () =>
+          new Promise<{ uri: string }>((resolve, reject) => {
+            call++;
+            if (call === 1) {
+              rejectRec1 = reject;
+            } else {
+              resolveRec2 = resolve;
+            }
+          }),
+      ),
+    });
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => ref,
+      permissionApi: makeApi(),
+    });
+    const h = await adapter.startPreview({});
+    await adapter.startRecording(h);
+    // pending に error を保存
+    rejectRec1(new Error("first session failed"));
+    await new Promise((r) => setTimeout(r, 0));
+    // 2 回目 startRecording で pending error クリア
+    const rec2 = await adapter.startRecording(h);
+    resolveRec2({ uri: "file:///tmp/fresh.mp4" });
+    await new Promise((r) => setTimeout(r, 0));
+    // stopRecording は新セッションの URI を成功で返す（旧 error を再送しない）
+    const result = await adapter.stopRecording(rec2);
+    expect(result.media).toMatchObject({ kind: "filePath", path: "file:///tmp/fresh.mp4" });
+  });
+
+  it("dispose で pending result / error がクリアされる（再利用時の残骸防止）", async () => {
+    // pending に結果を残した状態で dispose を呼ぶ
+    let resolveRec: (v: { uri: string }) => void = () => {};
+    const ref = makeRef({
+      recordAsync: vi.fn(
+        () =>
+          new Promise<{ uri: string }>((resolve) => {
+            resolveRec = resolve;
+          }),
+      ),
+    });
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => ref,
+      permissionApi: makeApi(),
+    });
+    const h = await adapter.startPreview({});
+    await adapter.startRecording(h);
+    // recordAsync 解決 → pending に値が積まれる
+    resolveRec({ uri: "file:///tmp/stale.mp4" });
+    await new Promise((r) => setTimeout(r, 0));
+    // dispose で pending がクリアされる（実装の dispose で pendingRecordingResult = undefined となる）
+    await expect(adapter.dispose()).resolves.toBeUndefined();
+  });
+
   it("dispose", async () => {
     const adapter = createExpoCameraAdapter({
       cameraRef: () => makeRef(),

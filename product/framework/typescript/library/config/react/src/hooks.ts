@@ -25,9 +25,13 @@ export function useConfig<T extends BaseConfig = BaseConfig>(): T {
 
 // 指定フラグの有効/無効を返す薄いラッパー hook
 // 不明なフラグ名は false 扱い（core の isFeatureEnabled に準拠）
-export function useFeatureFlag(
+//
+// 型安全性: F のジェネリクスでフラグ名を絞り込めるようにする。
+// 例: `useFeatureFlag<"newUi" | "betaSearch">("newUi")` でタイプミスをコンパイル時に検出。
+// 既存呼び出し（`useFeatureFlag("foo")`）は F = string がデフォルトのため非破壊。
+export function useFeatureFlag<F extends string = string>(
   // 判定対象のフラグ名
-  name: string,
+  name: F,
 ): boolean {
   // 現在の設定オブジェクトを取得
   const config = useConfig();
@@ -41,6 +45,11 @@ export function useFeatureFlag(
 
 // テーマを取り出す hook
 // BaseConfig.theme は unknown 型のため、Theme 型として返す（呼び出し側の利便性優先）
+//
+// 注意: 戻り値は as Theme で強制キャストしている（ランタイム検証は行わない）。
+// 利用側は ConfigProvider に渡す前に `themeSchema.parse(theme)` で必ず検証しておくこと。
+// 検証せずに不正な theme を Provider に渡すと、useTheme 経由のプロパティアクセスで
+// undefined エラーになる。
 export function useTheme(): Theme {
   // 現在の設定オブジェクトを取得
   const config = useConfig();

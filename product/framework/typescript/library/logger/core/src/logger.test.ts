@@ -390,6 +390,55 @@ describe("createLogger", () => {
     expect(t.entries[0]?.tags).toEqual(["a", "b", "c"]);
   });
 
+  // 親が空配列 tags を持ち、子が tags 未指定でも、entry.tags が空配列のまま維持される
+  // (旧実装は `parent.tags || child.tags` で `[]` が falsy 扱いされ undefined になっていた)
+  it("親 tags=[] / 子 tags 未指定でも entry.tags は空配列を維持する", () => {
+    // 記録 transport
+    const t = recordingTransport();
+    // 親で空配列 tags を明示的に指定
+    const logger = createLogger({
+      // 環境
+      env: "dev",
+      // 全レベル通す
+      defaultMinLevel: "trace",
+      // 親は空配列 tags を持つ
+      tags: [],
+      // transports
+      transports: [t],
+    });
+    // 子は tags を指定しない
+    const child = logger.child({});
+    // ログ発行
+    child.info("x");
+    // entry.tags が空配列のまま（undefined に倒れていない）であることを assert
+    expect(t.entries[0]?.tags).toEqual([]);
+  });
+
+  // 親が空オブジェクト context を持ち、子が context 未指定でも、entry.context が空オブジェクトのまま維持される
+  // (旧実装は `parent.context || child.context` で `{}` が truthy なので問題なかったが、
+  //  上記 tags と挙動を揃えるため undefined チェックに統一されたことを確認)
+  it("親 context={} / 子 context 未指定でも entry.context は空オブジェクトを維持する", () => {
+    // 記録 transport
+    const t = recordingTransport();
+    // 親で空 context を明示
+    const logger = createLogger({
+      // 環境
+      env: "dev",
+      // 全レベル通す
+      defaultMinLevel: "trace",
+      // 親は空 context を持つ
+      context: {},
+      // transports
+      transports: [t],
+    });
+    // 子は context を指定しない
+    const child = logger.child({});
+    // ログ発行
+    child.info("x");
+    // entry.context が空オブジェクトのまま（undefined に倒れていない）であることを assert
+    expect(t.entries[0]?.context).toEqual({});
+  });
+
   // normalizeError: null と undefined
   it("normalizeError: null/undefined は 'null'/'undefined' に文字列化される", () => {
     const t = recordingTransport();

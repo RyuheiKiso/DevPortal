@@ -173,6 +173,50 @@ describe("normalizeSession", () => {
   });
 });
 
+// 設計ポリシー文書化のためのテスト (normalizeSession の anonymous 入力では tokens / claims が破棄されることを契約として固定する)
+describe("normalizeSession の anonymous 入力 (#4 設計ポリシー)", () => {
+  // status=anonymous の入力に tokens / claims が含まれていても破棄されること
+  it("status=anonymous に渡された tokens / claims は破棄される", () => {
+    // tokens と claims を持つ匿名入力を渡す
+    const session = normalizeSession({
+      // 匿名状態
+      status: "anonymous",
+      // user は null
+      user: null,
+      // ゲストトークン相当
+      tokens: { accessToken: "guest-token" },
+      // 任意のクレーム
+      claims: { iss: "guest-idp" },
+    });
+    // 匿名セッションに正規化されること
+    expect(session.status).toBe("anonymous");
+    // tokens は破棄される (「匿名だがトークン保持」は本ライブラリの設計範囲外)
+    expect(session.tokens).toBeUndefined();
+    // claims も破棄される
+    expect(session.claims).toBeUndefined();
+  });
+});
+
+// shallow copy 仕様の文書化テスト (将来 deep copy 化したら期待値を更新する)
+describe("normalizeSession の shallow copy 仕様 (#5 設計ポリシー)", () => {
+  // attributes のネスト値は共有参照のまま (現契約の文書化テスト)
+  it("attributes のネスト値は shared 参照のまま (将来 deep copy 化するなら期待値を更新する)", () => {
+    // ネスト値を持つ attributes
+    const attributes: Record<string, unknown> = { nested: { tenant: "alpha" } };
+    // 認証済みセッションを正規化
+    const session = normalizeSession({
+      // 認証済み状態
+      status: "authenticated",
+      // ネストした attributes を持つ user
+      user: createUser({ attributes }),
+    });
+    // ネスト値を外部から mutate する
+    (attributes.nested as { tenant: string }).tenant = "beta";
+    // shallow copy 仕様により内部状態にも反映されてしまうことを文書化
+    expect((session.user?.attributes?.nested as { tenant: string }).tenant).toBe("beta");
+  });
+});
+
 // isAuthenticated のテスト群
 describe("isAuthenticated", () => {
   // 認証済み + user ありの場合のみ true を返すこと

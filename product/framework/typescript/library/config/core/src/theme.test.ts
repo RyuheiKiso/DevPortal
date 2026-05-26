@@ -45,4 +45,24 @@ describe("defaultTheme", () => {
       ["background", "primary", "text"],
     );
   });
+
+  // defaultTheme は deepFreeze されており、トップレベル・ネストとも不変であることを保証
+  it("トップレベルとネストすべてが Object.frozen である", () => {
+    // ルートが frozen
+    expect(Object.isFrozen(defaultTheme)).toBe(true);
+    // colors / spacing / typography も frozen
+    expect(Object.isFrozen(defaultTheme.colors)).toBe(true);
+    expect(Object.isFrozen(defaultTheme.spacing)).toBe(true);
+    expect(Object.isFrozen(defaultTheme.typography)).toBe(true);
+  });
+
+  // strict mode 下では frozen プロパティへの代入は TypeError を投げる
+  // （TypeScript のテストは "use strict" 相当でビルドされるため、書き換えは TypeError）
+  it("frozen プロパティへの代入は TypeError を投げる", () => {
+    // colors.primary を書き換えようとすると TypeError
+    expect(() => {
+      // テストのため readonly 制約を一旦回避して書き換えを試みる
+      (defaultTheme as unknown as { colors: { primary: string } }).colors.primary = "#000000";
+    }).toThrow(TypeError);
+  });
 });

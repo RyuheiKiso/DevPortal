@@ -69,12 +69,17 @@ function normalizeError(value: unknown): LogEntry["error"] {
 
 // 親バインディングと子バインディングを合成（タグは結合のうえ重複除去、context は浅マージ）
 function mergeBindings(parent: LoggerBindings, child: LoggerBindings): LoggerBindings {
-  // 結合後のタグ配列（両者がある場合のみ、Set で重複除去）
-  const tags = parent.tags || child.tags
+  // tags の存在判定は `undefined` 比較で行う（旧実装の `||` だと `parent.tags = []` が falsy 扱いで
+  // 子が undefined のときに結果が undefined に倒れる一貫性欠陥があった）
+  const hasTags = parent.tags !== undefined || child.tags !== undefined;
+  // 結合後のタグ配列（どちらかでも定義されていれば Set で重複除去して返す）
+  const tags = hasTags
     ? Array.from(new Set([...(parent.tags ?? []), ...(child.tags ?? [])]))
     : undefined;
-  // 結合後のコンテキスト（両者がある場合のみ）
-  const context = parent.context || child.context
+  // context も同様に `undefined` 比較で扱う（空オブジェクト `{}` が両方ある場合に破棄されないようにする）
+  const hasContext = parent.context !== undefined || child.context !== undefined;
+  // 結合後のコンテキスト（浅マージ、child 優先で上書き）
+  const context = hasContext
     ? { ...(parent.context ?? {}), ...(child.context ?? {}) }
     : undefined;
   // 統合結果

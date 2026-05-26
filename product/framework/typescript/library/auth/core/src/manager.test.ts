@@ -253,32 +253,36 @@ describe("createAuthManager", () => {
     expect(store.set).toHaveBeenCalledWith({ accessToken: "xyz" });
   });
 
-  // getAccessToken は TokenStore を優先しつつ、未保存時はセッションから取得すること
-  it("getAccessToken は TokenStore 優先、未保存時はセッションのトークンを返す", async () => {
-    // TokenStore は空
+  // getAccessToken は current.tokens を権威ソースとし、定義済みなら store には問い合わせないこと
+  it("getAccessToken は current.tokens を返し、store には問い合わせない (current 優先)", async () => {
+    // store は呼ばれてはいけない
     const store: TokenStore = {
-      // 常に undefined
+      // 呼ばれたら検出できるよう spy
       get: vi.fn(async () => undefined),
-      // 何もしない
+      // 受け取りだけ
       set: vi.fn(async () => undefined),
-      // 何もしない
+      // 受け取りだけ
       clear: vi.fn(async () => undefined),
     };
     // adapter
     const adapter: AuthAdapter = { getSession: vi.fn(async () => createSession("from-session")) };
     // manager
     const manager = createAuthManager(adapter, { tokenStore: store });
-    // ロード
+    // ロード (この時点で current.tokens は from-session)
     await manager.getSession();
-    // セッション側のトークンへフォールバックすること
+    // store.get の呼び出し回数をリセットする (applySession 内で store の操作はあるが、ここでは getAccessToken の挙動だけ見たい)
+    (store.get as ReturnType<typeof vi.fn>).mockClear();
+    // current 由来のトークンが返ること
     expect(await manager.getAccessToken()).toBe("from-session");
+    // 競合修正の回帰防止: current.tokens が定義済みなら store.get は呼ばれない
+    expect(store.get).not.toHaveBeenCalled();
   });
 
-  // getAccessToken は TokenStore に保存されている値を優先すること
-  it("getAccessToken は TokenStore に値があればそちらを返す", async () => {
-    // store には別の値を持たせる
+  // getAccessToken は store の古い値より current.tokens を優先すること (#2 競合修正の回帰防止)
+  it("getAccessToken は current.tokens を優先し、store の古い値は使わない", async () => {
+    // store には古いトークンが残っているシナリオ
     const store: TokenStore = {
-      // 保存値を返す
+      // 古い保存値を返す
       get: vi.fn(async () => ({ accessToken: "from-store" })),
       // 受け取りだけ
       set: vi.fn(async () => undefined),
@@ -289,10 +293,139 @@ describe("createAuthManager", () => {
     const adapter: AuthAdapter = { getSession: vi.fn(async () => createSession("from-session")) };
     // manager
     const manager = createAuthManager(adapter, { tokenStore: store });
-    // ロード
+    // ロード (current.tokens は from-session、store も applySession で from-session に上書きされる)
     await manager.getSession();
-    // TokenStore の値が優先されること
+    // current 由来のトークンが返ること (修正前は store の "from-store" を返していた)
+    expect(await manager.getAccessToken()).toBe("from-session");
+  });
+
+  // getAuthHeaders も current.tokens が未定義の場合に store フォールバックすること
+  it("getAuthHeaders は current.tokens が未定義の場合に store フォールバックでヘッダを組み立てる", async () => {
+    // store には有効トークンを持たせる
+    const store: TokenStore = {
+      // 保存値を返す
+      get: vi.fn(async () => ({ accessToken: "from-store" })),
+      // 受け取りだけ
+      set: vi.fn(async () => undefined),
+      // 受け取りだけ
+      clear: vi.fn(async () => undefined),
+    };
+    // adapter は anonymous (current.tokens は undefined のまま)
+    const adapter: AuthAdapter = {
+      // 匿名セッション
+      getSession: vi.fn(async () => ({ status: "anonymous" as const, user: null })),
+    };
+    // manager (initialSession 未指定なので loaded=false、current.tokens は undefined)
+    const manager = createAuthManager(adapter, { tokenStore: store });
+    // store のヘッダが組み立てられること (current フォールバック経路)
+    expect(await manager.getAuthHeaders()).toEqual({ Authorization: "Bearer from-store" });
+  });
+
+  // current.tokens が未定義の場合のみ store にフォールバックすること (SSR / 初期化前の経路)
+  it("current.tokens が未定義の場合のみ store にフォールバックする", async () => {
+    // store は値を持つ
+    const store: TokenStore = {
+      // 保存値を返す
+      get: vi.fn(async () => ({ accessToken: "from-store" })),
+      // 受け取りだけ
+      set: vi.fn(async () => undefined),
+      // 受け取りだけ
+      clear: vi.fn(async () => undefined),
+    };
+    // adapter は tokens を持たない anonymous を返す
+    const adapter: AuthAdapter = {
+      // 匿名セッション (current.tokens は undefined)
+      getSession: vi.fn(async () => ({ status: "anonymous" as const, user: null })),
+    };
+    // manager
+    const manager = createAuthManager(adapter, { tokenStore: store });
+    // ロード (current.tokens は undefined、store は applySession で clear されるはず)
+    await manager.getSession();
+    // applySession の clear で store も空になっているため、改めて値を持たせ直す
+    (store.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ accessToken: "from-store" });
+    // current.tokens が undefined なので store フォールバックされる
     expect(await manager.getAccessToken()).toBe("from-store");
+  });
+
+  // current.tokens.accessToken が空文字なら store にフォールバックせず空文字を返すこと (#2 空文字仕様)
+  it("current.tokens.accessToken が空文字でも store フォールバックせず空文字を返す", async () => {
+    // store には別の値を持たせる (フォールバックされたら値が返ってしまう)
+    const store: TokenStore = {
+      // 古い保存値
+      get: vi.fn(async () => ({ accessToken: "from-store" })),
+      // 受け取りだけ
+      set: vi.fn(async () => undefined),
+      // 受け取りだけ
+      clear: vi.fn(async () => undefined),
+    };
+    // adapter
+    const adapter: AuthAdapter = { getSession: vi.fn(async () => createSession()) };
+    // manager
+    const manager = createAuthManager(adapter, { tokenStore: store });
+    // setSession で current.tokens.accessToken を空文字に明示する
+    await manager.setSession({
+      // 認証済み状態
+      status: "authenticated",
+      // 最小ユーザー
+      user: { id: "user-1", roles: [], permissions: [] },
+      // 空文字 accessToken
+      tokens: { accessToken: "" },
+    });
+    // 空文字は「セッションが明示的に無効トークンを表現している」状態として、そのまま返す
+    expect(await manager.getAccessToken()).toBe("");
+    // getAuthHeaders 側も createAuthorizationHeader の空文字無効化ロジックにより空オブジェクトを返す
+    expect(await manager.getAuthHeaders()).toEqual({});
+  });
+
+  // applySession 進行中 (current 更新済み・store.set pending) の並行 getAccessToken が current の新トークンを返すこと (#2 競合修正の核心)
+  it("applySession 進行中の並行 getAccessToken が current の新トークンを返す (mutex 競合解消)", async () => {
+    // store.set を外部から resolve できるゲートで遅延させ、競合窓を再現する
+    let releaseStoreSet: (() => void) | undefined;
+    // store.set が pending の間ずっと止まる Promise
+    const storeSetGate = new Promise<void>((resolve) => {
+      // resolve を外に取り出す
+      releaseStoreSet = resolve;
+    });
+    // store 実装
+    const store: TokenStore = {
+      // 古い値を返す (修正前はこちらが優先されていた)
+      get: vi.fn(async () => ({ accessToken: "old-stored" })),
+      // set はゲートが開くまで決して解決しない
+      set: vi.fn(async () => {
+        // 外部から resolve されるまで待つ
+        await storeSetGate;
+      }),
+      // clear は今回のテスト経路では呼ばれない
+      clear: vi.fn(async () => undefined),
+    };
+    // adapter (今回は setSession 経路を使うため未使用)
+    const adapter: AuthAdapter = { getSession: vi.fn(async () => createSession()) };
+    // manager
+    const manager = createAuthManager(adapter, { tokenStore: store });
+    // setSession を await せずに発火 (applySession 内で current は同期更新済み、store.set はゲートで pending)
+    const setSessionPromise = manager.setSession({
+      // 認証済み状態
+      status: "authenticated",
+      // 最小ユーザー
+      user: { id: "user-1", roles: [], permissions: [] },
+      // 新トークン
+      tokens: { accessToken: "new-access" },
+    });
+    // applySession の中の `current = normalizeSession(...)` まで進めるためにマイクロタスクを数回進める
+    // (sessionMutex の chain.then(op, op) と applySession 内の op() で最低 2-3 microtask を要する)
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    // この時点で current.tokens は new-access、store はまだ old-stored のまま
+    // 修正前は store 優先だったため "old-stored" が返っていた
+    // 修正後は current 優先なので "new-access" が返る
+    expect(await manager.getAccessToken()).toBe("new-access");
+    // ヘッダ取得も新トークンで組み立てられること
+    expect(await manager.getAuthHeaders()).toEqual({ Authorization: "Bearer new-access" });
+    // ゲートを開いて applySession を完走させる
+    releaseStoreSet?.();
+    // setSession の完了を待つ (リーク防止)
+    await setSessionPromise;
   });
 
   // getAuthHeaders は authorization 不在時に空オブジェクトを返すこと
@@ -437,6 +570,66 @@ describe("createAuthManager", () => {
     // 2 回目 (in-flight は既に null に戻っているはず)
     await manager.refresh();
     expect(refreshCalls).toBe(2);
+  });
+
+  // listener の例外が他 listener への通知を止めないこと
+  it("1 つの listener が throw しても他の listener には通知が届く (onListenerError 経路)", async () => {
+    // observability フックを spy する
+    const onListenerError = vi.fn();
+    // adapter を作る
+    const adapter: AuthAdapter = { getSession: vi.fn(async () => createSession()) };
+    // onListenerError を渡して manager を作る
+    const manager = createAuthManager(adapter, { onListenerError });
+    // throw する listener A
+    const listenerA = vi.fn(() => {
+      // 任意の例外を投げる
+      throw new Error("boom");
+    });
+    // 通常の listener B
+    const listenerB = vi.fn();
+    // 順番依存を避けるため両方登録する
+    manager.subscribe(listenerA);
+    manager.subscribe(listenerB);
+    // セッション差し替えで emit を発火する
+    await manager.setSession(createSession());
+    // B は A の例外に関わらず 1 回呼ばれていること
+    expect(listenerB).toHaveBeenCalledTimes(1);
+    // B のイベント名は sessionChanged
+    expect(listenerB).toHaveBeenCalledWith(expect.anything(), "sessionChanged");
+    // onListenerError は A の例外を捕捉して 1 回呼ばれていること
+    expect(onListenerError).toHaveBeenCalledTimes(1);
+    // 受け取ったエラーは "boom"
+    expect((onListenerError.mock.calls[0]?.[0] as Error).message).toBe("boom");
+    // 第 2 引数は emit 時のイベント名
+    expect(onListenerError.mock.calls[0]?.[1]).toBe("sessionChanged");
+  });
+
+  // onListenerError 未指定時は console.error にフォールバックすること
+  it("onListenerError 未指定時は console.error でリスナー例外を通知する", async () => {
+    // console.error を黙らせる spy を仕込む
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      // adapter
+      const adapter: AuthAdapter = { getSession: vi.fn(async () => createSession()) };
+      // onListenerError 無しで manager を作る
+      const manager = createAuthManager(adapter);
+      // throw する listener
+      manager.subscribe(() => {
+        // 任意の例外を投げる
+        throw new Error("boom-fallback");
+      });
+      // setSession 経由で emit を発火する
+      await manager.setSession(createSession());
+      // console.error が呼ばれていること
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      // 引数のいずれかに Error が含まれていること (第 2 引数で渡している)
+      const args = consoleErrorSpy.mock.calls[0] ?? [];
+      // Error が含まれること
+      expect(args.some((a) => a instanceof Error && (a as Error).message === "boom-fallback")).toBe(true);
+    } finally {
+      // 必ず spy を解放する
+      consoleErrorSpy.mockRestore();
+    }
   });
 
   // applySession の mutex: 並行 signIn / signOut / refresh でメモリと storage の整合が崩れない

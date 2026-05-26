@@ -1,5 +1,5 @@
 // React の hook と型
-import { useEffect, useMemo, useRef, type ReactElement, type ReactNode } from "react";
+import { useEffect, useRef, type ReactElement, type ReactNode } from "react";
 // core
 import {
   createCameraManager,
@@ -53,11 +53,8 @@ export function CameraProvider(props: CameraProviderProps): ReactElement {
     };
   }, []);
 
-  // Context value
-  const value = useMemo<CameraManager | null>(
-    () => externalManager ?? internalManagerRef.current,
-    [externalManager],
-  );
-
+  // useMemo を使うと strict mode の double mount で古い dispose 済み manager を返す可能性があるため
+  // 毎 render で ref から直接 value を取得する
+  const value: CameraManager | null = externalManager ?? internalManagerRef.current;
   return <CameraContext.Provider value={value}>{props.children}</CameraContext.Provider>;
 }

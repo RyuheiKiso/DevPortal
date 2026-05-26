@@ -114,13 +114,17 @@ describe("createStorageTransport", () => {
     expect(s.dump()["k1s0-ts-logger:entries"]).toBe("{not-json");
   });
 
-  // JSON だが配列でない値も空配列扱い
-  it("既存値が JSON 配列でない場合も空配列から始める", async () => {
+  // JSON.parse は通るが配列でない値（旧スキーマ / 他ライブラリと衝突）の場合は write を失敗させ、既存値を温存する
+  // (旧実装は空配列にフォールバックして上書きしていたため、無関係なデータを破壊するリスクがあった)
+  it("既存値が JSON だが配列でない場合は write が reject して既存値を温存する", async () => {
+    // オブジェクトリテラルを既存値として配置
     const s = makeSyncStorage({ "k1s0-ts-logger:entries": "{}" });
+    // transport を生成
     const t = createStorageTransport({ storage: s });
-    await t.write(entry("recovered"));
-    const parsed = JSON.parse(s.dump()["k1s0-ts-logger:entries"]!);
-    expect(parsed).toHaveLength(1);
+    // 配列でない既存値があると write は reject する
+    await expect(t.write(entry("recovered"))).rejects.toThrow(/not an array/);
+    // 既存値 ("{}") が上書きされず温存されていること
+    expect(s.dump()["k1s0-ts-logger:entries"]).toBe("{}");
   });
 
   // 任意の key を指定できる

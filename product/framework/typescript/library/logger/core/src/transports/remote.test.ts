@@ -530,6 +530,121 @@ describe("createRemoteTransport", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  // dispose 中にバックオフ wait が abort されて sendBatch が lastError を投げるケースで、
+  // items が onPermanentFailure に通知されてサイレントロスを回避できる
+  // (修正前は batcher が items をリバッファするだけで dispose 完了とともに破棄、利用者は観測不能だった)
+  it("dispose 中の一時失敗で items が onPermanentFailure に通知される", async () => {
+    // 常にネットワークエラーを投げる fetch（retryable 扱いで wait に入る）
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
+      // ネットワーク失敗を擬似的に発生させる
+      throw new Error("net-down");
+    });
+    // 永続失敗通知を観測する箱
+    const permanentFailures: Array<{ error: unknown; items: readonly unknown[] }> = [];
+    // バックオフが長くなるようにして、dispose で wait が中断されることを確実に再現する
+    const t = createRemoteTransport({
+      // 送信先 URL
+      endpoint: "http://x",
+      // モック fetch を注入
+      fetchImpl,
+      // 1 件で即送信
+      flushSize: 1,
+      // リトライ回数は多めに（dispose で打ち切られる側を踏む）
+      maxRetries: 5,
+      // バックオフ初期遅延は長め（タイマーは実時間 setTimeout を使うため）
+      backoffBaseMs: 10000,
+      // ジッタを 0 に固定
+      random: () => 0,
+      // 永続失敗の通知を受け取る
+      onPermanentFailure: (error, items) => {
+        // 通知を箱に積む
+        permanentFailures.push({ error, items });
+      },
+    });
+    // 1 件 push → sendBatch が走り、1 回目の fetch reject → リトライ wait に入る
+    t.write(entry("lost-on-dispose"));
+    // 1 回目の fetch が呼ばれる猶予を与える
+    await flushMicrotasks();
+    // この時点で fetch は 1 回呼ばれ、バックオフ wait に入っているはず
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    // dispose を起動 → 内部で disposed=true、wait abort、sendBatch が lastError throw、
+    // onFlush の catch で disposed 分岐に入って onPermanentFailure を呼ぶ
+    await expect(t.dispose()).resolves.toBeUndefined();
+    // 永続失敗通知が 1 件届いていること（items は失われずに利用者へ伝わる）
+    expect(permanentFailures).toHaveLength(1);
+    // 通知に含まれる items が 1 件（push した分）であること
+    expect(permanentFailures[0]?.items).toHaveLength(1);
+    // items の中身が push したエントリそのものであること
+    expect((permanentFailures[0]?.items[0] as LogEntry).message).toBe("lost-on-dispose");
+  });
+
+  // dispose 中の onPermanentFailure コールバックが throw しても dispose は正常終了する
+  // (catch でコールバック例外を握りつぶす分岐のカバレッジを担保)
+  it("dispose 中の onPermanentFailure コールバックが throw しても dispose は正常終了する", async () => {
+    // 常にネットワークエラーを返す fetch
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
+      // 失敗を再現
+      throw new Error("net-down");
+    });
+    // 観測コールバックが例外を投げる構成
+    const t = createRemoteTransport({
+      // 送信先 URL
+      endpoint: "http://x",
+      // モック fetch を注入
+      fetchImpl,
+      // 1 件で即送信
+      flushSize: 1,
+      // リトライ余地を残す
+      maxRetries: 5,
+      // バックオフは長め
+      backoffBaseMs: 10000,
+      // ジッタを 0 に固定
+      random: () => 0,
+      // 観測コールバックが throw する（修正後はこの catch がカバーされる必要がある）
+      onPermanentFailure: () => {
+        // 任意の例外を投げる
+        throw new Error("callback exploded");
+      },
+    });
+    // 1 件 push
+    t.write(entry("a"));
+    // 1 回目 fetch が走る猶予を与える
+    await flushMicrotasks();
+    // dispose は正常終了する（コールバック例外が握りつぶされる）
+    await expect(t.dispose()).resolves.toBeUndefined();
+  });
+
+  // dispose 中の一時失敗で onPermanentFailure が未設定でも dispose は正常終了する
+  // (通知先が無い場合は items を破棄して終わる)
+  it("dispose 中の一時失敗で onPermanentFailure 未設定でも dispose は正常終了する", async () => {
+    // 常にネットワークエラーを返す fetch
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
+      // 失敗を再現
+      throw new Error("net-down");
+    });
+    // onPermanentFailure を渡さない構成
+    const t = createRemoteTransport({
+      // 送信先
+      endpoint: "http://x",
+      // モック fetch
+      fetchImpl,
+      // 1 件で即送信
+      flushSize: 1,
+      // リトライ余地あり
+      maxRetries: 5,
+      // バックオフ長め
+      backoffBaseMs: 10000,
+      // ジッタ固定
+      random: () => 0,
+    });
+    // 1 件 push
+    t.write(entry("silent-drop"));
+    // 1 回目 fetch が走る猶予
+    await flushMicrotasks();
+    // dispose は正常終了する（onPermanentFailure が無くても throw しない）
+    await expect(t.dispose()).resolves.toBeUndefined();
+  });
+
   // 3 件以上の同時 onFlush でも sendBatch が直列に呼ばれる
   it("3 件以上の同時 onFlush でも sendBatch が直列化される", async () => {
     // 各 fetch を手動で解決するため Deferred 群を用意

@@ -860,3 +860,150 @@ describe("CameraManager.getCapabilities", () => {
     expect(events.some((e) => e.type === "error" && e.error === err)).toBe(true);
   });
 });
+
+// dispose と start* の race を検証する
+// adapter の Promise を保留してから dispose を割り込ませ、await 後の disposed ガードが
+// 取得済みハンドルを解放しているかを確認する
+describe("createCameraManager dispose race condition", () => {
+  it("startPreview の await 中に dispose されたら handle を解放して CameraNotReadyError", async () => {
+    // adapter.startPreview を resolver で手動制御する
+    let resolvePreview: (h: PreviewHandle) => void = () => {};
+    const startPromise = new Promise<PreviewHandle>((res) => {
+      resolvePreview = res;
+    });
+    // 制御可能な adapter を作成
+    const adapter = makeAdapter({
+      startPreview: vi.fn(async () => startPromise),
+    });
+    const manager = createCameraManager(adapter);
+    // startPreview を呼ぶが await はせず Promise だけ受け取る
+    const startP = manager.startPreview();
+    // dispose を割り込ませる（先に disposed=true になる）
+    await manager.dispose();
+    // 保留していた adapter.startPreview をここで解決
+    resolvePreview(previewHandle);
+    // race 後の startPreview 呼出は CameraNotReadyError で reject される
+    await expect(startP).rejects.toBeInstanceOf(CameraNotReadyError);
+    // 内部状態にもハンドルが残っていない
+    expect(manager.getPreviewHandle()).toBeUndefined();
+    // adapter.stopPreview が race 後の解放経路で呼ばれていること
+    expect(adapter.stopPreview).toHaveBeenCalledWith(previewHandle);
+  });
+
+  it("startPreview の race 解放時に adapter.stopPreview が throw しても CameraNotReadyError", async () => {
+    // adapter.startPreview を遅延させ、stopPreview は throw に
+    let resolvePreview: (h: PreviewHandle) => void = () => {};
+    const startPromise = new Promise<PreviewHandle>((res) => {
+      resolvePreview = res;
+    });
+    const adapter = makeAdapter({
+      startPreview: vi.fn(async () => startPromise),
+      stopPreview: vi.fn(async () => {
+        throw new Error("stop fail");
+      }),
+    });
+    const manager = createCameraManager(adapter);
+    const startP = manager.startPreview();
+    await manager.dispose();
+    resolvePreview(previewHandle);
+    // 解放 throw は無視され、CameraNotReadyError が返ること
+    await expect(startP).rejects.toBeInstanceOf(CameraNotReadyError);
+  });
+
+  it("startRecording の await 中に dispose されたら recording を解放して CameraNotReadyError", async () => {
+    // adapter.startRecording を resolver で手動制御
+    let resolveStart: (h: RecordingHandle) => void = () => {};
+    const startPromise = new Promise<RecordingHandle>((res) => {
+      resolveStart = res;
+    });
+    // 制御可能な adapter
+    const adapter = makeAdapter({
+      startRecording: vi.fn(async () => startPromise),
+    });
+    const manager = createCameraManager(adapter);
+    // 事前にプレビューを開始しておく
+    await manager.startPreview();
+    // startRecording を呼ぶが await しない
+    const startP = manager.startRecording();
+    // dispose を割り込ませる
+    await manager.dispose();
+    // 録画開始 Promise をここで解決
+    resolveStart(recordingHandle);
+    // race 後の startRecording 呼出は CameraNotReadyError
+    await expect(startP).rejects.toBeInstanceOf(CameraNotReadyError);
+    // 状態は idle に戻っている
+    expect(manager.getRecordingState()).toBe("idle");
+    // adapter.stopRecording が race 後の解放経路で呼ばれる
+    expect(adapter.stopRecording).toHaveBeenCalledWith(recordingHandle);
+  });
+
+  it("startRecording の race 解放時に adapter.stopRecording が throw しても CameraNotReadyError", async () => {
+    // adapter.startRecording を遅延、stopRecording は throw
+    let resolveStart: (h: RecordingHandle) => void = () => {};
+    const startPromise = new Promise<RecordingHandle>((res) => {
+      resolveStart = res;
+    });
+    const adapter = makeAdapter({
+      startRecording: vi.fn(async () => startPromise),
+      stopRecording: vi.fn(async () => {
+        throw new Error("stop fail");
+      }),
+    });
+    const manager = createCameraManager(adapter);
+    await manager.startPreview();
+    const startP = manager.startRecording();
+    await manager.dispose();
+    resolveStart(recordingHandle);
+    // 解放 throw は無視され CameraNotReadyError が返る
+    await expect(startP).rejects.toBeInstanceOf(CameraNotReadyError);
+  });
+
+  it("startScanning の await 中に dispose されたら unsubscribe を呼んで CameraNotReadyError", async () => {
+    // unsubscribe を spy
+    const unsub = vi.fn();
+    // adapter.scanBarcode を resolver で手動制御
+    let resolveStart: (fn: () => void) => void = () => {};
+    const startPromise = new Promise<() => void>((res) => {
+      resolveStart = res;
+    });
+    const adapter = makeAdapter({
+      scanBarcode: vi.fn(async () => startPromise),
+    });
+    const manager = createCameraManager(adapter);
+    // 事前にプレビュー
+    await manager.startPreview();
+    // startScanning を呼ぶが await しない
+    const startP = manager.startScanning({ formats: ["qr_code"] }, () => {});
+    // dispose を割り込ませる
+    await manager.dispose();
+    // スキャナ Promise を解決
+    resolveStart(unsub);
+    // race 後は CameraNotReadyError で reject
+    await expect(startP).rejects.toBeInstanceOf(CameraNotReadyError);
+    // unsubscribe が race 後に呼ばれている
+    expect(unsub).toHaveBeenCalled();
+    // 内部スキャン中フラグは false
+    expect(manager.isScanning()).toBe(false);
+  });
+
+  it("startScanning の race 解放時に unsubscribe が throw しても CameraNotReadyError", async () => {
+    // unsubscribe が throw
+    const unsub = vi.fn(() => {
+      throw new Error("unsub fail");
+    });
+    let resolveStart: (fn: () => void) => void = () => {};
+    const startPromise = new Promise<() => void>((res) => {
+      resolveStart = res;
+    });
+    const adapter = makeAdapter({
+      scanBarcode: vi.fn(async () => startPromise),
+    });
+    const manager = createCameraManager(adapter);
+    await manager.startPreview();
+    const startP = manager.startScanning({ formats: ["qr_code"] }, () => {});
+    await manager.dispose();
+    resolveStart(unsub);
+    // 解放 throw は無視され CameraNotReadyError が返る
+    await expect(startP).rejects.toBeInstanceOf(CameraNotReadyError);
+  });
+});

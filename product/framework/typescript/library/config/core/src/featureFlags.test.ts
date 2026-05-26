@@ -78,4 +78,22 @@ describe("withOverrides", () => {
     // しかし別参照
     expect(result).not.toBe(base);
   });
+
+  // overrides に明示的 undefined が含まれていても base の値が保持されることを保証
+  // （spread の素朴な合成だと undefined で base を上書きしてしまうため、filter が必要）
+  it("overrides に明示的 undefined が含まれていても base の値を保持する", () => {
+    // ベースフラグ
+    const base = { newUi: true, betaSearch: false };
+    // 型システム的には Partial<Record<...>> なので undefined 値も許容される
+    const overrides: Partial<Record<"newUi" | "betaSearch", boolean>> = {
+      // 明示的に undefined を指定（呼び出し側の意図によるバグや lint 抜けを想定）
+      newUi: undefined,
+    };
+    // 上書き処理
+    const result = withOverrides(base, overrides);
+    // newUi は base の値 (true) のまま保持される
+    expect(result.newUi).toBe(true);
+    // betaSearch も base のまま
+    expect(result.betaSearch).toBe(false);
+  });
 });

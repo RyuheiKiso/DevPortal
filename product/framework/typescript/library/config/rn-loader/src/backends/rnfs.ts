@@ -2,6 +2,8 @@
 import { ConfigLoaderError } from "../errors.js";
 // FileSystemBackend 型を取り込む
 import type { FileSystemBackend } from "../types.js";
+// パス結合ユーティリティ (loader.ts と同じロジックを共有する)
+import { joinPath, isAbsolutePath } from "../pathUtils.js";
 
 // react-native-fs の特殊ディレクトリを抽象化するリテラル
 // documents: 永続データ (RNFS.DocumentDirectoryPath)
@@ -52,29 +54,6 @@ async function loadRNFS(): Promise<RNFSModule> {
   const candidate = "default" in namespace ? namespace.default : namespace;
   // 必要なフィールドが揃っているとみなしてキャスト
   return candidate as RNFSModule;
-}
-
-// dir に含まれる区切り文字を尊重して baseName と結合する
-// Windows (RNW) では DocumentDirectoryPath が "C:\\Users\\..." 形式のため
-// 単純に "/" で結合すると "C:\\Users\\...\\LocalState/app.json" のような混在パスになり
-// RNFS の Windows 実装が解決に失敗する可能性があるため、区切り文字を統一する
-function joinPath(dir: string, baseName: string): string {
-  // 末尾のスラッシュ/バックスラッシュを正規化
-  const trimmed = dir.replace(/[\\/]+$/, "");
-  // dir に含まれる区切り文字を検出して採用する
-  //   ・"\\" を含み "/" を含まない → "\\" (Windows パス)
-  //   ・それ以外 → "/" (POSIX パス、または区切り無し)
-  // 混在パス ("C:\\Users/app") は実用上稀なため POSIX を優先する
-  const separator = trimmed.includes("\\") && !trimmed.includes("/") ? "\\" : "/";
-  // 検出した区切り文字で結合
-  return `${trimmed}${separator}${baseName}`;
-}
-
-// 絶対パスかどうかを判定する
-// POSIX 絶対パス (/...)、Windows ドライブレター (C:\... / C:/...)、UNC (\\\\server\\...) をカバー
-function isAbsolutePath(filePath: string): boolean {
-  // 正規表現で 3 形式を網羅
-  return /^([\\/]|[A-Za-z]:[\\/])/.test(filePath);
 }
 
 // baseDir リテラルから実体ディレクトリパスへ解決する

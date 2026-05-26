@@ -544,6 +544,30 @@ describe("useScopedLogger", () => {
     expect((logger.child as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
   });
 
+  // StrictMode 下で 2 回 render されても、child は 1 回しか呼ばれない（useRef ベースの memoize が機能している）
+  // (StrictMode は同一 commit 内で 2 回コンポーネント関数を呼ぶため、render 中の useRef mutation が壊れる典型ケース)
+  it("StrictMode 配下でも child は 1 回だけ呼ばれる", async () => {
+    // ベース logger
+    const logger = makeLogger();
+    // 戻り値の入れ物
+    const ref: { current: Logger | undefined } = { current: undefined };
+    // 文字列 scope の Probe
+    const Probe = makeProbe(ref, () => useScopedLogger("strict"));
+    // 描画（StrictMode で囲む）
+    await act(async () => {
+      // 標準的な StrictMode 構造で hook を 2 回呼ばせる
+      create(
+        <React.StrictMode>
+          <LoggerProvider logger={logger}>
+            <Probe />
+          </LoggerProvider>
+        </React.StrictMode>,
+      );
+    });
+    // StrictMode で 2 回 render されても child は 1 回しか呼ばれていない（memoize が効いている）
+    expect((logger.child as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+  });
+
   // context のキー名が違うケース（キー集合不一致分岐）
   it("context のキー名が変わると再生成する", async () => {
     // ベース logger

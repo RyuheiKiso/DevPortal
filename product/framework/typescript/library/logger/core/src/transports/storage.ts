@@ -48,9 +48,17 @@ export function createStorageTransport(opts: StorageTransportOptions): Transport
     // という重大な事故が起きていた。throw を伝播させれば、上位 (logger.safeWrite) の
     // onTransportError に流れ、永続化に失敗した事実が観測可能になり、既存ログは温存される。
     const decoded = await store.get(key);
-    // 配列であることを確認 (object / number 等の異常値は空配列にフォールバック)
-    // (この分岐は JSON.parse は成功したが配列でない構造の場合のみ。
-    //  I/O エラーや parse 失敗は上の await で既に throw されている)
+    // null/undefined（未保存状態）はそのまま空配列扱いで OK だが、
+    // それ以外で「配列でない値」が入っているのは他ライブラリと衝突か旧スキーマ。
+    // 旧実装は空配列フォールバックで store.set すると既存値が上書きされ、無関係なログを破壊していた。
+    // ここで throw して onTransportError 経路で観測可能にし、既存値を温存する。
+    if (decoded !== null && decoded !== undefined && !Array.isArray(decoded)) {
+      // 警告用メッセージ（key と decoded の型情報を含める）
+      throw new Error(
+        `storage transport: existing value at "${key}" is not an array; refusing to overwrite`,
+      );
+    }
+    // ここまでくれば decoded は null/undefined または LogEntry[] のいずれか
     const existing: LogEntry[] = Array.isArray(decoded) ? decoded : [];
     // 末尾に新規エントリを追加
     existing.push(entry);

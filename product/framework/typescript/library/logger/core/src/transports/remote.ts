@@ -251,6 +251,21 @@ export function createRemoteTransport(opts: RemoteTransportOptions): Transport {
           // throw せずに正常終了 → batcher は items をリバッファしない (= 永久ループ回避)
           return;
         }
+        // dispose 中の一時失敗 (リトライ wait の中断で sendBatch が lastError を投げたケース) は
+        // batcher にリバッファしても dispose 完了でロスするだけなので、
+        // ここで onPermanentFailure に通知して観測可能にしてから破棄する
+        if (disposed) {
+          // 観測コールバックがあれば通知 (callbackの中で例外が出ても無視)
+          if (onPermanentFailure !== undefined) {
+            try {
+              onPermanentFailure(err, items);
+            } catch {
+              // 観測コールバックの例外は呼出側に影響させない
+            }
+          }
+          // throw せずに正常終了 → dispose 経路に巻き戻し、サイレントロスを回避
+          return;
+        }
         // それ以外 (retryable 上限到達 / 一時失敗) は throw して batcher にリバッファさせる
         throw err;
       }
@@ -286,12 +301,9 @@ export function createRemoteTransport(opts: RemoteTransportOptions): Transport {
       // 集合は abort() 内で自身を delete するが念のため空にしておく
       pendingWaitAborts.clear();
       // 残バッファを送信（disposed フラグにより各リトライは即終了）
-      try {
-        // batcher.dispose は内部で flushInternal を呼ぶため、未送信分を一度走らせる
-        await batcher.dispose();
-      } catch {
-        // 失敗（DisposedError 含む）は dispose 時には握りつぶす（onTransportError でなく flush 経路と分離）
-      }
+      // batcher.dispose は内部で flushInternal を呼ぶため、未送信分を一度走らせる。
+      // 修正後 onFlush は dispose 中の失敗を `return` 分岐に倒すため batcher.dispose() は reject されない設計。
+      await batcher.dispose();
       // 進行中の sending があれば終わるまで待つ（disposed により早期終了するはず）
       while (sending !== null) {
         try {

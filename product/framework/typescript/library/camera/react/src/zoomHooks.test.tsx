@@ -232,6 +232,127 @@ describe("useZoom", () => {
     expect(captured?.error).toBe(err);
   });
 
+  it("preview-start 以外のイベントは zoomHooks の listener では無視される", async () => {
+    // preview-stop イベントを流して reset 経路に入らないことを確認
+    const manager = makeManager();
+    let captured: ReturnType<typeof useZoom> | undefined;
+    function P() {
+      captured = useZoom();
+      return null;
+    }
+    act(() => {
+      TestRenderer.create(
+        <CameraProvider manager={manager}>
+          <P />
+        </CameraProvider>,
+      );
+    });
+    // preview-stop を emit（zoom リセットは起きない）
+    act(() => {
+      (manager as { __emit?: (e: CameraEvent) => void }).__emit?.({
+        type: "preview-stop",
+        handleId: "p-a",
+        at: 0,
+      });
+    });
+    await flush();
+    // 初期値の 1 のまま、ユーザも未操作
+    expect(captured?.zoom).toBe(1);
+  });
+
+  it("別 preview に切り替わったら userSetRef がリセットされ zoom が新 range.min へ同期する", async () => {
+    // 2 つの異なる capabilities を順番に返す mock
+    const capsA = { ...zoomSupportedCaps, zoom: { min: 1, max: 5 } };
+    const capsB = { ...zoomSupportedCaps, zoom: { min: 2, max: 10 } };
+    let callCount = 0;
+    const manager = makeManager({
+      getCapabilities: vi.fn(async () => {
+        callCount++;
+        // 1 回目: capsA、2 回目以降: capsB
+        return callCount === 1 ? capsA : capsB;
+      }),
+    });
+    let captured: ReturnType<typeof useZoom> | undefined;
+    function P() {
+      captured = useZoom();
+      return null;
+    }
+    act(() => {
+      TestRenderer.create(
+        <CameraProvider manager={manager}>
+          <P />
+        </CameraProvider>,
+      );
+    });
+    // 1 回目の preview-start（カメラ A）
+    act(() => {
+      (manager as { __emit?: (e: CameraEvent) => void }).__emit?.({
+        type: "preview-start",
+        handle: { __brand: "PreviewHandle", id: "p-a", native: null },
+        at: 0,
+      });
+    });
+    await flush();
+    // capsA.zoom.min = 1 に同期
+    expect(captured?.zoom).toBe(1);
+    // ユーザが set
+    await act(async () => {
+      await captured?.set(3);
+    });
+    expect(captured?.zoom).toBe(3);
+    // 2 回目の preview-start（カメラ B、別ハンドル ID）→ userSetRef リセット
+    act(() => {
+      (manager as { __emit?: (e: CameraEvent) => void }).__emit?.({
+        type: "preview-start",
+        handle: { __brand: "PreviewHandle", id: "p-b", native: null },
+        at: 1,
+      });
+    });
+    await flush();
+    // capsB.zoom.min = 2 に同期される（ユーザ操作前の状態に戻る）
+    expect(captured?.zoom).toBe(2);
+  });
+
+  it("同一 preview ID で preview-start が複数回来てもユーザ set した zoom は維持される", async () => {
+    const manager = makeManager();
+    let captured: ReturnType<typeof useZoom> | undefined;
+    function P() {
+      captured = useZoom();
+      return null;
+    }
+    act(() => {
+      TestRenderer.create(
+        <CameraProvider manager={manager}>
+          <P />
+        </CameraProvider>,
+      );
+    });
+    // 1 回目 preview-start（カメラ A）
+    act(() => {
+      (manager as { __emit?: (e: CameraEvent) => void }).__emit?.({
+        type: "preview-start",
+        handle: { __brand: "PreviewHandle", id: "p-a", native: null },
+        at: 0,
+      });
+    });
+    await flush();
+    // ユーザ set
+    await act(async () => {
+      await captured?.set(7);
+    });
+    expect(captured?.zoom).toBe(7);
+    // 2 回目 preview-start（同じハンドル ID）→ reset されない
+    act(() => {
+      (manager as { __emit?: (e: CameraEvent) => void }).__emit?.({
+        type: "preview-start",
+        handle: { __brand: "PreviewHandle", id: "p-a", native: null },
+        at: 1,
+      });
+    });
+    await flush();
+    expect(captured?.zoom).toBe(7);
+  });
+
   it("capabilities.zoom=false なら supported=false / range=undefined", async () => {
     const manager = makeManager({
       getCapabilities: vi.fn(async () => zoomUnsupportedCaps),

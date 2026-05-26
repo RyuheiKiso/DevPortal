@@ -18,7 +18,12 @@ export interface NotificationManagerLike {
     // 重複検出キー
     dedupeKey?: string;
   }) => string;
-  // dialog を発行する関数（Promise を返すが、ブリッジでは結果を待たない fire-and-forget）
+  // dialog を発行する関数
+  // 戻り値の Promise は actions のいずれかが押された / ユーザが dismiss したタイミングで解決する想定。
+  // **契約**: result.reason には押下された action.id が文字列でそのまま入る。
+  //   - 例: actions=[{ id: "open-settings", label: "..." }] を渡したら、ボタン押下時に reason: "open-settings" が返る。
+  //   - 自動 dismiss / 閉じるボタン押下時は reason: undefined（または action 側で割り当てた id）。
+  // この契約は `@k1s0-ts-notification/core` の NotificationManager.dialog の挙動に依存する。
   dialog: (input: {
     // 重要度
     level?: "info" | "success" | "warning" | "error";
@@ -26,13 +31,18 @@ export interface NotificationManagerLike {
     title?: string;
     // 本文
     message: string;
-    // ボタン群
+    // ボタン群（id は dialog の戻り値 reason フィールドにそのまま現れる）
     actions?: ReadonlyArray<{ id: string; label: string; intent?: "primary" | "destructive" | "neutral" }>;
     // 任意のメタデータ
     meta?: Readonly<Record<string, unknown>>;
     // 重複検出キー
     dedupeKey?: string;
-  }) => Promise<{ dismissed: true; reason?: string }>;
+  }) => Promise<{
+    // dismissed は型上 true 固定（dialog は必ず閉じる）
+    dismissed: true;
+    // 押下された action.id が入る（押下なし / 自動 dismiss なら undefined）
+    reason?: string;
+  }>;
 }
 
 // ブリッジ生成時のオプション
@@ -97,7 +107,8 @@ export function attachNotificationBridge(
           dedupeKey: dedupeKey("permission-blocked"),
         })
         .then((result) => {
-          // open-settings 押下時のみ openSettings コールバックを呼ぶ
+          // 上で渡した action.id "open-settings" と一致したときだけ openSettings を呼ぶ。
+          // この比較は NotificationManagerLike.dialog の reason 契約（action.id をそのまま返す）に依存する。
           if (result.reason === "open-settings" && options.openSettings !== undefined) {
             options.openSettings();
           }

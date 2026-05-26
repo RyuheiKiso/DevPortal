@@ -1,5 +1,12 @@
-// AppError の公開型と kind 値配列を取り込み
-import { appErrorKindValues, type AppError, type AppErrorKind, type SerializedAppError } from "./types.js";
+// AppError の公開型と kind/severity の値配列を取り込み
+import {
+  appErrorKindValues,
+  appErrorSeverityValues,
+  type AppError,
+  type AppErrorKind,
+  type AppErrorSeverity,
+  type SerializedAppError,
+} from "./types.js";
 
 // object 型かつ null でないことを判定（typeof null === "object" の罠を回避）
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -32,6 +39,18 @@ function isAppErrorKind(value: unknown): value is AppErrorKind {
   return (appErrorKindValues as readonly string[]).includes(value);
 }
 
+// 文字列が AppErrorSeverity の許容値に含まれるか判定
+// AppError の severity は createAppError で必ず埋まる必須フィールドなので、
+// 型ガードでも値域までチェックして「severity 欠落／不正値が AppError 扱いされる」状態を防ぐ
+function isAppErrorSeverity(value: unknown): value is AppErrorSeverity {
+  // 文字列でなければ即 false
+  if (typeof value !== "string") {
+    return false;
+  }
+  // appErrorSeverityValues は readonly tuple なので string[] と見なして includes を呼ぶ
+  return (appErrorSeverityValues as readonly string[]).includes(value);
+}
+
 // 任意値が AppError 形状を満たすかを厳密に判定する type guard
 // SerializedAppError は name が "SerializedAppError" なのでここでは false となり、誤判定を防ぐ
 export function isAppError(value: unknown): value is AppError {
@@ -39,14 +58,15 @@ export function isAppError(value: unknown): value is AppError {
   if (!isRecord(value)) {
     return false;
   }
-  // name 固定値 + kind 厳密チェック + 必須フィールドの型チェック
+  // name 固定値 + kind/severity の値域チェック + 必須フィールドの型チェック
   return (
     value.name === "AppError" &&
     isAppErrorKind(value.kind) &&
     typeof value.message === "string" &&
     typeof value.userMessage === "string" &&
     typeof value.retryable === "boolean" &&
-    typeof value.reportable === "boolean"
+    typeof value.reportable === "boolean" &&
+    isAppErrorSeverity(value.severity)
   );
 }
 
@@ -57,13 +77,14 @@ export function isSerializedAppError(value: unknown): value is SerializedAppErro
   if (!isRecord(value)) {
     return false;
   }
-  // name 固定値 + kind 厳密チェック + 必須フィールドの型チェック
+  // name 固定値 + kind/severity の値域チェック + 必須フィールドの型チェック
   return (
     value.name === "SerializedAppError" &&
     isAppErrorKind(value.kind) &&
     typeof value.message === "string" &&
     typeof value.userMessage === "string" &&
     typeof value.retryable === "boolean" &&
-    typeof value.reportable === "boolean"
+    typeof value.reportable === "boolean" &&
+    isAppErrorSeverity(value.severity)
   );
 }

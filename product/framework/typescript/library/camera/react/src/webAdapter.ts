@@ -149,6 +149,9 @@ interface RecordingNative {
   stopResolve: ((result: RecordingResult) => void) | null;
   // 停止 Promise の rejecter
   stopReject: ((err: unknown) => void) | null;
+  // 自動停止（maxDurationMs / maxFileSizeBytes）で onstop が先行したとき、
+  // ユーザの stopRecording 呼出を待たずに保持する pending 結果
+  pendingResult?: RecordingResult;
 }
 
 // 内部 state（adapter インスタンス間で共有しない、createWebAdapter ごとに独立）
@@ -450,8 +453,8 @@ export function createWebAdapter(options: WebAdapterOptions = {}): CameraAdapter
       throw new CameraError("Preview handle is not active", { code: "INVALID_HANDLE" });
     }
     const native = state.preview.native;
-    // video 要素を取り出し（target 未指定なら一時要素を作る）
-    const sourceVideo = native.videoElement ?? createOffscreenVideo(native.stream);
+    // video 要素を取り出し（target 未指定なら一時要素を作って await で metadata 取得まで待つ）
+    const sourceVideo = native.videoElement ?? (await createOffscreenVideo(native.stream));
     // 動的に幅高さを参照（読めなければ 640x480 既定）
     const width =
       (sourceVideo as unknown as { videoWidth?: number }).videoWidth ?? 640;
@@ -497,13 +500,41 @@ export function createWebAdapter(options: WebAdapterOptions = {}): CameraAdapter
   }
 
   // 一時 video 要素を作る（target 未指定の takePicture 用）
-  function createOffscreenVideo(stream: MediaStreamLike): HTMLVideoElement {
+  // metadata（videoWidth/Height）が反映されるよう play + loadedmetadata 待機までを一括で行う
+  async function createOffscreenVideo(stream: MediaStreamLike): Promise<HTMLVideoElement> {
+    // document の存在チェック（テスト環境で破棄され得るため）
     const document = (globalThis as { document?: Document }).document;
     if (document === undefined) {
       throw new CameraError("document is not available", { code: "DOCUMENT_UNAVAILABLE" });
     }
+    // <video> を生成
     const v = document.createElement("video");
+    // 自動再生のためミュート / playsInline を強制
+    (v as unknown as { muted: boolean }).muted = true;
+    (v as unknown as { playsInline: boolean }).playsInline = true;
+    // ストリームを attach
     (v as unknown as { srcObject: MediaStreamLike }).srcObject = stream;
+    // play は best-effort（自動再生ポリシーで失敗する環境では握りつぶす）
+    try {
+      await v.play();
+    } catch {
+      // play 失敗は致命ではない（後続の drawImage で 0px のリスクは残る）
+    }
+    // readyState が読めない mock 環境では 1 を返したとみなして待機をスキップ
+    const readyState = (v as unknown as { readyState?: number }).readyState ?? 1;
+    // HAVE_METADATA (=1) 未満なら loadedmetadata イベントを 1 度だけ待つ
+    if (readyState < 1) {
+      await new Promise<void>((resolve) => {
+        // 1 度発火したら listener を外して resolve
+        const onMeta = (): void => {
+          (v as unknown as { removeEventListener?: (e: string, cb: () => void) => void })
+            .removeEventListener?.("loadedmetadata", onMeta);
+          resolve();
+        };
+        (v as unknown as { addEventListener?: (e: string, cb: () => void) => void })
+          .addEventListener?.("loadedmetadata", onMeta);
+      });
+    }
     return v;
   }
 
@@ -551,16 +582,49 @@ export function createWebAdapter(options: WebAdapterOptions = {}): CameraAdapter
       stopResolve: null,
       stopReject: null,
     };
+    // 累積バイト数（maxFileSizeBytes 監視用）
+    let totalBytes = 0;
+    // maxDurationMs 監視用のタイマー
+    let durationTimer: ReturnType<typeof setTimeout> | undefined;
+    // maxDurationMs が指定されているなら setTimeout で自動停止を仕掛ける
+    if (rOptions.maxDurationMs !== undefined) {
+      durationTimer = setTimeout(() => {
+        // recorder.stop を best-effort で呼ぶ（既に停止していれば throw する実装もあるため try）
+        try {
+          recorder.stop();
+        } catch {
+          // 停止失敗は無視（stopRecording 経路で改めて拾われる）
+        }
+      }, rOptions.maxDurationMs);
+    }
     // ondataavailable で chunks へ
     recorder.ondataavailable = (event) => {
       // 空でなければ蓄積（空配信は実環境では極稀だが防御的に弾く）
       /* v8 ignore next */
       if (event.data !== undefined && event.data.size > 0) {
         recordingNative.chunks.push(event.data);
+        // 累積バイトを更新
+        totalBytes += event.data.size;
+        // maxFileSizeBytes 超過なら自動停止
+        if (
+          rOptions.maxFileSizeBytes !== undefined &&
+          totalBytes >= rOptions.maxFileSizeBytes
+        ) {
+          try {
+            recorder.stop();
+          } catch {
+            // 停止失敗は無視
+          }
+        }
       }
     };
     // onstop で Blob を組み立てて resolve
     recorder.onstop = () => {
+      // durationTimer が動いていれば破棄（自動停止 / 明示 stop どちらでも片付ける）
+      if (durationTimer !== undefined) {
+        clearTimeout(durationTimer);
+        durationTimer = undefined;
+      }
       // 連結 Blob
       const blob = new Blob(recordingNative.chunks, { type: recordingNative.mimeType });
       // result を作る
@@ -570,9 +634,12 @@ export function createWebAdapter(options: WebAdapterOptions = {}): CameraAdapter
         durationMs: now() - recordingNative.startedAt,
         sizeBytes: blob.size,
       };
-      // resolver があれば解決
+      // resolver があれば解決、無ければ pending に積んでおき後続の stopRecording で取り出す
       if (recordingNative.stopResolve !== null) {
         recordingNative.stopResolve(result);
+      } else {
+        // 自動停止で先に onstop が走ったケース
+        recordingNative.pendingResult = result;
       }
     };
     // onerror で reject（stop 前に onerror が発火するケースは実環境では極稀だが防御的に許容）
@@ -584,8 +651,14 @@ export function createWebAdapter(options: WebAdapterOptions = {}): CameraAdapter
         );
       }
     };
-    // 録画開始
-    recorder.start();
+    // maxFileSizeBytes / maxDurationMs を監視する場合は chunked 配信のため timeslice を指定
+    // 監視が無いときは従来通り timeslice 無しで一括 ondataavailable を待つ
+    const timeslice =
+      rOptions.maxFileSizeBytes !== undefined || rOptions.maxDurationMs !== undefined
+        ? 1000
+        : undefined;
+    // 録画開始（timeslice を渡すと指定 ms ごとに ondataavailable が発火）
+    recorder.start(timeslice);
     // ハンドル組み立て
     const recordingHandle: RecordingHandle = {
       __brand: "RecordingHandle",
@@ -605,6 +678,12 @@ export function createWebAdapter(options: WebAdapterOptions = {}): CameraAdapter
     const native = state.recording.native;
     // 取り出して state クリア（onstop が後発でも参照は持たせる）
     state.recording = undefined;
+    // 自動停止で pendingResult が既に積まれていれば即時返却する
+    if (native.pendingResult !== undefined) {
+      const pending = native.pendingResult;
+      native.pendingResult = undefined;
+      return { ...pending, id: recording.id };
+    }
     // Promise を仕込んでから stop を呼ぶ
     const result = await new Promise<RecordingResult>((resolve, reject) => {
       native.stopResolve = resolve;
@@ -687,6 +766,10 @@ export function createWebAdapter(options: WebAdapterOptions = {}): CameraAdapter
           const detections = await detector.detect(video);
           // 1 件ずつ評価
           for (const d of detections) {
+            // ループ途中で cancel された場合は残りの結果を捨てて末尾の reschedule 判定へ抜ける
+            if (cancelled) {
+              break;
+            }
             const scannedAt = now();
             // throttle 判定
             if (!shouldEmitScan({ value: d.rawValue, scannedAt }, previous, config.throttleMs ?? 0)) {
@@ -854,7 +937,8 @@ export function createWebAdapter(options: WebAdapterOptions = {}): CameraAdapter
       // フォーカス能力
       focus,
       // フラッシュは Web 標準で別 API（ImageCapture.setOptions）が必要なため getCapabilities ではトーチと同義に揃える
-      flash: torchSupported,
+      // torch と同じく applyConstraints の有無も考慮して判定の一貫性を保つ
+      flash: torchSupported && track.applyConstraints !== undefined,
       // 露出モード一覧
       exposureMode: caps.exposureMode !== undefined && caps.exposureMode.length > 0 ? caps.exposureMode : (false as const),
       // ホワイトバランス一覧

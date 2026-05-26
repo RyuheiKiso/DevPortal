@@ -73,8 +73,13 @@ export function createBatcher<T>(opts: BatcherOptions<T>): Batcher<T> {
       // 発火時はハンドルをクリアしてから flush
       timerHandle = null;
       // 非同期 flush は await しない（タイマーコールバックでは fire-and-forget）
-      // 失敗時は flushInternal が items を buffer に戻すので握りつぶして OK（unhandled rejection 回避）
-      flushInternal().catch(() => {});
+      // 失敗時は flushInternal が items を buffer に戻したうえで catch される。
+      // タイマー駆動経路は明示 flush と異なり「呼出側が例外を観測する手段がない」ので、
+      // ここで startTimer() を呼んで次の発火を再スケジュールし、滞留バグを回避する。
+      flushInternal().catch(() => {
+        // タイマー駆動経路でだけタイマーを再起動（明示 flush 経路の連鎖発火は引き起こさない）
+        startTimer();
+      });
     }, opts.flushIntervalMs);
   };
 

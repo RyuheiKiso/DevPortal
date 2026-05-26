@@ -6,6 +6,7 @@ import type {
   AuthManager,
   AuthManagerOptions,
   AuthSession,
+  AuthTokenSet,
   GetSessionOptions,
   SignInRequest,
   SignOutRequest,
@@ -61,11 +62,26 @@ export function createAuthManager(
   let inflightRefresh: Promise<AuthSession> | null = null;
 
   // リスナーへセッション変化を通知する
+  // 1 つのリスナーが throw しても他のリスナーへの通知が止まらないよう、各呼び出しを try/catch で隔離する
+  // 例外は options.onListenerError があれば委譲し、無ければ console.error にフォールバックする (完全サイレントは運用事故検出が困難なため避ける)
   function emit(event: AuthEvent): void {
     // 現在の購読者へ順に通知する
     for (const listener of listeners) {
-      // 各リスナーに現在セッションとイベント名を渡す
-      listener(current, event);
+      // 隔離して呼ぶ
+      try {
+        // 各リスナーに現在セッションとイベント名を渡す
+        listener(current, event);
+      } catch (error) {
+        // 利用者提供フックがあれば委譲する (フック自体の throw はここでは catch しない: 二重 throw は呼び出し側のバグとして外に漏らす)
+        if (options.onListenerError !== undefined) {
+          // observability コールバックへエラー情報を渡す
+          options.onListenerError(error, event);
+        } else {
+          // フック未指定時は console.error でサイレント握り潰しを避ける
+          // eslint-disable-next-line no-console
+          console.error("[@k1s0-ts-auth/core] auth listener threw", error);
+        }
+      }
     }
   }
 
@@ -174,19 +190,33 @@ export function createAuthManager(
   }
 
   // 現在のアクセストークンを返す
+  // applySession は `current 代入 → await tokenStore.set` の順に直列実行されるため、
+  // mutex 内で current だけ先に更新済み・store はまだ古い窓が必ず存在する
+  // その窓で store を優先すると並行 getAccessToken/getAuthHeaders が古い値を返してしまうため、
+  // current.tokens を権威ソースとし、未定義時のみ store にフォールバックする
+  // (SSR ハイドレーション直前など、まだ adapter からセッションを取得していないケース用)
   async function getAccessToken(): Promise<string | undefined> {
-    // TokenStore の値を優先する
+    // セッション側に tokens が設定されていれば current を権威ソースとして返す (空文字は無効トークンとしてそのまま返す)
+    if (current.tokens !== undefined) return current.tokens.accessToken;
+    // セッション側に tokens が無い場合のみ TokenStore に問い合わせる
     const tokens = await tokenStore.get();
-    // 保存済みアクセストークンがあれば返す
-    if (tokens?.accessToken !== undefined) return tokens.accessToken;
-    // セッション上のアクセストークンを返す
-    return current.tokens?.accessToken;
+    // store にもなければ undefined
+    return tokens?.accessToken;
   }
 
   // HTTP クライアントに渡せる認証ヘッダを返す
+  // 上記 getAccessToken と同じ理由でセッション上のトークンを優先する
   async function getAuthHeaders(): Promise<Record<string, string>> {
-    // TokenStore の値を取得する
-    const tokens = (await tokenStore.get()) ?? current.tokens;
+    // セッション側に tokens があれば current を優先、無ければ store から取得する (`??` ではなく明示的な if/else で書くことで v8 coverage の分岐検出を確実にする)
+    let tokens: AuthTokenSet | undefined;
+    // current.tokens があれば権威ソースとして採用する
+    if (current.tokens !== undefined) {
+      // セッション上のトークンを採用
+      tokens = current.tokens;
+    } else {
+      // current が tokens を持たないときのみ store にフォールバック (SSR ハイドレーション直前など)
+      tokens = await tokenStore.get();
+    }
     // Authorization ヘッダ値を生成する
     const authorization = createAuthorizationHeader(tokens);
     // トークンがなければ空ヘッダを返す

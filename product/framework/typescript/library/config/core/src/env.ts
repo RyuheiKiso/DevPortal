@@ -14,6 +14,10 @@ export interface EnvConfigMap<T> {
 
 // dev をベースに env で指定された環境の差分をマージして返す
 // オブジェクト型のみを対象（プリミティブの混在による予期せぬ展開を避ける）
+//
+// 注意: 浅いマージのため、返り値のネストオブジェクトは map.dev / map.staging / map.prod と
+// 参照を共有する。呼び出し側で結果を mutate すると元のマップも書き換わるため、
+// 結果を変更したい場合は事前に structuredClone してから扱うこと。
 export function mergeEnvConfig<T extends object>(
   // 環境別の設定マップ（dev + staging/prod の差分）
   map: EnvConfigMap<T>,
