@@ -1,5 +1,5 @@
 // React の hook 群を取り込み
-import { useCallback, useContext, useRef } from "react";
+import { useCallback, useContext, useEffect, useRef } from "react";
 // core の公開型を取り込み
 import type { AppError } from "@k1s0-ts-error/core";
 // Context 値と関連型を取り込み
@@ -39,8 +39,13 @@ export function useAsyncErrorHandler<TArgs extends readonly unknown[], TResult>(
   const { handleError } = useErrorContext();
   // options を ref に保持して useCallback の依存配列から外す
   const optionsRef = useRef(options);
-  // 毎レンダで最新の options を ref に反映（呼び出し時にはこちらが参照される）
-  optionsRef.current = options;
+  // 最新の options を ref に反映する
+  // 旧実装は render 中に `optionsRef.current = options` を直接書き込んでいたため、
+  // Concurrent React で render が破棄されても optionsRef が古い値で固まりうる不整合があった。
+  // useEffect 内で commit 後にのみ更新することで、画面に反映された options のみが ref に残る。
+  useEffect(() => {
+    optionsRef.current = options;
+  });
   // 失敗時は handleError へ委譲し、戻り値を undefined にして上位 await を継続させる
   return useCallback(
     async (...args: TArgs): Promise<TResult | undefined> => {

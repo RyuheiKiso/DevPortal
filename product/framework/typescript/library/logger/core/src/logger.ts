@@ -102,12 +102,15 @@ function safeWrite(
       onError?.(transport, entry, err);
     }
   })();
-  // 進行中 Promise を集合に登録
-  pending.add(p);
-  // 完了時に集合から除去（fulfilled/rejected どちらでも）
-  p.finally(() => {
-    pending.delete(p);
+  // 完了時に集合から除去するための tracked Promise を作る
+  // 旧実装は `pending.add(p)` の後で `p.finally(...)` の戻り値を捨てており、
+  // flush() の `Promise.allSettled(Array.from(pending))` が finally の処理を確実に待てなかった。
+  // tracked を集合に登録することで「write 完了 + 削除」までを 1 つの Promise として追跡する。
+  const tracked: Promise<void> = p.finally(() => {
+    pending.delete(tracked);
   });
+  // 進行中 Promise を集合に登録 (削除は上の finally 内で行う)
+  pending.add(tracked);
 }
 
 // transport.flush または dispose を呼ぶラッパ

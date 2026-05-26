@@ -7,7 +7,8 @@
 - `AuthProvider` による Context 配信（初期ロード／エラー／reload の状態管理込み）
 - `useAuth` / `useAuthSession` / `useCurrentUser` / `useIsAuthenticated` / `useRole` / `usePermission` / `useAccess`
 - 描画ガード `RequireAuth` / `RequirePermission`
-- `createWebTokenStore` による localStorage / sessionStorage 連携（SSR 安全なメモリ fallback 付き）
+- **暗号化 TokenStore** `createEncryptedWebTokenStore` + `loadOrCreateAesKey`（AES-GCM, extractable:false 鍵を IndexedDB で永続化）
+- `createWebTokenStore` による localStorage / sessionStorage 連携（SSR 安全なメモリ fallback 付き、**平文保存**）
 - React 19 / 18 双方対応（peerDependencies に明記）
 
 ## クイックスタート
@@ -91,7 +92,44 @@ Context には `{ manager, session, loading, error, reload() }` を載せます�
 </RequirePermission>
 ```
 
-## `createWebTokenStore(options?)`
+## `createEncryptedWebTokenStore(options)` (推奨)
+
+AES-GCM で暗号化した状態で localStorage に保存する Web TokenStore。鍵は `@k1s0-ts-storage/react` の `loadOrCreateAesKey` で `extractable:false` の `CryptoKey` として生成し、IndexedDB に永続化します。鍵 raw bytes は JavaScript からもディスクからも露出しません。
+
+```tsx
+// 鍵管理ヘルパを取り込み (extractable:false 鍵生成 + IDB 永続化)
+import { loadOrCreateAesKey } from "@k1s0-ts-storage/react";
+// AES-GCM provider ファクトリを取り込み
+import { createAesGcmProvider } from "@k1s0-ts-storage/core";
+// 認証マネージャと暗号化 TokenStore を取り込み
+import { createAuthManager } from "@k1s0-ts-auth/core";
+import { createEncryptedWebTokenStore } from "@k1s0-ts-auth/react";
+
+// アプリ起動時に 1 度だけ実行する非同期セットアップ
+async function setupAuth() {
+  // IDB から鍵を取り出すか、初回なら生成して保存する (extractable:false / AES-GCM 256bit)
+  const key = await loadOrCreateAesKey({ keyName: "myapp.auth" });
+  // CryptoKey から AES-GCM provider を組み立てる
+  const provider = createAesGcmProvider({ key });
+  // 暗号化 TokenStore を作成
+  const tokenStore = createEncryptedWebTokenStore({ provider });
+  // AuthManager に渡す
+  return createAuthManager(adapter, { tokenStore });
+}
+```
+
+| option | 型 | 既定 |
+| --- | --- | --- |
+| `provider` | `CryptoProvider` | 必須。`createAesGcmProvider({ key })` で生成 |
+| `storage` | `WebKeyValueStorage` | `window.localStorage`（参照不能なら自動でメモリ fallback） |
+| `key` | `string` | `"k1s0.auth.tokens"` |
+| `onCorrupt` | `(raw, error) => void` | 復号 / JSON.parse / schema 検証いずれかが失敗した時に呼ばれる observability コールバック（破損データは自動削除） |
+
+復号失敗・envelope 不正・JSON 不正・schema 検証失敗のいずれでも `onCorrupt` 通知後に `removeItem` で破損データを掃除し `undefined` を返します（自動再ログインフロー）。
+
+## `createWebTokenStore(options?)` (平文)
+
+> **注意**: localStorage に **平文** で保存します。トークン用途では `createEncryptedWebTokenStore` を強く推奨。`createWebTokenStore` は機密性の低い設定値や、暗号化のオーバーヘッドを避けたい用途向けです。
 
 Web 環境向けの永続 TokenStore を生成します。
 

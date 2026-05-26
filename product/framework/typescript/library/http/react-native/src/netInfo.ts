@@ -110,7 +110,17 @@ export async function createNetInfoAware(
       });
     }
     // queueWhenOffline: オンライン復帰を待つ。signal abort / dispose では reject する。
+    // Promise executor 内のシーケンスを以下の順序で再構成して race を排除する:
+    //   ① disposed / aborted の事前チェック (即時 reject)
+    //   ② waiter 構築 + onAbort 定義
+    //   ③ signal への abort リスナ登録
+    //   ④ online 再チェック (登録の前後で復帰した場合に即 resolve)
+    //   ⑤ aborted 再チェック (③ で同期発火しなかったが間際で abort された場合)
+    //   ⑥ waiters 配列へ push
+    // ③〜⑥ の間で online 復帰 / abort が起きても、listener 登録済み + 後段の再チェックにより
+    // waiter がキューに居残るリーク (= waiter が永遠に解放されない) を防ぐ。
     await new Promise<void>((resolve, reject) => {
+      // 共通 reject helper (HttpError を組み立てて reject する)
       const rejectWith = (message: string, code: string, cause?: unknown): void => {
         reject(
           new HttpError({
@@ -122,7 +132,7 @@ export async function createNetInfoAware(
           }),
         );
       };
-      // dispose 後に enqueue されたら即 reject
+      // ① 事前チェック: dispose 後 / 既に abort 済みなら即 reject
       if (disposed) {
         rejectWith("netInfo aware disposed", "OFFLINE");
         return;
@@ -131,22 +141,57 @@ export async function createNetInfoAware(
         rejectWith("request aborted while offline", "ABORTED", getAbortReason(req.signal));
         return;
       }
+      // ② waiter を構築 (onAbort は ③ で登録するため先に組み立てる)
       const waiter: OfflineWaiter = {
         resolve,
         reject: (err) => reject(err),
         requestId: req.requestId,
         signal: req.signal,
       };
+      // abort 発火時のハンドラ: 自分が waiters に居れば抜き、reject する
       waiter.onAbort = (): void => {
+        // 自分の位置を捜して取り除く (まだ push されていない場合は -1 で no-op)
         const index = waiters.indexOf(waiter);
         if (index >= 0) {
           waiters.splice(index, 1);
         }
+        // reject する (Promise 既決ならこの reject は no-op)
         rejectWith("request aborted while offline", "ABORTED", getAbortReason(req.signal));
       };
+      // ③ signal への abort リスナ登録 (once:true なので 1 回で自動解除)
       if (req.signal !== undefined) {
         req.signal.addEventListener("abort", waiter.onAbort, { once: true });
       }
+      // ④ online 再チェック: ① と ③ の間に online が回復した場合は即 resolve
+      // (NetInfo の addEventListener コールバックは別タスクで発火するため、ここで online が true なら
+      //  リスナによる解放を待たずに直接 resolve しても安全)
+      // ※ 同期実行内では online が変化しない実装が大半だが、将来 ② の中で await を挟む変更や
+      //   NetInfo 実装の差異 (同期発火) に備えた防御コード。テストでの自然な到達は困難なため
+      //   coverage からは除外する。
+      /* v8 ignore next 8 */
+      if (online) {
+        // 登録した abort リスナを除去 (リーク防止)
+        if (req.signal !== undefined && waiter.onAbort !== undefined) {
+          req.signal.removeEventListener("abort", waiter.onAbort);
+        }
+        resolve();
+        return;
+      }
+      // ⑤ aborted 再チェック: ③ の登録より前に abort が立っていた可能性を補完
+      // (現代の AbortSignal.addEventListener は abort 後の登録でリスナを発火させないため、
+      //  ここで明示的に再チェックしないとリーク経路が残る)
+      // ※ TypeScript は ① の早期 return で `signal.aborted` を false に狭めるが、
+      //   実行時には ②〜④ の間に変化しうるため、`Boolean(...)` で narrowing を解除する。
+      //   同期実行内では到達しないが、AbortSignal 実装差異への防御として残す。
+      /* v8 ignore next 7 */
+      if (Boolean(req.signal?.aborted)) {
+        if (req.signal !== undefined && waiter.onAbort !== undefined) {
+          req.signal.removeEventListener("abort", waiter.onAbort);
+        }
+        rejectWith("request aborted while offline", "ABORTED", getAbortReason(req.signal));
+        return;
+      }
+      // ⑥ ここまで来たら本当にオフラインかつ未 abort、列に並ぶ
       waiters.push(waiter);
     });
     if (disposed) {

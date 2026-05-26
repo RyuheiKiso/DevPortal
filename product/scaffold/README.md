@@ -106,22 +106,32 @@ register-all.bat の実行後、Backstage の `http://localhost:7007/create/temp
 
 1. ブラウザで `http://localhost:7007/create/templates` を開く
 2. 使いたいカードの「Choose」ボタンを押下
-3. `プロジェクト名` (kebab-case、必須) と `説明` (任意) を入力
-4. 「Create」を押下 → Scaffolder が `fetch:plain` で scaffold dir 配下を新規プロジェクトにコピーする
+3. 必須項目を入力:
+   - React 19 SPA: `プロジェクト名` (kebab-case、必須) と `説明` (任意)
+   - React Native Windows: 上記に加え `パッケージ名` (reverse-DNS、例 `com.example.myapp`) が必須
+4. 「Create」を押下 → Scaffolder が `fetch:template` で `scaffold/skeleton/<sub>/` 配下のみを新規プロジェクトにコピーし、`${{ values.* }}` プレースホルダを自動展開する
 
-### 重要な caveat
+### skeleton 化の概要
 
-`fetch:plain` は `scaffold/react/` (または `scaffold/react_native/`) ディレクトリ配下を**そのまま全部コピー**します。**生成後に以下のファイルを手動削除してください**:
+`scaffold/skeleton/{react,react_native}/` に **git 管理対象だけを抽出した最小雛形** を配置しており、生成物は数十 MB 程度に収まります (旧 `fetch:plain` 時代は約 2 GB)。プレースホルダ置換も同時に行われるため、生成後の手作業 (package.json 書き換え、ファイル名変更等) は不要です。
 
-- `node_modules/` (大きいので必ず削除 → `npm install` で再生成)
-- `dist/` / `build/` / `.vite/` (Vite キャッシュ・ビルド成果物)
-- `windows/Debug/` / `windows/Release/` / `*.dll` / `*.appx` (React Native Windows のネイティブビルド成果物)
-- `template.yaml` (これは scaffold メタデータなので新規プロジェクトには不要)
-- `catalog-info.yaml` (新規プロジェクトでは独自に書き直す)
+主な置換内容:
+
+| 項目 | 置換結果 |
+|---|---|
+| `package.json` `name` | プロジェクト名 |
+| `index.html` `<title>` (react) | プロジェクト名 |
+| `app.json` `name` / `displayName` (RN) | プロジェクト名 |
+| Android `applicationId` / `namespace` | パッケージ名 |
+| Android Java パッケージパス (RN) | `android/app/src/main/java/com/example/myapp/` のように展開 |
+| iOS xcodeproj / ディレクトリ名 (RN) | `ios/<プロジェクト名>.xcodeproj` 等にリネーム |
+
+### 既知の制約
+
+- **Windows プロジェクト名 (RN) は "ReactNative" 固定**: `windows/` 配下の vcxproj / sln / Identity Name は固定です。Visual Studio は GUID で識別するため動作には支障ありません。表示名を変更したい場合は生成後に `windows/ReactNative.Package/Package.appxmanifest` の `<DisplayName>` を手で編集してください。
 
 ### 将来の改良候補
 
-- `skeleton/` サブディレクトリに不要ファイル除外済みの最小雛形を切り出し、`fetch:template` 経由で `${{ values.name }}` プレースホルダ置換可能にする
 - `publish:github` action でリポジトリ作成 + プッシュまで自動化
 - `catalog:register` step で生成直後に Backstage Catalog にも登録
 

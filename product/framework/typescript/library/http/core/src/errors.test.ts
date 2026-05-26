@@ -115,12 +115,13 @@ describe("normalizeError", () => {
     expect(out.requestId).toBe("r");
     expect(out.cause).toBe(e);
   });
-  // TimeoutError は code:"TIMEOUT"
-  it("DOMException(TimeoutError) は TIMEOUT に正規化", () => {
+  // TimeoutError は code:"TIMEOUT"、retryable=true (per-attempt timeout の再試行を許可)
+  // 実際の再試行可否は retry 層の冪等性ガード (resolveEffectiveRetryPolicy) が最終決定する
+  it("DOMException(TimeoutError) は TIMEOUT に正規化される (retryable=true)", () => {
     const e = new DOMException("deadline", "TimeoutError");
     const out = normalizeError(e, makeReq("r"));
     expect(out.code).toBe("TIMEOUT");
-    expect(out.retryable).toBe(false);
+    expect(out.retryable).toBe(true);
   });
   // TypeError は NETWORK / cause なしは retryable=false（CORS や Mixed Content の永続失敗を保護）
   it("TypeError (cause なし) は NETWORK / retryable=false", () => {

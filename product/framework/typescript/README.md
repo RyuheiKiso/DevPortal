@@ -24,12 +24,15 @@ DevPortal の TypeScript 共通基盤ライブラリ群を格納するディレ�
 | `library/storage/core` | `@k1s0-ts-storage/core` | KV ストレージコア (合成可能ミドルウェア / TypedSlot / 機密度別 Registry / 暗号化) |
 | `library/storage/react` | `@k1s0-ts-storage/react` | React 向け Storage Provider / Hook / アダプタ (localStorage / sessionStorage / IndexedDB / cookie) / cross-tab 同期 |
 | `library/storage/react-native` | `@k1s0-ts-storage/react-native` | React Native 向け Storage Provider / Hook / アダプタ (AsyncStorage / SecureStore / Keychain / MMKV) |
+| `library/camera/core` | `@k1s0-ts-camera/core` | カメラコア (静止画 / 動画 / プレビュー / QR バーコード / 権限モデル) |
+| `library/camera/react` | `@k1s0-ts-camera/react` | React 向けカメラ Provider / Hook + Web 用 webAdapter (MediaDevices / MediaRecorder / BarcodeDetector) |
+| `library/camera/react-native` | `@k1s0-ts-camera/react-native` | React Native 向けカメラ Provider / Hook + 公式アダプタ (vision-camera / expo-camera / Windows MediaCapture) |
 
 依存関係は `react` / `react-native` が同グループの `core` を参照する形です (`file:../core` 開発参照 → publish 時に `^<version>` に自動書き換え)。
 
 ## publish スクリプト
 
-このディレクトリには 18 パッケージを Verdaccio へ一括 publish するためのスクリプトを同梱しています。
+このディレクトリには 21 パッケージを Verdaccio へ一括 publish するためのスクリプトを同梱しています。
 
 | ファイル | 役割 |
 |---|---|
@@ -55,8 +58,8 @@ publish-all.bat
 1. Verdaccio (`http://localhost:4873`) の死活確認
 2. `admin` / `admin` で htpasswd 認証 → publish 用 JWT を取得
 3. 取得トークンを `%TEMP%` 配下の使い捨て `.npmrc` に書き出し、`NPM_CONFIG_USERCONFIG` 環境変数で npm に読み込ませる (ユーザーの `~/.npmrc` は汚染されません)
-4. 第 1 ラウンドで `*/core` 4 パッケージを並列 publish (既定 4 並列、`-MaxParallel` で変更可)
-5. 第 2 ラウンドで `*/react` `*/react-native` 8 パッケージを並列 publish
+4. 第 1 ラウンドで `*/core` 8 パッケージを並列 publish (既定 4 並列、`-MaxParallel` で変更可)
+5. 第 2 ラウンドで `*/react` `*/react-native` 16 パッケージを並列 publish
 6. 集計結果 (パッケージごとの所要時間 + トータル) を OK / SKIP / FAIL の色付きで表示
 7. 一時 `.npmrc` を削除して終了
 
@@ -193,6 +196,7 @@ API リファレンスや使用例は各パッケージ配下の README を参�
 - [logger/core/README.md](library/logger/core/README.md)
 - [http/core/README.md](library/http/core/README.md)
 - [notification/core/README.md](library/notification/core/README.md)
+- [camera/core/README.md](library/camera/core/README.md)
 
 `react` / `react-native` 版の README もそれぞれのディレクトリ直下にあります。
 
@@ -200,20 +204,20 @@ API リファレンスや使用例は各パッケージ配下の README を参�
 
 このディレクトリ配下のパッケージ群は、社内 Backstage (DevPortal の setup ツールでインストール、`http://localhost:7007`) の Software Catalog に登録できる状態にしてあります。登録すると依存関係グラフや所有者一覧が Backstage UI 上で可視化されます。
 
-### 登録される 26 エンティティの構成
+### 登録される 30 エンティティの構成
 
 | ファイル | 種別 | 名前 | 役割 |
 |---|---|---|---|
-| `catalog-info.yaml` | Location | `k1s0-ts-framework` | 配下 25 ファイルの一括取り込みエントリポイント |
+| `catalog-info.yaml` | Location | `k1s0-ts-framework` | 配下 29 ファイルの一括取り込みエントリポイント |
 | `owners.yaml` | Group + Domain | `k1s0-framework-team` / `k1s0-framework` | 所有チームとフレームワーク領域 |
-| `<domain>/catalog-info.yaml` | System | `k1s0-ts-<domain>` | 7 ドメイン (auth / config / error / http / logger / notification / storage) |
-| `<domain>/<platform>/catalog-info.yaml` | Component | `k1s0-ts-<domain>-<platform>` | 21 パッケージ (core / react / react-native) |
+| `<domain>/catalog-info.yaml` | System | `k1s0-ts-<domain>` | 8 ドメイン (auth / config / error / http / logger / notification / storage / camera) |
+| `<domain>/<platform>/catalog-info.yaml` | Component | `k1s0-ts-<domain>-<platform>` | 24 パッケージ (core / react / react-native) |
 
 `react` / `react-native` 版 Component は `spec.dependsOn` で同ドメインの `core` を参照しているため、Backstage UI の「Dependency Graph」タブで `core → react / react-native` の矢印が表示されます。
 
 ### 登録手順 (推奨: バッチ一発 + 管理者権限)
 
-`publish-all.bat` と同じ要領で、`register-all.bat` 一発で 21 ファイルを Backstage の `app-config.yaml` に追記し、サービスを自動再起動して取り込みまで完了させます。
+`publish-all.bat` と同じ要領で、`register-all.bat` 一発で 24 ファイルを Backstage の `app-config.yaml` に追記し、サービスを自動再起動して取り込みまで完了させます。
 
 ```cmd
 cd C:\work\github\DevPortal\product\framework\typescript
@@ -225,12 +229,12 @@ register-all.bat
 
 1. **前提確認**: 管理者権限、`app-config.yaml` 存在、Python + PyYAML の利用可否
 2. **バックアップ**: `app-config.yaml.bak.YYYYMMDD-HHMMSS` にコピー
-3. **YAML マージ** (`register-locations.py`): `catalog.locations` に 25 件の `type: file` エントリ追記、`catalog.rules[0].allow` に `Group` / `Domain` 追加 (重複は SKIP)
+3. **YAML マージ** (`register-locations.py`): `catalog.locations` に 29 件の `type: file` エントリ追記、`catalog.rules[0].allow` に `Group` / `Domain` 追加 (重複は SKIP)
 4. **サービス再起動**: `Restart-Service DevPortal-Backstage`
 5. **起動待ち**: `/api/auth/guest/refresh` の 200 を最大 120 秒ポーリング
-6. **取り込み確認**: guest トークンで `/api/catalog/entities` を取得し、`k1s0-*` 26 件 (Group 1 / Domain 1 / System 7 / Component 17) が見えるまで最大 90 秒ポーリング
+6. **取り込み確認**: guest トークンで `/api/catalog/entities` を取得し、`k1s0-*` 30 件 (Group 1 / Domain 1 / System 8 / Component 20) が見えるまで最大 90 秒ポーリング
 
-実測値: 初回 約 36 秒、再実行時は added=0 / skipped=21 で idempotent。終了コードは ConfigFile モードでは 0 (成功) のみ、例外発生時 1。
+実測値: 初回 約 36 秒、再実行時は added=0 / skipped=24 で idempotent。終了コードは ConfigFile モードでは 0 (成功) のみ、例外発生時 1。
 
 > **管理者権限について**: `app-config.yaml` (`%ProgramData%\DevPortal\backstage\app\`) の上書きと `Restart-Service` に必要です。`Start-Process powershell -Verb RunAs` で UAC 経由実行も可能。
 
@@ -281,10 +285,10 @@ register-all.bat -BackstageUrl http://192.168.0.10:7007 ^
 
 | 項目 | publish-all | register-all |
 |---|---|---|
-| 対象 | 18 npm パッケージ | 25 catalog-info.yaml |
+| 対象 | 21 npm パッケージ | 29 catalog-info.yaml |
 | 送信先 | Verdaccio (`/-/ping`, npm publish) | Backstage (`/api/catalog/health`, `POST /locations`) |
 | 認証 | htpasswd Basic auth (`_auth=Base64`) | optional Bearer (permission 有効時のみ) |
-| Round 構造 | Round 1 = core 7 / Round 2 = react・react-native 14 | Round 1 = owners + 7 System / Round 2 = 21 Component |
+| Round 構造 | Round 1 = core 8 / Round 2 = react・react-native 16 | Round 1 = owners + 8 System / Round 2 = 24 Component |
 | 重複検出 | `npm view <name>@<ver>` で SKIP | 既存 locations の target 一致で SKIP / 409 を SKIP 扱い |
 
 ### 失敗時のトラブルシュート

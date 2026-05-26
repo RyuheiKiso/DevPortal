@@ -27,6 +27,10 @@ export interface RemoteTransportOptions {
   serialize?: (entries: readonly LogEntry[]) => BodyInit;
   // タイマー実装の差し替え（既定: グローバル setTimeout/clearTimeout）
   timer?: BatcherTimer;
+  // 永続失敗 (shouldRetry が false を返したケース) で items を破棄する直前に通知する
+  // 旧実装は永続失敗時も items を batcher にリバッファし、4xx 等で「同じバッチを無限再送 → 全件失敗」
+  // のループが起きていた。本オプションで観測可能性を担保しつつ、items はそのまま破棄する。
+  onPermanentFailure?: (error: unknown, items: readonly LogEntry[]) => void;
 }
 
 // 既定ヘッダ（Content-Type を明示）
@@ -49,6 +53,24 @@ const defaultShouldRetry = (response: Response | undefined, _error: unknown, _at
 const defaultSerialize = (entries: readonly LogEntry[]): BodyInit =>
   // 単純なラッパーオブジェクトに包んで送信
   JSON.stringify({ entries });
+
+// 永続失敗を示す内部エラー型
+// shouldRetry が false を返したケースで sendBatch が throw する。
+// onFlush 側でこの型を検出し「items を batcher に戻さず破棄する」分岐に振る。
+class RemotePermanentFailure extends Error {
+  // 元の原因 (4xx Response や fetch 由来 TypeError 等)
+  readonly cause: unknown;
+  constructor(cause: unknown) {
+    // メッセージは原因に従う (Error なら message、それ以外は String 化)
+    // (sendBatch 側は必ず Error を渡すが、API 形上 unknown を受けるため防御的に分岐する)
+    /* v8 ignore next */
+    super(cause instanceof Error ? cause.message : String(cause));
+    // 型判別子 (instanceof と name 比較の双方で識別可能にする)
+    this.name = "RemotePermanentFailure";
+    // 原因を保持
+    this.cause = cause;
+  }
+}
 
 // HTTP リトライ送信付きのトランスポートを生成
 export function createRemoteTransport(opts: RemoteTransportOptions): Transport {
@@ -165,9 +187,10 @@ export function createRemoteTransport(opts: RemoteTransportOptions): Transport {
       // 直前のエラーを保持（失敗時はこれを最後に投げる）
       // thrown が defined ならそれを、無ければ response は必ず存在するのでステータスを文字列化
       lastError = thrown ?? new Error(`remote transport failed with status ${response!.status}`);
-      // shouldRetry が false ならループを抜けて投げる
+      // shouldRetry が false なら「永続失敗」として PermanentFailure を投げる
+      // (旧実装は通常 Error として投げており、batcher 側で items が無限リバッファされていた)
       if (!shouldRetry(response, thrown, attempt)) {
-        break;
+        throw new RemotePermanentFailure(lastError);
       }
       // リトライ余地が無ければ抜ける
       if (attempt >= maxRetries) {
@@ -187,6 +210,9 @@ export function createRemoteTransport(opts: RemoteTransportOptions): Transport {
     // リトライ上限到達 or 中断。最後のエラーを投げて呼出側に通知
     throw lastError;
   };
+
+  // 永続失敗通知コールバック (任意)
+  const onPermanentFailure = opts.onPermanentFailure;
 
   // バッチ機構（onFlush で実際に送信する）
   const batcher = createBatcher<LogEntry>({
@@ -208,7 +234,26 @@ export function createRemoteTransport(opts: RemoteTransportOptions): Transport {
         sending = null;
       });
       // 呼出側にも結果を返すため await
-      await sending;
+      try {
+        await sending;
+      } catch (err) {
+        // 永続失敗 (shouldRetry=false) は items を破棄する分岐に振る
+        // (throw すると batcher.flushInternal が items をリバッファして無限ループになる)
+        if (err instanceof RemotePermanentFailure) {
+          // 任意の観測コールバックがあれば通知 (items は引数で渡し、内部参照は破棄する)
+          if (onPermanentFailure !== undefined) {
+            try {
+              onPermanentFailure(err.cause, items);
+            } catch {
+              // 観測コールバックの例外は呼出側に影響させない
+            }
+          }
+          // throw せずに正常終了 → batcher は items をリバッファしない (= 永久ループ回避)
+          return;
+        }
+        // それ以外 (retryable 上限到達 / 一時失敗) は throw して batcher にリバッファさせる
+        throw err;
+      }
     },
   });
 

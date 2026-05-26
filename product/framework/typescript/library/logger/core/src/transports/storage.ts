@@ -40,17 +40,18 @@ export function createStorageTransport(opts: StorageTransportOptions): Transport
 
   // 実際の read-modify-write 処理（単一の write 呼び出しに対する純粋な作業）
   const performWrite = async (entry: LogEntry): Promise<void> => {
-    // 既存配列を読み込む（壊れた JSON / 配列でない値はすべて空配列扱い）
-    let existing: LogEntry[];
-    try {
-      // codec 経由で値を取得する (JSON.parse 失敗時は throw されるので catch)
-      const decoded = await store.get(key);
-      // 配列であることを確認 (object / number 等は空配列にフォールバック)
-      existing = Array.isArray(decoded) ? decoded : [];
-    } catch {
-      // パース失敗 (壊れた JSON 等) は空配列で起動継続
-      existing = [];
-    }
+    // 既存配列を読み込む
+    // store.get が throw した場合は **そのまま伝播させ** write を失敗とする。
+    // 旧実装は catch で空配列にフォールバックしていたが、
+    //   - 一時的な I/O エラー (ディスク満杯/権限) でも空配列扱いになり、
+    //   - 続く store.set で既存ログ全件が空 + 新規エントリ 1 件に置き換わる → ログ消失
+    // という重大な事故が起きていた。throw を伝播させれば、上位 (logger.safeWrite) の
+    // onTransportError に流れ、永続化に失敗した事実が観測可能になり、既存ログは温存される。
+    const decoded = await store.get(key);
+    // 配列であることを確認 (object / number 等の異常値は空配列にフォールバック)
+    // (この分岐は JSON.parse は成功したが配列でない構造の場合のみ。
+    //  I/O エラーや parse 失敗は上の await で既に throw されている)
+    const existing: LogEntry[] = Array.isArray(decoded) ? decoded : [];
     // 末尾に新規エントリを追加
     existing.push(entry);
     // 上限を超える場合は古い順から切り捨て（純粋に最新 N 件を保持）

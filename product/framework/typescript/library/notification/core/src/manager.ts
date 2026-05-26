@@ -197,9 +197,10 @@ export function createNotificationManager(
     }
     // dedupeKey 一致の既存トーストがあれば置換（同じ ID を再利用）
     if (input.dedupeKey !== undefined) {
-      // 既存通知を探す
-      const existing = findByDedupeKey(queue, input.dedupeKey);
-      // 既存があり、かつ toast の場合に限り置換
+      // 既存通知を探す (kind="toast" のみを対象にする)
+      // (kindFilter を渡さないと先頭の dialog/confirm がヒットして toast の dedupe が壊れる)
+      const existing = findByDedupeKey(queue, input.dedupeKey, "toast");
+      // 既存があれば置換 (kindFilter により kind は必ず toast)
       if (existing !== null && existing.notification.kind === "toast") {
         // 既存のタイマーを停止（duration をリセット）
         clearTimer(existing.notification.id);
@@ -278,16 +279,25 @@ export function createNotificationManager(
       createdAt: now(),
     };
     const frozenNotification = freezeNotification(notification);
-    // キュー末尾に追加
+    // resolve をホイスト（Promise executor は ECMA 仕様上同期実行されるためここで確実に取り出せる）
+    let resolveFn!: (result: DialogResult) => void;
+    // 解決用 Promise を組み立てる
+    const promise = new Promise<DialogResult>((resolve) => {
+      // resolve 関数を外側に逃がす（pending 登録に使用）
+      resolveFn = resolve;
+    });
+    // 重要: pending 登録は queue.push / emit より前に行う
+    // emit("add") の listener が同期的に resolveDialog(id) を呼んでも no-op にならないよう
+    // pendingDialogs 側を先に整える（順序を逆にすると Promise が永久未解決になる）
+    pendingDialogs.set(id, { resolve: resolveFn });
+    // キュー末尾に追加（pending 登録済みなので listener から同期解決されても安全）
     queue.push(frozenNotification);
     // add イベントを通知
     emit({ type: "add", notification: frozenNotification });
     // 上限超過のときは最古 toast を破棄（dialog/confirm のみの場合は何も削除しない）
     enforceQueueLimit();
-    // Promise を構築して pending に登録
-    return new Promise<DialogResult>((resolve) => {
-      pendingDialogs.set(id, { resolve });
-    });
+    // 解決用 Promise を返す
+    return promise;
   };
 
   // confirm の本体（Promise<boolean> を返す）
@@ -313,16 +323,25 @@ export function createNotificationManager(
       createdAt: now(),
     };
     const frozenNotification = freezeNotification(notification);
-    // キュー末尾に追加
+    // resolve をホイスト（Promise executor は ECMA 仕様上同期実行されるためここで確実に取り出せる）
+    let resolveFn!: (value: boolean) => void;
+    // 解決用 Promise を組み立てる
+    const promise = new Promise<boolean>((resolve) => {
+      // resolve 関数を外側に逃がす（pending 登録に使用）
+      resolveFn = resolve;
+    });
+    // 重要: pending 登録は queue.push / emit より前に行う
+    // emit("add") の listener が同期的に resolveConfirm(id) を呼んでも no-op にならないよう
+    // pendingConfirms 側を先に整える（順序を逆にすると Promise が永久未解決になる）
+    pendingConfirms.set(id, { resolve: resolveFn });
+    // キュー末尾に追加（pending 登録済みなので listener から同期解決されても安全）
     queue.push(frozenNotification);
     // add イベントを通知
     emit({ type: "add", notification: frozenNotification });
     // 上限超過のときは最古 toast を破棄
     enforceQueueLimit();
-    // Promise 構築 + pending 登録
-    return new Promise<boolean>((resolve) => {
-      pendingConfirms.set(id, { resolve });
-    });
+    // 解決用 Promise を返す
+    return promise;
   };
 
   // dialog を reason 付きで解決する（UI 側のボタン押下用）

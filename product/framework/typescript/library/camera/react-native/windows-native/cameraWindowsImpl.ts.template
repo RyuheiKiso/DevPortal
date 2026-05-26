@@ -1,0 +1,223 @@
+// ============================================================================
+// cameraWindowsImpl.ts (template)
+// @k1s0-ts-camera/react-native の WindowsCameraImpl を実装する TypeScript
+// ブリッジファイル。利用者プロジェクトの src/ などにコピーして使ってください。
+//
+// 拡張子 .template は npm publish 後の意図しない参照を防ぐためのものです。
+// 利用時は .template を外して "cameraWindowsImpl.ts" にリネームしてください。
+// ============================================================================
+
+// React Native の NativeModules 経由でネイティブモジュールにアクセス
+import { NativeModules } from "react-native";
+// 型定義は core から
+import type {
+  PermissionDescriptor,
+  PermissionStatus,
+  PhotoOptions,
+  PhotoResult,
+  PreviewConfig,
+  RecordingOptions,
+  RecordingResult,
+} from "@k1s0-ts-camera/core";
+// WindowsCameraImpl interface は本パッケージのサブパスから取得
+import type { WindowsCameraImpl } from "@k1s0-ts-camera/react-native/adapters/windows";
+
+// ネイティブモジュールの ABI 型定義（K1s0Camera.h の REACT_METHOD と 1:1 対応）
+interface NativeK1s0Camera {
+  // 利用可能カメラ列挙
+  listDevices(): Promise<Array<{ id: string; label: string }>>;
+  // 権限要求（needMicrophone: true なら AudioAndVideo モードで初期化テスト）
+  // 注: 初回呼び出し時に OS のカメラ権限ダイアログを表示する可能性あり（副作用あり）
+  requestPermission(needMicrophone: boolean): Promise<string>;
+  // 現在の権限状態を非破壊で取得（副作用なし、ダイアログを表示しない）
+  // 一度も requestPermission が呼ばれていない場合は "prompt" を返す
+  getCurrentPermission(): Promise<string>;
+  // プレビュー開始（戻り値: session ID、空文字なら失敗）
+  startPreview(deviceId: string, needAudio: boolean): Promise<string>;
+  // プレビュー停止
+  stopPreview(sessionId: string): Promise<void>;
+  // 静止画キャプチャ（戻り値: { path, width, height }）
+  takePicture(sessionId: string): Promise<{ path: string; width: number; height: number }>;
+  // 動画録画開始（戻り値: recording ID、空文字なら失敗）
+  startRecording(sessionId: string): Promise<string>;
+  // 動画録画停止（戻り値: { path, sizeBytes }）
+  stopRecording(recordingId: string): Promise<{ path: string; sizeBytes: number }>;
+}
+
+// NativeModules から取得（ReactPackageProvider で AddModule(L"K1s0Camera", ...) した名前で参照）
+const native: NativeK1s0Camera | undefined =
+  (NativeModules as { K1s0Camera?: NativeK1s0Camera }).K1s0Camera;
+
+// 内部 session/recording 管理（adapter インスタンスごとに独立した state）
+function createSessionState() {
+  // PreviewHandle id -> ネイティブ session ID
+  const previewMap = new Map<string, string>();
+  // RecordingHandle id -> ネイティブ recording ID
+  const recordingMap = new Map<string, string>();
+  // recording ID -> 開始時刻（durationMs 算出用）
+  const recordingStartedAt = new Map<string, number>();
+  return { previewMap, recordingMap, recordingStartedAt };
+}
+
+// WindowsCameraImpl を実装するファクトリ
+// 利用例: createWindowsAdapter({ mediaCapture: createWindowsNativeImpl() })
+export function createWindowsNativeImpl(): WindowsCameraImpl {
+  // ネイティブモジュール未ロード時は明示エラー（利用者の組み込みミスを早期発見）
+  if (native === undefined) {
+    throw new Error(
+      "K1s0Camera ネイティブモジュールがロードされていません。" +
+        "Package.appxmanifest の <DeviceCapability Name='webcam' /> と、" +
+        ".vcxproj への K1s0Camera.cpp 登録、ReactPackageProvider への AddModule(L'K1s0Camera', ...) 追記を確認してください。",
+    );
+  }
+  // セッション状態
+  const state = createSessionState();
+
+  return {
+    // デバイス列挙（CameraDevice 形に整形）
+    listDevices: async () => {
+      const list = await native.listDevices();
+      return list.map((d) => ({
+        id: d.id,
+        label: d.label,
+      }));
+    },
+
+    // 権限照会（非破壊、副作用なし）
+    // core 契約に従い「OS ダイアログを表示しない」実装。
+    // ネイティブ側のキャッシュ（過去の requestPermission 結果）を読むだけで、
+    // 一度も requestPermission が呼ばれていない場合は "prompt" を返す。
+    // descriptor.microphone はキャッシュ判定に使われない（Windows ではカメラ・マイクをまとめて要求）
+    getPermission: async (_descriptor: PermissionDescriptor): Promise<PermissionStatus> => {
+      const result = await native.getCurrentPermission();
+      return result as PermissionStatus;
+    },
+
+    // 権限要求（OS ダイアログを表示する可能性あり）
+    // 結果はネイティブ側のキャッシュに保存され、以降の getPermission で副作用なく取得可能
+    requestPermission: async (descriptor: PermissionDescriptor): Promise<PermissionStatus> => {
+      const result = await native.requestPermission(descriptor.microphone === true);
+      return result as PermissionStatus;
+    },
+
+    // プレビュー開始（ネイティブから session ID を取得し PreviewHandle に詰める）
+    startPreview: async (config: PreviewConfig) => {
+      const deviceId = config.deviceId ?? "";
+      const sessionId = await native.startPreview(deviceId, config.audio === true);
+      if (sessionId.length === 0) {
+        // 空文字 = ネイティブ側で初期化失敗（権限拒否やデバイス不在）
+        throw new Error("Windows カメラの初期化に失敗しました (sessionId が空)");
+      }
+      // 利用者には不透明な ID を返す
+      const handleId = `win-${sessionId}`;
+      state.previewMap.set(handleId, sessionId);
+      return {
+        id: handleId,
+        native: { sessionId },
+      };
+    },
+
+    // プレビュー停止
+    stopPreview: async (handle) => {
+      const sessionId = state.previewMap.get(handle.id);
+      if (sessionId === undefined) {
+        // 未知のハンドルは no-op（冪等性）
+        return;
+      }
+      state.previewMap.delete(handle.id);
+      await native.stopPreview(sessionId);
+    },
+
+    // 静止画キャプチャ
+    takePicture: async (handle, opts?: PhotoOptions): Promise<PhotoResult> => {
+      const sessionId = state.previewMap.get(handle.id);
+      if (sessionId === undefined) {
+        throw new Error("プレビューが開始されていません");
+      }
+      const r = await native.takePicture(sessionId);
+      if (r.path.length === 0) {
+        throw new Error("撮影に失敗しました");
+      }
+      return {
+        id: `photo-${Date.now()}`,
+        media: {
+          kind: "filePath",
+          path: r.path,
+          mimeType: opts?.mimeType ?? "image/jpeg",
+        },
+        width: r.width,
+        height: r.height,
+        capturedAt: Date.now(),
+      };
+    },
+
+    // 動画録画開始
+    // 拡張点: _opts に maxDurationMs / maxFileSizeBytes / videoBitsPerSecond などが渡されるが、
+    //        現状の C++ 実装は HD720p MP4 固定。これらを反映したい場合は以下の作業が必要:
+    //        1. K1s0Camera.h の StartRecording に追加引数を加える（例: int maxDurationMs）
+    //        2. K1s0Camera.cpp で MediaEncodingProfile / record limits を反映
+    //        3. 本ファイルの native.startRecording 呼び出しに引数を追加
+    // 利用者は _opts を opts にリネームして上記の拡張を行ってください。
+    startRecording: async (handle, _opts?: RecordingOptions) => {
+      const sessionId = state.previewMap.get(handle.id);
+      if (sessionId === undefined) {
+        throw new Error("プレビューが開始されていません");
+      }
+      const recordingId = await native.startRecording(sessionId);
+      if (recordingId.length === 0) {
+        throw new Error("Windows 録画の開始に失敗しました");
+      }
+      const handleId = `rec-${recordingId}`;
+      state.recordingMap.set(handleId, recordingId);
+      // 開始時刻を保存（stopRecording で durationMs を算出）
+      state.recordingStartedAt.set(handleId, Date.now());
+      return {
+        id: handleId,
+        native: { recordingId },
+      };
+    },
+
+    // 動画録画停止
+    stopRecording: async (recording): Promise<RecordingResult> => {
+      const recordingId = state.recordingMap.get(recording.id);
+      if (recordingId === undefined) {
+        throw new Error("録画セッションが見つかりません");
+      }
+      // 開始時刻を取り出して duration を計算
+      const startedAt = state.recordingStartedAt.get(recording.id) ?? Date.now();
+      state.recordingMap.delete(recording.id);
+      state.recordingStartedAt.delete(recording.id);
+      const r = await native.stopRecording(recordingId);
+      if (r.path.length === 0) {
+        throw new Error("Windows 録画の停止に失敗しました");
+      }
+      return {
+        id: recording.id,
+        media: {
+          kind: "filePath",
+          path: r.path,
+          mimeType: "video/mp4",
+        },
+        durationMs: Date.now() - startedAt,
+        sizeBytes: r.sizeBytes,
+      };
+    },
+
+    // アダプタ解放（現在の session を全て stop）
+    // Promise.allSettled で並列実行（HW 同時操作の制約が問題になる場合は for await に戻す）
+    dispose: async () => {
+      // すべての session に対する stop Promise を並列起動
+      const stopPromises = Array.from(state.previewMap.values()).map((sessionId) =>
+        native.stopPreview(sessionId).catch(() => {
+          // 解放失敗は無視（dispose は best-effort）
+        }),
+      );
+      // 全部の完了を待つ（失敗があっても allSettled で全部待ち切る）
+      await Promise.allSettled(stopPromises);
+      // 内部 state をすべてクリア
+      state.previewMap.clear();
+      state.recordingMap.clear();
+      state.recordingStartedAt.clear();
+    },
+  };
+}

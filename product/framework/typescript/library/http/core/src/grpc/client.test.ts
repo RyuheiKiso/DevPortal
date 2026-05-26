@@ -255,4 +255,80 @@ describe("createGrpcClient", () => {
       code: "GRPC_PEER_MISSING",
     });
   });
+
+  // 並行 unary 呼び出しで underlying クライアントが二重作成されないこと (singleflight)
+  // (resolveUnderlying の in-flight Promise 共有経路を網羅する)
+  it("並行 unary で grpcClientFactory が 1 度しか呼ばれない (singleflight)", async () => {
+    // factory 呼び出し回数を計測
+    let factoryCalls = 0;
+    const client = await createGrpcClient({
+      baseUrl: "https://grpc",
+      // factory はマイクロタスクを跨ぐ非同期処理を模した遅延を含める
+      grpcClientFactory: () => {
+        factoryCalls += 1;
+        // すぐに rpcCall を返す軽量実装
+        return {
+          rpcCall: (_url, _req, _md, _desc, cb) => {
+            // 成功で即 callback
+            (cb as (err: null, res: string) => void)(null, "ok");
+            return undefined;
+          },
+        };
+      },
+    });
+    // 5 並列 unary 呼び出し → resolveUnderlying は 5 回呼ばれるが factory は 1 度だけ起動するはず
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () => client.unary(desc, "in")),
+    );
+    // 全結果が同じレスポンス
+    expect(results).toEqual(["ok", "ok", "ok", "ok", "ok"]);
+    // factory は singleflight により 1 回のみ呼ばれる
+    expect(factoryCalls).toBe(1);
+  });
+
+  // attempt 毎に auth.getAuthHeaders が再評価され、token refresh が反映されること
+  // (旧実装は withRetry 外で metadata を固定していたため、retry 中の token 更新が無視された)
+  it("attempt 毎に auth.getAuthHeaders が再評価される (token refresh 反映)", async () => {
+    // attempt 毎に異なるトークンを返す auth (初回 "old"、2 回目以降 "new")
+    let getAuthCalls = 0;
+    const auth = {
+      async getAuthHeaders(): Promise<Record<string, string>> {
+        getAuthCalls += 1;
+        return { Authorization: getAuthCalls === 1 ? "Bearer old" : "Bearer new" };
+      },
+    };
+    // rpcCall は attempt 毎に異なる metadata を観測したいので、各呼出の metadata を記録
+    const observedAuth: string[] = [];
+    let rpcCalls = 0;
+    const client = await createGrpcClient({
+      baseUrl: "https://grpc",
+      auth,
+      // 1 回目は失敗、2 回目は成功するようにする
+      retry: { maxRetries: 3, backoffBaseMs: 1, backoffMaxMs: 1, jitter: "none" },
+      grpcClientFactory: () => ({
+        rpcCall: (_url, _req, md, _desc, cb) => {
+          rpcCalls += 1;
+          observedAuth.push((md as Record<string, string>)["Authorization"] ?? "");
+          if (rpcCalls === 1) {
+            // 初回は 5xx 相当の retryable エラー
+            (cb as (err: { code: number; message: string } | null, res: string) => void)(
+              { code: 14, message: "unavailable" },
+              "",
+            );
+          } else {
+            // 2 回目以降は成功
+            (cb as (err: null, res: string) => void)(null, "ok");
+          }
+          return undefined;
+        },
+      }),
+    });
+    const out = await client.unary(desc, "in");
+    expect(out).toBe("ok");
+    // 1 回目 attempt は "old"、2 回目 attempt は "new" が観測される (= attempt 毎に再評価された証)
+    expect(observedAuth[0]).toBe("Bearer old");
+    expect(observedAuth[1]).toBe("Bearer new");
+    // auth.getAuthHeaders も 2 回呼ばれている
+    expect(getAuthCalls).toBe(2);
+  });
 });

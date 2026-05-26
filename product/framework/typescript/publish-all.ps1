@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     setup GUI で導入された Verdaccio (http://localhost:4873, htpasswd 認証) に対して、
-    auth / config / error / logger / http / notification 配下の core → react / react-native の順で
+    auth / config / error / logger / http / notification / storage / camera 配下の core → react / react-native の順で
     依存関係を壊さないように publish を実施する。
     同一バージョンが既に存在する場合はスキップし、ラウンド内では並列実行する。
 
@@ -65,6 +65,7 @@ $Packages = @(
     [pscustomobject]@{ Name = "@k1s0-ts-http/core";         Path = "library\http\core";                Round = 1 }
     [pscustomobject]@{ Name = "@k1s0-ts-notification/core"; Path = "library\notification\core";        Round = 1 }
     [pscustomobject]@{ Name = "@k1s0-ts-storage/core";      Path = "library\storage\core";             Round = 1 }
+    [pscustomobject]@{ Name = "@k1s0-ts-camera/core";       Path = "library\camera\core";              Round = 1 }
     # react / react-native パッケージ群 (core を file:../core で参照しているため後発で publish)
     [pscustomobject]@{ Name = "@k1s0-ts-auth/react";                Path = "library\auth\react";               Round = 2 }
     [pscustomobject]@{ Name = "@k1s0-ts-auth/react-native";         Path = "library\auth\react-native";        Round = 2 }
@@ -80,6 +81,8 @@ $Packages = @(
     [pscustomobject]@{ Name = "@k1s0-ts-notification/react-native"; Path = "library\notification\react-native";Round = 2 }
     [pscustomobject]@{ Name = "@k1s0-ts-storage/react";             Path = "library\storage\react";            Round = 2 }
     [pscustomobject]@{ Name = "@k1s0-ts-storage/react-native";      Path = "library\storage\react-native";     Round = 2 }
+    [pscustomobject]@{ Name = "@k1s0-ts-camera/react";              Path = "library\camera\react";             Round = 2 }
+    [pscustomobject]@{ Name = "@k1s0-ts-camera/react-native";       Path = "library\camera\react-native";      Round = 2 }
 )
 
 # ログレベルからコンソール色を導出する

@@ -1,0 +1,24 @@
+// ============================================================================
+// K1s0Camera.idl
+// MIDL3 ランタイムクラス宣言。react-native-windows の NativeModule として
+// JS 側から `NativeModules.K1s0Camera` で参照される runtimeclass を定義する。
+//
+// 本ファイルは @k1s0-ts-camera/react-native パッケージが配布する Windows
+// ネイティブモジュールサンプルです。利用者プロジェクトの
+//   windows/<AppName>/
+// 直下にコピーして、同階層の .vcxproj に <Midl Include="K1s0Camera.idl" />
+// として登録してください。
+// ============================================================================
+
+// 本サンプル独自の WinRT 名前空間（衝突回避のため "K1s0CameraNative"）
+namespace K1s0CameraNative
+{
+    // JS 側から `NativeModules.K1s0Camera` でアクセスされる ABI 公開クラス
+    // default_interface 属性: 既定インターフェイスを自動生成
+    [default_interface]
+    runtimeclass K1s0Camera
+    {
+        // 既定コンストラクタ（NativeModule の DI が利用するため必須）
+        K1s0Camera();
+    };
+}

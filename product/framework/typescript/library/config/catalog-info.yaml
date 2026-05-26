@@ -9,7 +9,7 @@ metadata:
   # System の一意な名前 (各 Component の system から参照)
   name: k1s0-ts-config
   # UI 表示用の説明文
-  description: "@k1s0-ts-config/* (core / react / react-native) 設定管理ライブラリ群"
+  description: "@k1s0-ts-config/* (core / react / react-native / loader / rn-loader) 設定管理ライブラリ群"
 # System 固有の仕様
 spec:
   # 所有者 (Group)

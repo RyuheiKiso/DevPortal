@@ -12,6 +12,10 @@ export type { CookieAttributes, CreateCookieBackendOptions } from "./cookie.js";
 export { attachStorageEvents } from "./storageEvent.js";
 export type { AttachStorageEventsOptions } from "./storageEvent.js";
 
+// 暗号鍵管理ヘルパ (extractable:false 鍵生成 + IndexedDB 永続化)
+export { createAesKey, loadOrCreateAesKey } from "./cryptoKey.js";
+export type { LoadOrCreateAesKeyOptions } from "./cryptoKey.js";
+
 // React 統合
 export { StorageContext } from "./context.js";
 export { StorageProvider } from "./StorageProvider.js";

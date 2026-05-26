@@ -76,12 +76,15 @@ export function createAlertConfirmAdapter(
     if (notification.kind === "dialog" && handleDialog && !shownIds.has(notification.id)) {
       shownIds.add(notification.id);
       const dismissible = notification.dismissible ?? true;
+      // dismissible に関わらず onDismiss は必ず設定する。
+      // 旧実装は dismissible=false のとき onDismiss を未設定にしていたため、
+      // Android の OS 破棄や RN reload で Alert が閉じられても manager.resolveDialog が呼ばれず、
+      // 対応する Promise が永久未解決のまま残るリークがあった。
+      // cancelable=false でも Android では稀に dismiss が走るため、defensive に登録する。
       const alertOptions: AlertOptions = {
         cancelable: dismissible,
+        onDismiss: () => manager.resolveDialog(notification.id, undefined),
       };
-      if (dismissible) {
-        alertOptions.onDismiss = () => manager.resolveDialog(notification.id, undefined);
-      }
       Alert.alert(
         notification.title ?? "",
         notification.message,

@@ -57,6 +57,10 @@ export function AuthProvider(props: AuthProviderProps): ReactElement {
   useEffect(() => {
     // manager の状態変化を React state に同期する
     const unsubscribe = props.manager.subscribe((next) => setSession(next));
+    // 購読登録 _直後_ に最新スナップショットへ再同期する
+    // (Strict Mode の二重 mount で subscribe → unsubscribe → subscribe が走った際、
+    //  解除〜再登録の間に発火した変更を取り零さないため)
+    setSession(props.manager.getSnapshot());
     // loadOnMount が true の場合だけ初期ロードする
     if (props.loadOnMount === true) {
       // 非同期ロードを開始する

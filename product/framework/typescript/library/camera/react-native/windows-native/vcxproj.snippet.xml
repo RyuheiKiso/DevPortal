@@ -1,0 +1,23 @@
+<!--
+  ============================================================================
+  vcxproj.snippet.xml
+  利用者プロジェクトの windows/<AppName>/<AppName>.vcxproj に追記する
+  IDL / ヘッダ / 実装ファイルの ItemGroup 抜粋。
+  既存の <ItemGroup> 群と並べて以下を追加してください
+  （Visual Studio で「既存項目の追加」をしても自動生成されます）。
+  ============================================================================
+-->
+<Project>
+  <!-- MIDL3 ランタイムクラス定義 -->
+  <ItemGroup>
+    <Midl Include="K1s0Camera.idl" />
+  </ItemGroup>
+  <!-- ヘッダ -->
+  <ItemGroup>
+    <ClInclude Include="K1s0Camera.h" />
+  </ItemGroup>
+  <!-- 実装 -->
+  <ItemGroup>
+    <ClCompile Include="K1s0Camera.cpp" />
+  </ItemGroup>
+</Project>
