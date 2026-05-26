@@ -228,6 +228,79 @@ describe("useZoom (RN)", () => {
     expect(captured?.error).toBe(err);
   });
 
+  it("preview-start 以外のイベントは無視される（preview-stop で zoom リセットしない）", async () => {
+    const manager = makeManager();
+    let captured: ReturnType<typeof useZoom> | undefined;
+    function P() {
+      captured = useZoom();
+      return null;
+    }
+    act(() => {
+      TestRenderer.create(
+        <CameraProvider manager={manager}>
+          <P />
+        </CameraProvider>,
+      );
+    });
+    // preview-stop は zoom 状態に影響しない
+    act(() => {
+      (manager as { __emit?: (e: CameraEvent) => void }).__emit?.({
+        type: "preview-stop",
+        handleId: "p-a",
+        at: 0,
+      });
+    });
+    await flush();
+    expect(captured?.zoom).toBe(1);
+  });
+
+  it("別 preview ハンドル ID に切り替わったら zoom が新 range.min へリセット", async () => {
+    const capsA = { ...zoomSupportedCaps, zoom: { min: 1, max: 5 } };
+    const capsB = { ...zoomSupportedCaps, zoom: { min: 2, max: 10 } };
+    let calls = 0;
+    const manager = makeManager({
+      getCapabilities: vi.fn(async () => (++calls === 1 ? capsA : capsB)),
+    });
+    let captured: ReturnType<typeof useZoom> | undefined;
+    function P() {
+      captured = useZoom();
+      return null;
+    }
+    act(() => {
+      TestRenderer.create(
+        <CameraProvider manager={manager}>
+          <P />
+        </CameraProvider>,
+      );
+    });
+    // 1 回目 preview-start
+    act(() => {
+      (manager as { __emit?: (e: CameraEvent) => void }).__emit?.({
+        type: "preview-start",
+        handle: { __brand: "PreviewHandle", id: "p-a", native: null },
+        at: 0,
+      });
+    });
+    await flush();
+    expect(captured?.zoom).toBe(1);
+    // ユーザ set
+    await act(async () => {
+      await captured?.set(3);
+    });
+    expect(captured?.zoom).toBe(3);
+    // 別ハンドル ID の preview-start
+    act(() => {
+      (manager as { __emit?: (e: CameraEvent) => void }).__emit?.({
+        type: "preview-start",
+        handle: { __brand: "PreviewHandle", id: "p-b", native: null },
+        at: 1,
+      });
+    });
+    await flush();
+    // 新 range の min=2 に同期
+    expect(captured?.zoom).toBe(2);
+  });
+
   it("zoom=false なら supported=false", async () => {
     const manager = makeManager({
       getCapabilities: vi.fn(async () => zoomUnsupportedCaps),

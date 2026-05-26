@@ -113,4 +113,43 @@ describe("CameraProvider (react-native)", () => {
       });
     }).toThrow(/must be called inside/);
   });
+
+  it("mount → unmount → 再 mount で毎回有効な manager を返す（strict mode 相当）", async () => {
+    const adapter1 = makeAdapter();
+    const adapter2 = makeAdapter();
+    const cap1 = vi.fn();
+    const cap2 = vi.fn();
+    let renderer1: TestRenderer.ReactTestRenderer | undefined;
+    act(() => {
+      renderer1 = TestRenderer.create(
+        <CameraProvider adapter={adapter1}>
+          <Probe onValue={cap1} />
+        </CameraProvider>,
+      );
+    });
+    const m1 = cap1.mock.calls[0][0] as CameraManager;
+    expect(m1).toBeDefined();
+    act(() => {
+      renderer1?.unmount();
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(adapter1.dispose).toHaveBeenCalled();
+    let renderer2: TestRenderer.ReactTestRenderer | undefined;
+    act(() => {
+      renderer2 = TestRenderer.create(
+        <CameraProvider adapter={adapter2}>
+          <Probe onValue={cap2} />
+        </CameraProvider>,
+      );
+    });
+    const m2 = cap2.mock.calls[0][0] as CameraManager;
+    expect(m2).toBeDefined();
+    expect(m2).not.toBe(m1);
+    expect(adapter2.dispose).not.toHaveBeenCalled();
+    act(() => {
+      renderer2?.unmount();
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(adapter2.dispose).toHaveBeenCalled();
+  });
 });

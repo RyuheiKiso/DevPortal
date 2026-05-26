@@ -57,6 +57,30 @@ export function useZoom(): UseZoomResult {
   // supported は range が存在することと同義
   const supported = range !== undefined;
 
+  // 直近の preview ハンドル ID（ハンドルが入れ替わったときだけ userSetRef をリセットする判定用）
+  const lastPreviewIdRef = useRef<string | undefined>(undefined);
+
+  // preview-start のハンドル ID が前回と異なる場合だけ userSetRef をリセットする
+  // 同一 preview の能力情報再取得などで preview-start が複数回飛んでも、ユーザの zoom 操作を温存する
+  useEffect(() => {
+    // manager のイベント購読
+    const unsub = manager.subscribe((event) => {
+      // preview-start 以外は無視
+      if (event.type !== "preview-start") {
+        return;
+      }
+      // 初回 preview-start は ID を記録するだけ（reset しない）
+      const prevId = lastPreviewIdRef.current;
+      lastPreviewIdRef.current = event.handle.id;
+      // 別 preview に切り替わったタイミングでのみリセット
+      if (prevId !== undefined && prevId !== event.handle.id) {
+        userSetRef.current = false;
+        setZoomState(1);
+      }
+    });
+    return unsub;
+  }, [manager]);
+
   // capabilities が更新されたら、ユーザが未操作なら zoom を range.min に同期する
   // ユーザ set 後は userSetRef が true のため何もしない（意志優先）
   useEffect(() => {

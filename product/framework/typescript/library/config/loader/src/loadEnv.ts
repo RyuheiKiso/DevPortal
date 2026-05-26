@@ -55,9 +55,18 @@ function findEnvFileSync(dir: string, baseName: string): string | undefined {
 
 // 任意の値がオブジェクト (連想配列) かどうかを判定する
 // mergeEnvConfig の差分側 (Partial<T>) として安全に扱うためのガード
+//
+// 仕様: 空 YAML 等で `null` / `undefined` がパース結果として返るケースは「差分なし」と
+// 解釈して空 {} を返す（js-yaml は完全空ファイルでは undefined、`null:`/`~` では null を返す）。
+// 配列・プリミティブは引き続き構造エラーとして PARSE_ERROR に分類する。
 function ensureObject(value: unknown, filePath: string): Record<string, unknown> {
-  // null と非オブジェクト (配列含む扱いは別) を弾く
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+  // null / undefined は「差分なし」とみなして空オブジェクトに正規化
+  if (value === null || value === undefined) {
+    // 空マージとして扱うため {} を返却
+    return {};
+  }
+  // 配列やプリミティブはトップレベルが連想配列でないため構造エラー
+  if (typeof value !== "object" || Array.isArray(value)) {
     // 形式違いはパース後の構造エラーとして PARSE_ERROR に分類
     throw new ConfigLoaderError(
       `Expected object at top level (file: ${filePath})`,
@@ -70,12 +79,22 @@ function ensureObject(value: unknown, filePath: string): Record<string, unknown>
 
 // dir 配下の dev / staging / prod 設定ファイルを読み込んで EnvConfigMap<unknown> を返す
 // dev は必須 (無ければ FILE_NOT_FOUND)、staging/prod は欠けていたら {} 補完
+//
+// 並列化: 3 ファイルのパス探索と読込はそれぞれ I/O を伴うため Promise.all で並列実行する。
+// （順次 await すると起動時に最悪 3 ファイル分の I/O 直列待ちになるため）
 export async function loadEnvConfigMap(
   // 環境別ファイルが置かれているディレクトリ
   dir: string,
 ): Promise<EnvConfigMap<Record<string, unknown>>> {
-  // dev ファイルを探す
-  const devPath = await findEnvFile(dir, "dev");
+  // dev / staging / prod のパスを並列で探索（候補拡張子の access も並列化）
+  const [devPath, stagingPath, prodPath] = await Promise.all([
+    // dev ファイルを探す
+    findEnvFile(dir, "dev"),
+    // staging ファイルを探す
+    findEnvFile(dir, "staging"),
+    // prod ファイルを探す
+    findEnvFile(dir, "prod"),
+  ]);
   // dev が無ければファイル未存在として扱う
   if (devPath === undefined) {
     // 期待するパス候補を伝えるため最初の候補をメッセージに含める
@@ -84,14 +103,19 @@ export async function loadEnvConfigMap(
       "FILE_NOT_FOUND",
     );
   }
-  // dev は必須なのでまず読み込む
-  const devRaw = ensureObject(await loadConfig(devPath), devPath);
-  // staging は欠けていたら {} 扱い
-  const stagingPath = await findEnvFile(dir, "staging");
-  const stagingRaw = stagingPath === undefined ? {} : ensureObject(await loadConfig(stagingPath), stagingPath);
-  // prod も欠けていたら {} 扱い
-  const prodPath = await findEnvFile(dir, "prod");
-  const prodRaw = prodPath === undefined ? {} : ensureObject(await loadConfig(prodPath), prodPath);
+  // 3 ファイル分の読込も並列化（staging/prod が undefined のときは空 {} に即時 resolve）
+  const [devRaw, stagingRaw, prodRaw] = await Promise.all([
+    // dev は必須。読み込み後 ensureObject で正規化
+    loadConfig(devPath).then((v) => ensureObject(v, devPath)),
+    // staging は欠けていたら {} 扱い
+    stagingPath === undefined
+      ? Promise.resolve<Record<string, unknown>>({})
+      : loadConfig(stagingPath).then((v) => ensureObject(v, stagingPath)),
+    // prod も欠けていたら {} 扱い
+    prodPath === undefined
+      ? Promise.resolve<Record<string, unknown>>({})
+      : loadConfig(prodPath).then((v) => ensureObject(v, prodPath)),
+  ]);
   // core の EnvConfigMap 形にまとめて返す
   return { dev: devRaw, staging: stagingRaw, prod: prodRaw };
 }

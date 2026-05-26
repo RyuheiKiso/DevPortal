@@ -152,4 +152,7 @@ export interface AuthManagerOptions {
   initialSession?: AuthSession;
   // トークン保存先
   tokenStore?: TokenStore;
+  // subscribe で登録した listener が throw した時に呼ばれる observability フック
+  // 未指定時は console.error にフォールバック、いずれの場合も他の listener への通知は継続する
+  onListenerError?: (error: unknown, event: AuthEvent) => void;
 }

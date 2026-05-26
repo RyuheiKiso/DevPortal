@@ -1,5 +1,5 @@
 // React の hook を取り込み
-import { useCallback, useContext, useEffect, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 // core から型を取り込み
 import type {
   CameraDevice,
@@ -100,11 +100,16 @@ export function useCameraPermission(descriptor: PermissionDescriptor): {
 // 任意イベントを listener で受け取る hook
 export function useCameraEvents(listener: CameraListener): void {
   const manager = useCamera();
-  // listener が変わる度に subscribe をやり直す
+  // 利用側が毎 render で新しい listener 関数を渡しても subscribe をやり直さないよう ref で常に最新を保持
+  const listenerRef = useRef<CameraListener>(listener);
+  // render の度に最新の listener 参照に更新（次の subscribe 通知から自動で反映）
+  listenerRef.current = listener;
+  // subscribe は manager が変わったときのみやり直す
   useEffect(() => {
+    // wrapper 経由で常に listenerRef.current を呼ぶ
     const unsub = manager.subscribe((e: CameraEvent) => {
-      listener(e);
+      listenerRef.current(e);
     });
     return unsub;
-  }, [manager, listener]);
+  }, [manager]);
 }

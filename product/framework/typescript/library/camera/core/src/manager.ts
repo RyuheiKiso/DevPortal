@@ -26,6 +26,7 @@ import type { CameraAdapter } from "./adapter.js";
 // 各種エラー
 import {
   CameraControlError,
+  CameraError,
   CameraNotReadyError,
   RecordingError,
   ScannerError,
@@ -90,9 +91,10 @@ export function createCameraManager(
     } catch (err) {
       // CameraError 系統のみ event に乗せる（型ガードで判定するのは大袈裟なので CameraError 系の duck typing）
       const at = now();
-      // 既知 CameraError 系統なら event 化
+      // 既知 CameraError 系統なら event 化（CameraError union への代入は emit シグネチャに合わせて局所 cast する）
       if (isCameraErrorLike(err)) {
-        emitter.emit({ type: "error", error: err, at });
+        // emit の error 型は CameraError 系の union だが、duck typing で同形と判明済みのため局所 cast で渡す
+        emitter.emit({ type: "error", error: err as CameraError, at });
       }
       // 元の例外を rethrow（呼出側で握る）
       throw err;
@@ -100,11 +102,10 @@ export function createCameraManager(
   }
 
   // 内部 duck typing: CameraError 系統 (code + retryable プロパティ) を持つかで判定
-  function isCameraErrorLike(value: unknown): value is CameraEvent & { type: "error" } extends {
-    error: infer E;
-  }
-    ? E
-    : never {
+  // 戻り値の type predicate は `code: string; retryable: boolean` を持つ任意オブジェクト
+  function isCameraErrorLike(
+    value: unknown,
+  ): value is { code: string; retryable: boolean; message?: string } {
     // null / プリミティブは即 false
     if (value === null || typeof value !== "object") {
       return false;
@@ -162,6 +163,17 @@ export function createCameraManager(
     }
     // adapter 呼び出し
     const handle = await runAdapter(() => adapter.startPreview(previewConfig));
+    // await 中に dispose されていた場合、取得した handle を即時解放してリークを防ぐ
+    if (disposed) {
+      // adapter 側に handle 解放を依頼し、失敗は無視（既に adapter.dispose 済みのことがある）
+      try {
+        await adapter.stopPreview(handle);
+      } catch {
+        // 解放失敗は無視
+      }
+      // 呼出側には CameraNotReadyError を返す（dispose 後の状態を明確に伝える）
+      throw new CameraNotReadyError("CameraManager has been disposed");
+    }
     // 状態を更新
     previewHandle = handle;
     // event 配信
@@ -229,6 +241,17 @@ export function createCameraManager(
     }
     // adapter 呼び出し
     const recording = await runAdapter(() => adapter.startRecording(handle, options));
+    // await 中に dispose されていた場合、取得した RecordingHandle を即時解放してリーク回避
+    if (disposed) {
+      // adapter 側に録画停止を依頼し、失敗は無視
+      try {
+        await adapter.stopRecording(recording);
+      } catch {
+        // 解放失敗は無視
+      }
+      // 呼出側には CameraNotReadyError を返す
+      throw new CameraNotReadyError("CameraManager has been disposed");
+    }
     // 状態遷移
     stateMachine.transitionTo("recording");
     // ハンドルと開始時刻を保持
@@ -343,6 +366,17 @@ export function createCameraManager(
         emitter.emit({ type: "scan", result, at: now() });
       }),
     );
+    // await 中に dispose されていた場合、取得した unsubscribe を即時呼んでスキャナを止める
+    if (disposed) {
+      // adapter 側のスキャナ停止を試行し、失敗は無視
+      try {
+        unsubscribeFromAdapter();
+      } catch {
+        // 解除失敗は無視
+      }
+      // 呼出側には CameraNotReadyError を返す
+      throw new CameraNotReadyError("CameraManager has been disposed");
+    }
     // 解除関数を組み立て
     const unsubscribe = (): void => {
       // 既に解除済みなら無視

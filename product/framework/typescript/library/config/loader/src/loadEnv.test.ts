@@ -54,6 +54,19 @@ describe("loadEnvConfigMap (async)", () => {
       code: "PARSE_ERROR",
     });
   });
+
+  // staging が空 YAML（パース結果が undefined）・prod が null YAML でも {} として扱われる
+  // ファイルを置きたいが差分なしというユースケース（ブランチ運用などで残骸が残るケース）
+  it("treats empty/null overlay files as empty diff", async () => {
+    // staging.yaml がコメントのみ・prod.yml が null の fixture を読む
+    const map = await loadEnvConfigMap(fixture("env-empty-overlays"));
+    // dev は読み込まれる
+    expect(map.dev).toMatchObject({ apiUrl: "http://localhost:3000" });
+    // staging は undefined → {} 正規化
+    expect(map.staging).toEqual({});
+    // prod は null → {} 正規化
+    expect(map.prod).toEqual({});
+  });
 });
 
 // loadEnvConfigMapSync (同期) の振る舞いを網羅するテスト

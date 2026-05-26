@@ -152,6 +152,10 @@ export function createVisionCameraAdapter(options: VisionCameraAdapterOptions): 
   let recordingReject: ((err: unknown) => void) | null = null;
   // 録画開始時刻
   let recordingStartedAt: number | undefined;
+  // stopRecording 呼出前に vision-camera 側から onRecordingFinished / onRecordingError が
+  // 先行発火した場合の結果 / エラーを保留する pending 変数
+  let pendingRecordingResult: { path: string; duration: number } | undefined;
+  let pendingRecordingError: unknown | undefined;
 
   // CameraRef を取得（無ければ throw）
   function requireRef(): VisionCameraRef {
@@ -264,25 +268,33 @@ export function createVisionCameraAdapter(options: VisionCameraAdapterOptions): 
       const ref = requireRef();
       // 録画 ID を発行
       const id = idFactory();
+      // 前回録画の pending を必ずクリア（stopRecording を呼ばれなかったセッションの残骸が
+      // 新セッションの stopRecording で誤って返るのを防ぐ）
+      pendingRecordingResult = undefined;
+      pendingRecordingError = undefined;
       recordingStartedAt = now();
       // vision-camera の startRecording を呼び出し（コールバック方式）
       ref.startRecording({
         onRecordingFinished: (video) => {
-          // stopRecording の Promise を解決する（recordingResolve は stopRecording 内でセットされる前提）
-          /* v8 ignore next */
+          // 既に stopRecording が resolve を待っているなら即解決、無ければ pending に保留する
           if (recordingResolve !== null) {
             recordingResolve(video);
             recordingResolve = null;
             recordingReject = null;
+          } else {
+            // stopRecording 呼出前に finished が来たケース（端末側の自動停止など）
+            pendingRecordingResult = video;
           }
         },
         onRecordingError: (err) => {
-          // stopRecording の Promise を reject（recordingReject は stopRecording 内でセットされる前提）
-          /* v8 ignore next */
+          // 既に stopRecording が reject を待っているなら即拒否、無ければ pending に保留
           if (recordingReject !== null) {
             recordingReject(err);
             recordingResolve = null;
             recordingReject = null;
+          } else {
+            // stopRecording 呼出前に error が来たケース
+            pendingRecordingError = err;
           }
         },
         fileType: opts?.mimeType,
@@ -294,6 +306,28 @@ export function createVisionCameraAdapter(options: VisionCameraAdapterOptions): 
       };
     },
     stopRecording: async (recording: RecordingHandle): Promise<RecordingResult> => {
+      // 既に pending result が積まれていればそれを返却（vision-camera が先行発火したケース）
+      if (pendingRecordingResult !== undefined) {
+        const cached = pendingRecordingResult;
+        pendingRecordingResult = undefined;
+        return {
+          id: recording.id,
+          media: {
+            kind: "filePath",
+            path: cached.path,
+            mimeType: "video/mp4",
+          },
+          // recordingStartedAt は startRecording で必ずセット、未セット時は秒→ms 換算で fallback
+          /* v8 ignore next */
+          durationMs: recordingStartedAt !== undefined ? now() - recordingStartedAt : cached.duration * 1000,
+        };
+      }
+      // pending error が積まれていればそれを投げ直す
+      if (pendingRecordingError !== undefined) {
+        const cachedError = pendingRecordingError;
+        pendingRecordingError = undefined;
+        throw cachedError;
+      }
       const ref = requireRef();
       // resolve / reject を仕掛けて stop 呼び出し
       const result = await new Promise<{ path: string; duration: number }>((resolve, reject) => {
@@ -435,6 +469,9 @@ export function createVisionCameraAdapter(options: VisionCameraAdapterOptions): 
       currentPreview = undefined;
       recordingResolve = null;
       recordingReject = null;
+      // pending も明示的にクリアしてメモリを開放
+      pendingRecordingResult = undefined;
+      pendingRecordingError = undefined;
     },
   };
 }

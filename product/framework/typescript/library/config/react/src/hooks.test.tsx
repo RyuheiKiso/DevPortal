@@ -74,16 +74,33 @@ describe("useConfig", () => {
   });
 
   // Provider 外では Error を投げること
+  // React 19 + react-test-renderer では render 内の throw が同期的に伝搬しないため、
+  // Probe コンポーネント内部で try/catch して captured 変数に補足するパターンを採る
+  // （react-native パッケージ側のテストと同じ書き方に統一）
   it("Provider 外で呼ばれた場合は Error を投げる", () => {
-    // Provider なしで hook を呼ぶ関数コンポーネント
+    // Probe 内部で発生した例外を補足する変数
+    let captured: unknown;
+    // Probe コンポーネント（Provider 外で hook を呼ぶ）
     function Probe(): React.JSX.Element {
-      // Provider 外なので throw されることを期待する
-      useConfig();
-      // ここには到達しない
+      try {
+        // Provider 外なので throw される想定
+        useConfig();
+      } catch (error) {
+        // 例外を退避
+        captured = error;
+      }
+      // 描画は空
       return <>{null}</>;
     }
-    // render すると hook 内部の throw が伝搬する
-    expect(() => create(<Probe />)).toThrow(/useConfig must be called inside <ConfigProvider>/);
+    // Provider なしで描画
+    act(() => {
+      // create を実行（捕捉した例外は Probe 内に保存済み）
+      create(<Probe />);
+    });
+    // Error インスタンスであること
+    expect(captured).toBeInstanceOf(Error);
+    // メッセージに ConfigProvider への誘導が含まれること
+    expect((captured as Error).message).toMatch(/useConfig must be called inside <ConfigProvider>/);
   });
 });
 

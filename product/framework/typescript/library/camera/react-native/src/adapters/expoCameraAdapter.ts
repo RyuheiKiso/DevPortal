@@ -208,6 +208,10 @@ export function createExpoCameraAdapter(options: ExpoCameraAdapterOptions): Came
       }
       const ref = requireRef();
       const id = idFactory();
+      // 前回の録画で stopRecording を呼ばれずに pending に残っていた結果 / エラーをクリア
+      // これを忘れると新セッションの stopRecording が古い録画結果を返してしまう
+      pendingRecordingResult = undefined;
+      pendingRecordingError = undefined;
       recordingStartedAt = now();
       // recordAsync は録画完了で resolve する Promise を返す
       // resolve / reject 両方を捕捉し、stopRecording が後で来た場合に備えて pending にも保存
@@ -391,6 +395,9 @@ export function createExpoCameraAdapter(options: ExpoCameraAdapterOptions): Came
       currentPreview = undefined;
       recordingResolve = null;
       recordingReject = null;
+      // pending も明示的にクリアして次セッションへの混入を完全に断つ
+      pendingRecordingResult = undefined;
+      pendingRecordingError = undefined;
     },
   };
 }

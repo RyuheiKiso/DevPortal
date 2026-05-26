@@ -63,6 +63,10 @@ export function usePermission(permission: string): boolean {
 }
 
 // 複合要件を満たすか判定する hook
+// 注意: 返り値の AccessDecision は呼び出すたびに manager.canAccess が組み立てる新規オブジェクト
+// のため、参照同一性は保証しない。useEffect の依存配列に直接渡すと再 render のたびに
+// effect が再実行される。安定参照が必要なら `.allowed` 等プリミティブを取り出して依存に渡すか、
+// 呼び出し側で useMemo で安定化すること
 export function useAccess(requirement: AccessRequirement): AccessDecision {
   // manager の判定へ委譲する
   return useAuth().canAccess(requirement);

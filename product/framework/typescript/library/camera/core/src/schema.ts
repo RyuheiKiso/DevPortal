@@ -102,8 +102,8 @@ export const cameraManagerConfigSchema = z.object({
 
 // PermissionDescriptor のスキーマ
 export const permissionDescriptorSchema = z.object({
-  // カメラは必須 true
-  camera: z.literal(true).or(z.boolean()),
+  // カメラ要否（型定義側 PermissionDescriptor.camera が boolean のため schema もそのまま boolean に揃える）
+  camera: z.boolean(),
   // マイクは任意
   microphone: z.boolean().optional(),
   // メディアライブラリは任意

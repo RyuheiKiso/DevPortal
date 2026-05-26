@@ -7,9 +7,29 @@ export interface GlobalHandlersOptions {
   fatalForUnhandled?: boolean;
 }
 
-// モジュールスコープのアクティブハンドル管理（HMR / 重複呼び出しでの listener 増殖を防ぐ）
-// logger インスタンスごとに最新の解除関数を保持し、再登録時に古いものを解除する
-const activeUninstall = new WeakMap<Logger, () => void>();
+// アクティブハンドル管理（HMR / 重複呼び出しでの listener 増殖を防ぐ）
+// 旧実装はモジュールスコープの WeakMap を使っていたが、HMR でモジュールが再評価されると
+// WeakMap も新規になって前回の uninstall を引けず、結果として window 上にリスナが二重登録されていた。
+// 対策として、HMR を跨いでも保持される window スコープに固定キー（Symbol.for で grobal Symbol registry を経由）で WeakMap を保管する。
+const ACTIVE_UNINSTALL_KEY = Symbol.for("@k1s0-ts-logger/react:activeUninstalls");
+// アクティブ解除関数を保持する WeakMap の型
+type ActiveUninstallMap = WeakMap<Logger, () => void>;
+// window 上の固定 Symbol キーから WeakMap を取り出し、無ければ生成して保管する
+function getActiveUninstallMap(): ActiveUninstallMap {
+  // 動的アクセスのため Record 型でキャスト
+  const target = window as unknown as Record<symbol, ActiveUninstallMap | undefined>;
+  // 既存があれば返す
+  const existing = target[ACTIVE_UNINSTALL_KEY];
+  // 既にあるならそれを返す
+  if (existing !== undefined) {
+    return existing;
+  }
+  // 無ければ生成して保管
+  const created: ActiveUninstallMap = new WeakMap();
+  target[ACTIVE_UNINSTALL_KEY] = created;
+  // 生成したものを返す
+  return created;
+}
 
 // window.onerror / unhandledrejection を Logger に流すユーティリティ
 // 戻り値は冪等な解除関数。SSR 環境では no-op として何もせず () => void を返す。
@@ -23,6 +43,8 @@ export function installGlobalHandlers(
     return () => {};
   }
 
+  // HMR を跨いでも保持される WeakMap を取得（window 上の固定 Symbol キーに保管）
+  const activeUninstall = getActiveUninstallMap();
   // 同一 logger に対する以前の登録があれば先に解除（HMR / StrictMode 二重マウント対策）
   const prev = activeUninstall.get(logger);
   if (prev !== undefined) {

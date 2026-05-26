@@ -2,7 +2,7 @@
 import type { ReactElement, ReactNode } from "react";
 // React の hook を取り込み
 import { useCallback, useEffect, useMemo, useState } from "react";
-// core から型を取り込み
+// core から型と匿名セッション生成を取り込み
 import type { AuthManager, AuthSession } from "@k1s0-ts-auth/core";
 // core から匿名セッション生成を取り込み
 import { createAnonymousSession } from "@k1s0-ts-auth/core";
@@ -57,6 +57,10 @@ export function AuthProvider(props: AuthProviderProps): ReactElement {
   useEffect(() => {
     // manager の状態変化を React state に同期する
     const unsubscribe = props.manager.subscribe((next) => setSession(next));
+    // 購読登録 _直後_ に最新スナップショットへ再同期する
+    // (Strict Mode の二重 mount で subscribe → unsubscribe → subscribe が走った際、
+    //  解除〜再登録の間に発火した変更を取り零さないため。React 版 AuthProvider と挙動を一致させる)
+    setSession(props.manager.getSnapshot());
     // loadOnMount が true の場合だけ初期ロードする
     if (props.loadOnMount === true) {
       // 非同期ロードを開始する

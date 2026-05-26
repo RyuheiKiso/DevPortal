@@ -9,24 +9,26 @@ import type { FileSystemBackend, Loader } from "./types.js";
 import { detectParser } from "./detect.js";
 // loader 共通のエラークラスを取り込む
 import { ConfigLoaderError } from "./errors.js";
+// パス結合ユーティリティ (backends 側と同じロジックを共有して混在パスを防ぐ)
+import { joinPath } from "./pathUtils.js";
 
 // 環境別ファイルを探す際に試す拡張子の優先順 (JSON > YAML > YML)
 const ENV_EXTENSIONS = [".json", ".yaml", ".yml"] as const;
 
-// 末尾のセパレータを除去してから baseName をスラッシュで結合する
-// RN/Expo のパスはフォワードスラッシュ前提だが、利用者の入力次第で末尾に / が付くため正規化
-function joinPath(dir: string, baseName: string): string {
-  // 末尾のスラッシュ/バックスラッシュを除去
-  const trimmed = dir.replace(/[\\/]+$/, "");
-  // 区切り文字としてフォワードスラッシュを採用 (RN は POSIX 系のため)
-  return `${trimmed}/${baseName}`;
-}
-
 // 任意の値がオブジェクト (連想配列) かどうかを判定する
 // mergeEnvConfig の差分側 (Partial<T>) として安全に扱うためのガード
+//
+// 仕様: 空 YAML 等で `null` / `undefined` がパース結果として返るケースは「差分なし」と
+// 解釈して空 {} を返す（js-yaml は完全空ファイルでは undefined、`null:`/`~` では null を返す）。
+// 配列・プリミティブは引き続き構造エラーとして PARSE_ERROR に分類する。
 function ensureObject(value: unknown, filePath: string): Record<string, unknown> {
-  // null と非オブジェクト (配列含む) を弾く
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+  // null / undefined は「差分なし」とみなして空オブジェクトに正規化
+  if (value === null || value === undefined) {
+    // 空マージとして扱うため {} を返却
+    return {};
+  }
+  // 配列やプリミティブはトップレベルが連想配列でないため構造エラー
+  if (typeof value !== "object" || Array.isArray(value)) {
     // 形式違いはパース後の構造エラーとして PARSE_ERROR に分類
     throw new ConfigLoaderError(
       `Expected object at top level (file: ${filePath})`,
@@ -106,9 +108,19 @@ export function createLoader(
     },
 
     // 公開: ディレクトリ → EnvConfigMap (dev/staging/prod)
+    //
+    // 並列化: 3 ファイルのパス探索と読込はそれぞれ I/O を伴うため Promise.all で並列実行する。
+    // RN 環境では FS の I/O レイテンシが高めなので、起動時間に効く。
     async loadEnvConfigMap(dir: string): Promise<EnvConfigMap<Record<string, unknown>>> {
-      // dev ファイルを探す
-      const devPath = await findEnvFile(dir, "dev");
+      // dev / staging / prod のパス探索を並列化
+      const [devPath, stagingPath, prodPath] = await Promise.all([
+        // dev ファイルを探す
+        findEnvFile(dir, "dev"),
+        // staging ファイルを探す
+        findEnvFile(dir, "staging"),
+        // prod ファイルを探す
+        findEnvFile(dir, "prod"),
+      ]);
       // dev が無ければファイル未存在として扱う
       if (devPath === undefined) {
         // 期待するパス候補を伝えるためにメッセージを組み立てる
@@ -117,18 +129,19 @@ export function createLoader(
           "FILE_NOT_FOUND",
         );
       }
-      // dev は必須なのでまず読み込み、トップレベルがオブジェクトであることを保証する
-      const devRaw = ensureObject(await loadConfig(devPath), devPath);
-      // staging は欠けていたら {} 扱い
-      const stagingPath = await findEnvFile(dir, "staging");
-      const stagingRaw = stagingPath === undefined
-        ? {}
-        : ensureObject(await loadConfig(stagingPath), stagingPath);
-      // prod も欠けていたら {} 扱い
-      const prodPath = await findEnvFile(dir, "prod");
-      const prodRaw = prodPath === undefined
-        ? {}
-        : ensureObject(await loadConfig(prodPath), prodPath);
+      // 3 ファイル分の読込も並列化（staging/prod が undefined のときは空 {} に即時 resolve）
+      const [devRaw, stagingRaw, prodRaw] = await Promise.all([
+        // dev は必須。読み込み後 ensureObject で正規化
+        loadConfig(devPath).then((v) => ensureObject(v, devPath)),
+        // staging は欠けていたら {} 扱い
+        stagingPath === undefined
+          ? Promise.resolve<Record<string, unknown>>({})
+          : loadConfig(stagingPath).then((v) => ensureObject(v, stagingPath)),
+        // prod も欠けていたら {} 扱い
+        prodPath === undefined
+          ? Promise.resolve<Record<string, unknown>>({})
+          : loadConfig(prodPath).then((v) => ensureObject(v, prodPath)),
+      ]);
       // core の EnvConfigMap 形にまとめて返す
       return { dev: devRaw, staging: stagingRaw, prod: prodRaw };
     },

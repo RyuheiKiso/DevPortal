@@ -50,7 +50,7 @@ const headers = await manager.getAuthHeaders();
 
 ### `createAuthManager(adapter, options?)`
 
-`AuthAdapter` を渡して `AuthManager` を生成します。`options.initialSession` で SSR 由来の初期セッションを注入できます。`options.tokenStore` を渡せばトークン保存先を差し替えられます（省略時はメモリ）。
+`AuthAdapter` を渡して `AuthManager` を生成します。`options.initialSession` で SSR 由来の初期セッションを注入できます。`options.tokenStore` を渡せばトークン保存先を差し替えられます（省略時はメモリ）。`options.onListenerError` を渡せば、`subscribe` で登録した listener が throw した時の通知先を差し替えられます（省略時は `console.error` にフォールバック）。いずれの場合も他の listener への通知は継続します。
 
 ### `AuthManager`
 
@@ -62,11 +62,11 @@ const headers = await manager.getAuthHeaders();
 | `signIn(request?)` | `adapter.signIn` を呼ぶ。未実装なら `adapter.getSession` にフォールバック |
 | `signOut(request?)` | `adapter.signOut` を呼んで匿名へ |
 | `refresh()` | `adapter.refresh(tokenStore.get())` を呼んで反映 |
-| `getAccessToken()` | TokenStore → 現在セッションの順に access token を返す |
-| `getAuthHeaders()` | `{ Authorization: "<type> <token>" }` か `{}` を返す |
+| `getAccessToken()` | 現在セッション (`current.tokens`) を優先して access token を返す。未定義時のみ TokenStore にフォールバック (SSR ハイドレーション直前など) |
+| `getAuthHeaders()` | 現在セッションのトークンを優先して `{ Authorization: "<type> <token>" }` か `{}` を返す |
 | `hasRole(role)` / `hasPermission(permission)` | 現在ユーザーに対する単一判定 |
 | `canAccess(requirement)` | `AccessRequirement` を満たすか詳細判定（`AccessDecision` を返す） |
-| `subscribe(listener)` | セッション変化を購読。返り値は購読解除関数 |
+| `subscribe(listener)` | セッション変化を購読。返り値は購読解除関数。listener が throw しても他の listener への通知は止まらず、例外は `options.onListenerError` または `console.error` に流れる |
 
 ### `canAccess(session, requirement)`
 
@@ -100,6 +100,11 @@ const headers = await manager.getAuthHeaders();
 - `undefined` 入力 → `createAnonymousSession()` の匿名セッション
 - `status="authenticated"` かつ `user=null` の不整合 → 匿名へ倒す
 - `roles` / `permissions` / `attributes` / `tokens` / `claims` を独立した複製として保持し、外部 mutation を遮断
+
+### 設計ポリシー
+
+- `status="anonymous"` の入力に付随する `tokens` / `claims` は **破棄** されます。「匿名だがトークンを保持」したい用途 (例: guest token を別途利用するなど) は本ライブラリの設計範囲外で、別途アプリ側で管理してください。
+- `tokens` / `claims` / `attributes` は **shallow copy** で保護されます。第一層キーの追加・削除やプリミティブ値の差し替えは遮断されますが、**ネストしたオブジェクト・配列の内部 mutation までは防げません**。深い不変が必要な場合は利用側で `structuredClone` 等を行ってから渡してください。
 
 ## 注意点
 

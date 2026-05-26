@@ -123,6 +123,7 @@ describe("isAppError", () => {
         userMessage: "x",
         retryable: false,
         reportable: false,
+        severity: "error",
       }),
     ).toBe(false);
     // userMessage が欠落
@@ -133,6 +134,7 @@ describe("isAppError", () => {
         message: "x",
         retryable: false,
         reportable: false,
+        severity: "error",
       }),
     ).toBe(false);
     // retryable が真偽値でない
@@ -144,6 +146,7 @@ describe("isAppError", () => {
         userMessage: "x",
         retryable: "no",
         reportable: false,
+        severity: "error",
       }),
     ).toBe(false);
     // reportable が真偽値でない
@@ -155,6 +158,7 @@ describe("isAppError", () => {
         userMessage: "x",
         retryable: false,
         reportable: 0,
+        severity: "error",
       }),
     ).toBe(false);
   });
@@ -169,6 +173,52 @@ describe("isAppError", () => {
         userMessage: "x",
         retryable: false,
         reportable: false,
+        severity: "error",
+      }),
+    ).toBe(false);
+  });
+
+  // severity が欠落していれば false（B1 回帰防止）
+  // createAppError 経由なら severity は必ず埋まるが、transport 由来で severity 欠落の値を AppError 扱いしてはならない
+  it("returns false when severity is missing", () => {
+    expect(
+      isAppError({
+        name: "AppError",
+        kind: "unknown",
+        message: "x",
+        userMessage: "x",
+        retryable: false,
+        reportable: false,
+      }),
+    ).toBe(false);
+  });
+
+  // severity が許容値以外なら false（B1 回帰防止）
+  it("returns false when severity is not a known AppErrorSeverity", () => {
+    expect(
+      isAppError({
+        name: "AppError",
+        kind: "unknown",
+        message: "x",
+        userMessage: "x",
+        retryable: false,
+        reportable: false,
+        severity: "fatal",
+      }),
+    ).toBe(false);
+  });
+
+  // severity が文字列以外なら false（B1 回帰防止）
+  it("returns false when severity is not a string", () => {
+    expect(
+      isAppError({
+        name: "AppError",
+        kind: "unknown",
+        message: "x",
+        userMessage: "x",
+        retryable: false,
+        reportable: false,
+        severity: 1,
       }),
     ).toBe(false);
   });
@@ -241,6 +291,7 @@ describe("isSerializedAppError", () => {
         userMessage: "x",
         retryable: false,
         reportable: false,
+        severity: "error",
       }),
     ).toBe(false);
     // userMessage 欠落
@@ -251,6 +302,7 @@ describe("isSerializedAppError", () => {
         message: "x",
         retryable: false,
         reportable: false,
+        severity: "error",
       }),
     ).toBe(false);
     // retryable 型違反
@@ -262,6 +314,7 @@ describe("isSerializedAppError", () => {
         userMessage: "x",
         retryable: "no",
         reportable: false,
+        severity: "error",
       }),
     ).toBe(false);
     // reportable 型違反
@@ -273,6 +326,36 @@ describe("isSerializedAppError", () => {
         userMessage: "x",
         retryable: false,
         reportable: 0,
+        severity: "error",
+      }),
+    ).toBe(false);
+  });
+
+  // severity が欠落していれば false（B1 回帰防止）
+  it("returns false when severity is missing", () => {
+    expect(
+      isSerializedAppError({
+        name: "SerializedAppError",
+        kind: "unknown",
+        message: "x",
+        userMessage: "x",
+        retryable: false,
+        reportable: false,
+      }),
+    ).toBe(false);
+  });
+
+  // severity が許容値以外なら false（B1 回帰防止）
+  it("returns false when severity is not a known AppErrorSeverity", () => {
+    expect(
+      isSerializedAppError({
+        name: "SerializedAppError",
+        kind: "unknown",
+        message: "x",
+        userMessage: "x",
+        retryable: false,
+        reportable: false,
+        severity: "fatal",
       }),
     ).toBe(false);
   });

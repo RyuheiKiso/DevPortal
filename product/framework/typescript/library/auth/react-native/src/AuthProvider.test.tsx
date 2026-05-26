@@ -202,6 +202,67 @@ describe("AuthProvider (react-native)", () => {
     expect(adapter.getSession).toHaveBeenCalledTimes(2);
   });
 
+  // subscribe 登録直後に manager の最新スナップショットへ再同期される
+  // (Strict Mode の二重 mount / unmount→remount で subscribe〜unsubscribe〜subscribe の間に
+  //  manager 側で変化が起きても取り逃がさないことを担保する)
+  it("subscribe 登録直後に manager.getSnapshot で再同期される", async () => {
+    // 初期は匿名で始まる adapter
+    const adapter: AuthAdapter = {
+      // 匿名セッションを返す
+      getSession: vi.fn(async () => ({ status: "anonymous" })),
+    };
+    // manager を作る
+    const manager = createAuthManager(adapter);
+    // provider が subscribe する前にセッションを更新しておく
+    await manager.setSession(makeAuthSession("pre-mount"));
+    // Probe で session を観察するための参照
+    const ref: { current: ContextProbe | undefined } = { current: undefined };
+    // Probe コンポーネント
+    const Probe = makeProbe(ref);
+    // provider を mount
+    await act(async () => {
+      // Provider 配下で Probe を描画
+      create(
+        <AuthProvider manager={manager} loadOnMount={false}>
+          <Probe />
+        </AuthProvider>,
+      );
+    });
+    // useState の初期値で取得した snapshot に加え、useEffect 内の再同期も走るため、
+    // 最終的には manager.getSnapshot 由来の値 (pre-mount) が反映される
+    expect(ref.current?.session.tokens?.accessToken).toBe("pre-mount");
+  });
+
+  // useEffect 内で manager.getSnapshot が呼ばれる (再同期 1 行が消えた瞬間 fail する強い回帰防止)
+  it("subscribe 後に manager.getSnapshot が呼ばれる", async () => {
+    // adapter
+    const adapter: AuthAdapter = {
+      // 認証済みセッションを返す
+      getSession: vi.fn(async () => makeAuthSession()),
+    };
+    // manager
+    const manager = createAuthManager(adapter);
+    // getSnapshot spy を mount 直前に仕込む
+    const getSnapshotSpy = vi.spyOn(manager, "getSnapshot");
+    // Probe 参照
+    const ref: { current: ContextProbe | undefined } = { current: undefined };
+    // Probe
+    const Probe = makeProbe(ref);
+    // 描画 (loadOnMount=false で初期ロードは発火させない)
+    await act(async () => {
+      // Provider
+      create(
+        <AuthProvider manager={manager}>
+          <Probe />
+        </AuthProvider>,
+      );
+    });
+    // useState 初期化 (1 回) + useEffect 内の再同期 (1 回) で 2 回以上呼ばれているはず
+    expect(getSnapshotSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    // spy 解放
+    getSnapshotSpy.mockRestore();
+  });
+
   // manager.subscribe 経由でセッション変化が反映されること
   it("manager の購読経由でセッション変化が Context に伝搬する", async () => {
     // adapter

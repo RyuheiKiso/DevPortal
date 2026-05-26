@@ -28,6 +28,14 @@ function makeLogger(): Logger {
 afterEach(() => {
   // vi.stubGlobal で書き換えた値を元に戻す
   vi.unstubAllGlobals();
+  // HMR テストで作られた window スコープの WeakMap も毎テストで掃除する
+  // (afterEach で削除しておかないと他テストにリスナが残留する可能性がある)
+  if (typeof window !== "undefined") {
+    // 固定 Symbol キー（実装側と一致させる）
+    const key = Symbol.for("@k1s0-ts-logger/react:activeUninstalls");
+    // 動的アクセスで削除
+    delete (window as unknown as Record<symbol, unknown>)[key];
+  }
 });
 
 // installGlobalHandlers のテスト
@@ -195,6 +203,28 @@ describe("installGlobalHandlers", () => {
     uninstall();
     // 2 回目は何もしない
     expect(() => uninstall()).not.toThrow();
+  });
+
+  // HMR を模した、モジュールスコープ WeakMap の再生成をシミュレートして二重登録されないことを確認
+  // (旧実装はモジュールスコープ WeakMap が HMR で消えると、新スコープの WeakMap には何も入っておらず
+  //  「前回の listener を解除できない」状態で再 install されていた)
+  it("window 上の Symbol.for キーに WeakMap が保管されていて HMR を跨いでも参照される", () => {
+    // logger
+    const logger = makeLogger();
+    // 1 回目の install（modules cache をクリアせず、純粋に内部 API の構造を確認）
+    const uninstall1 = installGlobalHandlers(logger);
+    // window 上の固定 Symbol キーに WeakMap が保管されている
+    const key = Symbol.for("@k1s0-ts-logger/react:activeUninstalls");
+    // 動的アクセス用に型キャスト
+    const map = (window as unknown as Record<symbol, WeakMap<object, () => void> | undefined>)[key];
+    // WeakMap として存在する
+    expect(map).toBeInstanceOf(WeakMap);
+    // 登録された uninstall が WeakMap 経由で引けること（自分が最新であることを意味する）
+    expect(map?.get(logger)).toBeTypeOf("function");
+    // 後片付け
+    uninstall1();
+    // uninstall 後は WeakMap からも削除されていること（自分が最新だった分岐）
+    expect(map?.get(logger)).toBeUndefined();
   });
 
   // 同じ logger で再 install すると、前回の listener は解除されて二重呼び出しが起きないこと

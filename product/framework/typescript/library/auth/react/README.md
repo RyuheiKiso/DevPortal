@@ -65,7 +65,7 @@ Context には `{ manager, session, loading, error, reload() }` を載せます�
 | `useIsAuthenticated()` | `boolean` | status と user の両方を考慮 |
 | `useRole(role)` | `boolean` | `manager.hasRole(role)` |
 | `usePermission(permission)` | `boolean` | `manager.hasPermission(permission)` |
-| `useAccess(requirement)` | `AccessDecision` | `manager.canAccess(requirement)` |
+| `useAccess(requirement)` | `AccessDecision` | `manager.canAccess(requirement)`。返り値は毎回新規オブジェクトのため、`useEffect` 依存に使うときは `.allowed` 等プリミティブを取り出すか `useMemo` で安定化を |
 
 ## 表示ガード
 

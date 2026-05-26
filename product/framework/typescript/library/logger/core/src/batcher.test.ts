@@ -207,6 +207,57 @@ describe("createBatcher", () => {
     expect(onFlush).toHaveBeenLastCalledWith([1, 2, 3]);
   });
 
+  // インターバル駆動 flush が失敗してもタイマーが再起動して、次回発火で再送される
+  // (旧実装は catch 内で startTimer を呼ばず、追加 push がない限り items が滞留していた)
+  it("flushIntervalMs 設定下で onFlush が失敗してもタイマーが再起動し、次の発火で再送される", async () => {
+    // フェイクタイマー
+    const fake = createFakeTimer();
+    // 1 回目失敗、2 回目以降は成功する onFlush
+    let calls = 0;
+    const onFlush = vi.fn(async (_items: readonly number[]) => {
+      // 呼出回数をカウント
+      calls += 1;
+      // 初回だけ失敗
+      if (calls === 1) {
+        throw new Error("transient");
+      }
+    });
+    // バッチ機構生成
+    const b = createBatcher<number>({
+      // バッファサイズは大きく取って、明示 flush 経路を踏まない
+      flushSize: 100,
+      // インターバル発火
+      flushIntervalMs: 50,
+      // onFlush 上書き
+      onFlush,
+      // フェイクタイマーを注入
+      timer: fake.timer,
+    });
+    // 1 件 push してタイマーを起動
+    b.push(1);
+    // この時点でタイマーが 1 つ起動している
+    expect(fake.pending()).toBe(1);
+    // 1 回目のタイマー発火
+    fake.runAll();
+    // 非同期 onFlush の完了を待つ（catch まで実行されること）
+    await Promise.resolve();
+    await Promise.resolve();
+    // 1 回目の onFlush が呼ばれて失敗していること
+    expect(onFlush).toHaveBeenCalledTimes(1);
+    // items が buffer に戻っていること
+    expect(b.size()).toBe(1);
+    // 失敗後にタイマーが再起動されていること（修正前は 0 になる）
+    expect(fake.pending()).toBe(1);
+    // 2 回目のタイマー発火
+    fake.runAll();
+    // 非同期完了を待つ
+    await Promise.resolve();
+    await Promise.resolve();
+    // 2 回目は成功し、buffer は空になる
+    expect(onFlush).toHaveBeenCalledTimes(2);
+    expect(b.size()).toBe(0);
+  });
+
   // タイマー注入なし（DEFAULT_TIMER = setTimeout/clearTimeout）でも動く
   it("timer 未注入でも flushIntervalMs と dispose の clear が動く", async () => {
     // 呼び出し記録

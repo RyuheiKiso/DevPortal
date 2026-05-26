@@ -47,4 +47,47 @@ describe("parseYaml", () => {
     // メッセージにパスが含まれること
     expect(caught?.message).toContain("documents/x.yaml");
   });
+
+  // __proto__ キーを含む YAML をパースしても Object.prototype が汚染されないこと
+  // （信頼できない config ソースを RN/Expo で OTA 配信するケースを想定）
+  it("strips __proto__ keys to prevent prototype pollution", () => {
+    // __proto__ 経由で polluted を生やそうとする YAML
+    const malicious = '__proto__:\n  polluted: true\nfoo: 1\n';
+    // パース実行
+    const result = parseYaml(malicious) as Record<string, unknown>;
+    // foo は通常通り取り出せる
+    expect(result.foo).toBe(1);
+    // __proto__ プロパティは strip されているため、結果オブジェクトには存在しない
+    expect(Object.prototype.hasOwnProperty.call(result, "__proto__")).toBe(false);
+    // 他の素のオブジェクトに polluted が漏れていない
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  // constructor / prototype キーも同様に除去されること
+  it("strips constructor and prototype keys", () => {
+    // 危険キーを並べた YAML（ネストにも仕込む）
+    const malicious = 'constructor:\n  bad: 1\nprototype:\n  bad: 2\nnested:\n  __proto__:\n    deep: true\n  ok: yes\n';
+    // パース実行
+    const result = parseYaml(malicious) as Record<string, unknown>;
+    // トップレベルの constructor / prototype は strip
+    expect(Object.prototype.hasOwnProperty.call(result, "constructor")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(result, "prototype")).toBe(false);
+    // nested.__proto__ も strip されつつ、ok は残る
+    const nested = result.nested as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(nested, "__proto__")).toBe(false);
+    expect(nested.ok).toBe("yes");
+  });
+
+  // 配列の中にあるオブジェクトの危険キーも再帰的に除去されること
+  it("strips dangerous keys inside arrays recursively", () => {
+    // 配列要素の中に __proto__ を仕込む
+    const malicious = 'items:\n  - __proto__:\n      pwned: true\n    name: a\n  - name: b\n';
+    // パース実行
+    const result = parseYaml(malicious) as { items: Array<Record<string, unknown>> };
+    // 配列要素の __proto__ も削除されている
+    expect(Object.prototype.hasOwnProperty.call(result.items[0], "__proto__")).toBe(false);
+    // 正常なキーは保持されている
+    expect(result.items[0].name).toBe("a");
+    expect(result.items[1].name).toBe("b");
+  });
 });

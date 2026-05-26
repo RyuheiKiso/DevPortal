@@ -223,15 +223,34 @@ describe("createLoader.loadEnvConfigMap", () => {
     await expect(loader.loadEnvConfigMap("/env")).rejects.toMatchObject({ code: "PARSE_ERROR" });
   });
 
-  // staging が null の場合も PARSE_ERROR (構造エラー)
-  it("throws PARSE_ERROR when staging is null", async () => {
+  // staging が null/空 YAML の場合は {} 扱い（差分なしとして許容）
+  // 「ファイルを置いておきたいが現在は差分なし」というブランチ運用ケースで使いやすくするため
+  it("treats null staging YAML as empty diff", async () => {
     // staging YAML が null
     const loader = createLoader(makeBackend({
       "/env/dev.json": '{"apiUrl":"x"}',
       "/env/staging.yaml": "null\n",
     }));
-    // PARSE_ERROR が飛ぶ
-    await expect(loader.loadEnvConfigMap("/env")).rejects.toMatchObject({ code: "PARSE_ERROR" });
+    // PARSE_ERROR にならず、staging は {} 扱い
+    const map = await loader.loadEnvConfigMap("/env");
+    // staging は空オブジェクトに正規化される
+    expect(map.staging).toEqual({});
+    // dev は通常通り読まれる
+    expect(map.dev).toMatchObject({ apiUrl: "x" });
+  });
+
+  // staging が完全空ファイル (パース結果 undefined) でも {} として扱われる
+  it("treats empty staging YAML (parses to undefined) as empty diff", async () => {
+    // staging YAML が完全空（コメントのみと等価で undefined にパースされる）
+    const loader = createLoader(makeBackend({
+      "/env/dev.json": '{"apiUrl":"x"}',
+      // 完全に空文字列
+      "/env/staging.yaml": "",
+    }));
+    // PARSE_ERROR にならず staging は {} 扱い
+    const map = await loader.loadEnvConfigMap("/env");
+    // staging は空オブジェクトに正規化される
+    expect(map.staging).toEqual({});
   });
 
   // prod が配列の場合も PARSE_ERROR (構造エラー)
@@ -269,5 +288,36 @@ describe("createLoader.loadEnvConfigMap", () => {
     const map = await loader.loadEnvConfigMap("/env");
     // .yaml が選ばれて apiUrl=yaml になる
     expect(map.dev).toMatchObject({ apiUrl: "yaml" });
+  });
+
+  // Windows 形式のディレクトリパス（バックスラッシュ）でも整合した区切り文字で結合される
+  // RNW 環境で loadEnvConfigMap("C:\\Users\\app\\env") を呼ぶケースを想定。
+  // 旧実装では loader.ts 側が "/" 固定で結合していたため "C:\\...\\env/dev.json" の混在パスが
+  // backend に渡されていた。pathUtils.joinPath への統一で解決済みであることを保証する。
+  it("uses backslash separator when dir is Windows-style path (RNW)", async () => {
+    // Windows パス形式の dir をキーに持つバックエンド（バックスラッシュ統一）
+    const loader = createLoader(makeBackend({
+      // バックスラッシュで結合された Windows パス
+      "C:\\Users\\app\\env\\dev.json": '{"apiUrl":"win"}',
+    }));
+    // バックスラッシュ区切りの dir で呼ぶ
+    const map = await loader.loadEnvConfigMap("C:\\Users\\app\\env");
+    // 正しくバックスラッシュ統一のキーで読み込まれている
+    expect(map.dev).toMatchObject({ apiUrl: "win" });
+    // staging/prod は欠けているので {} 扱い
+    expect(map.staging).toEqual({});
+    expect(map.prod).toEqual({});
+  });
+
+  // Windows パスの末尾バックスラッシュも正規化される
+  it("normalizes trailing backslash on Windows-style dir", async () => {
+    // 末尾バックスラッシュ付きの dir で呼んでも結果は同じ
+    const loader = createLoader(makeBackend({
+      "C:\\Users\\app\\env\\dev.json": '{"apiUrl":"win"}',
+    }));
+    // 末尾にバックスラッシュを付けて呼ぶ
+    const map = await loader.loadEnvConfigMap("C:\\Users\\app\\env\\");
+    // 重複なくキーに到達できる
+    expect(map.dev).toMatchObject({ apiUrl: "win" });
   });
 });

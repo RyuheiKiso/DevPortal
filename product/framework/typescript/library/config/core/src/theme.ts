@@ -34,9 +34,29 @@ export interface Theme {
   };
 }
 
+// オブジェクトとそのネストをすべて再帰的に Object.freeze する小ヘルパ
+// defaultTheme の不可変性を保証するため（利用側からの mutate を防ぐ）
+function deepFreeze<T>(value: T): T {
+  // オブジェクトまたは配列のときだけ再帰
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    // 値側を先に freeze（参照されている子オブジェクトもまとめて凍結する）
+    Object.values(value as Record<string, unknown>).forEach((child) => {
+      // 子要素が object/array なら再帰的に freeze
+      deepFreeze(child);
+    });
+    // 自身を freeze
+    Object.freeze(value);
+  }
+  // freeze 済みの値をそのまま返す
+  return value;
+}
+
 // 各アプリで上書き前提のデフォルトテーマ
 // あえて中立的な値にして特定プロダクトのブランドカラーを混入させない
-export const defaultTheme: Theme = {
+//
+// 不変性保証: deepFreeze によりネスト含めて全プロパティが Object.frozen 状態。
+// strict mode 下で `defaultTheme.colors.primary = "x"` のような書き換えは TypeError になる。
+export const defaultTheme: Theme = deepFreeze({
   // 中立的なグレースケール基調の色
   colors: {
     // 主要色（青系）
@@ -66,4 +86,4 @@ export const defaultTheme: Theme = {
     // 一般的な本文サイズ
     baseSize: 14,
   },
-};
+});

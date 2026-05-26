@@ -147,4 +147,50 @@ describe("CameraProvider", () => {
       });
     }).toThrow(/must be called inside/);
   });
+
+  it("マウント → アンマウント → 再マウントで毎回有効な manager を返す（strict mode 相当の double mount を模す）", async () => {
+    const adapter1 = makeAdapter();
+    const adapter2 = makeAdapter();
+    const captured1 = vi.fn();
+    const captured2 = vi.fn();
+    // 1 回目マウント
+    let renderer1: TestRenderer.ReactTestRenderer | undefined;
+    act(() => {
+      renderer1 = TestRenderer.create(
+        <CameraProvider adapter={adapter1}>
+          <Probe onValue={captured1} />
+        </CameraProvider>,
+      );
+    });
+    const m1 = captured1.mock.calls[0][0] as CameraManager;
+    expect(m1).toBeDefined();
+    expect(m1.adapterId).toBe("mock");
+    // 1 回目アンマウント（cleanup で dispose）
+    act(() => {
+      renderer1?.unmount();
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(adapter1.dispose).toHaveBeenCalled();
+    // 2 回目マウント（新しい adapter で別 Provider）
+    let renderer2: TestRenderer.ReactTestRenderer | undefined;
+    act(() => {
+      renderer2 = TestRenderer.create(
+        <CameraProvider adapter={adapter2}>
+          <Probe onValue={captured2} />
+        </CameraProvider>,
+      );
+    });
+    const m2 = captured2.mock.calls[0][0] as CameraManager;
+    // 2 回目に取得した manager は別インスタンス
+    expect(m2).toBeDefined();
+    expect(m2).not.toBe(m1);
+    // adapter2 が dispose されないことを確認（まだ生きている）
+    expect(adapter2.dispose).not.toHaveBeenCalled();
+    // 2 回目アンマウントで adapter2 が dispose される
+    act(() => {
+      renderer2?.unmount();
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(adapter2.dispose).toHaveBeenCalled();
+  });
 });
