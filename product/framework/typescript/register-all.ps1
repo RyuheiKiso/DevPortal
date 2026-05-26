@@ -1,12 +1,12 @@
 ﻿<#
 .SYNOPSIS
-    product/framework/typescript 配下の 33 個の catalog-info.yaml を社内 Backstage に一括登録する。
+    product/framework/typescript 配下の 35 個の catalog-info.yaml を社内 Backstage に一括登録する。
 
 .DESCRIPTION
     setup ツールで導入された Backstage (http://localhost:7007) の Catalog REST API
     (POST /api/catalog/locations) を使って、framework/typescript 配下の Location ファイル
-    群 (owners.yaml + 8 System + 24 Component) を登録する。
-    依存解決の都合で Round 1 (Group/Domain + 8 System) → Round 2 (24 Component) の
+    群 (owners.yaml + 8 System + 26 Component) を登録する。
+    依存解決の都合で Round 1 (Group/Domain + 8 System) → Round 2 (26 Component) の
     順に投入し、ラウンド内では並列実行する。既存 location との重複は SKIP する。
 
 .PARAMETER Method
@@ -28,7 +28,7 @@
     ConfigFile モードでサービス再起動をスキップする (手動で再起動したい場合用)。
 
 .PARAMETER CatalogRoot
-    33 ファイル探索のルート (既定: スクリプト自身のあるディレクトリ = framework/typescript)。
+    35 ファイル探索のルート (既定: スクリプト自身のあるディレクトリ = framework/typescript)。
 
 .PARAMETER LocationType
     Backstage の location type (file または url、既定: file)。
@@ -114,7 +114,7 @@ if ([string]::IsNullOrWhiteSpace($AppConfig)) {
 # ログファイルパスをスクリプトスコープで Write-Log から参照できるよう保持する
 $script:LogFilePath = if ([string]::IsNullOrWhiteSpace($LogFile)) { $null } else { [System.IO.Path]::GetFullPath($LogFile) }
 
-# 登録対象 location 一覧 (Round 1 = owners + 8 System、Round 2 = 24 Component)
+# 登録対象 location 一覧 (Round 1 = owners + 8 System、Round 2 = 26 Component)
 $Locations = @(
     # Round 1: 依存先となる Group / Domain / System を先に投入する
     [pscustomobject]@{ Name = "owners";                       RelPath = "owners.yaml";                          Round = 1 }
@@ -133,6 +133,8 @@ $Locations = @(
     [pscustomobject]@{ Name = "component:k1s0-ts-config-core";              RelPath = "library\config\core\catalog-info.yaml";              Round = 2 }
     [pscustomobject]@{ Name = "component:k1s0-ts-config-react";             RelPath = "library\config\react\catalog-info.yaml";             Round = 2 }
     [pscustomobject]@{ Name = "component:k1s0-ts-config-react-native";      RelPath = "library\config\react-native\catalog-info.yaml";      Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-config-loader";            RelPath = "library\config\loader\catalog-info.yaml";            Round = 2 }
+    [pscustomobject]@{ Name = "component:k1s0-ts-config-rn-loader";         RelPath = "library\config\rn-loader\catalog-info.yaml";         Round = 2 }
     [pscustomobject]@{ Name = "component:k1s0-ts-error-core";               RelPath = "library\error\core\catalog-info.yaml";               Round = 2 }
     [pscustomobject]@{ Name = "component:k1s0-ts-error-react";              RelPath = "library\error\react\catalog-info.yaml";              Round = 2 }
     [pscustomobject]@{ Name = "component:k1s0-ts-error-react-native";       RelPath = "library\error\react-native\catalog-info.yaml";       Round = 2 }
@@ -355,7 +357,7 @@ function Invoke-ConfigFileMode {
     Write-Log Ok "バックアップ作成: $backupPath"
 
     # 3. YAML マージ (python ヘルパー呼び出し)
-    Write-Log Info "register-locations.py で 33 件を catalog.locations にマージ中..."
+    Write-Log Info "register-locations.py で 35 件を catalog.locations にマージ中..."
     $relPaths = $Locations | ForEach-Object { $_.RelPath -replace '\\','/' }
     $mergeResult = Invoke-LocationMerge -AppConfigPath $AppConfig -CatalogRootPath $CatalogRoot -RelPaths $relPaths
     Write-Log Ok ("マージ結果: added={0} skipped={1} rules_added=[{2}] total_locations_after={3}" -f `

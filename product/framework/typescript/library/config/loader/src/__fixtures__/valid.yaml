@@ -1,0 +1,17 @@
+env: dev
+featureFlags:
+  newUi: true
+theme:
+  colors:
+    primary: "#3366ff"
+    background: "#ffffff"
+    text: "#1a1a1a"
+  spacing:
+    xs: 4
+    sm: 8
+    md: 16
+    lg: 24
+    xl: 32
+  typography:
+    fontFamily: system-ui
+    baseSize: 14
