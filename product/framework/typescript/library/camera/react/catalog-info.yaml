@@ -1,0 +1,31 @@
+# Backstage Software Catalog - Component: @k1s0-ts-camera/react
+
+# Backstage Catalog のスキーマバージョン
+apiVersion: backstage.io/v1alpha1
+# エンティティ種別 (Component)
+kind: Component
+# エンティティ自身を識別するメタデータ
+metadata:
+  # Component の一意な名前
+  name: k1s0-ts-camera-react
+  # UI 表示用の説明文 (package.json の description より)
+  description: "DevPortal React bindings for the headless camera framework (Web / MediaDevices)."
+  # 検索・フィルタ用タグ
+  tags:
+    - typescript
+    - library
+    - camera
+    - react
+# Component 固有の仕様
+spec:
+  # 種別 (再利用ライブラリ)
+  type: library
+  # ライフサイクル (本番利用可)
+  lifecycle: production
+  # 所有者 (owners.yaml で定義した Group)
+  owner: k1s0-framework-team
+  # 所属する System (camera ドメイン)
+  system: k1s0-ts-camera
+  # 依存先 Component (core)
+  dependsOn:
+    - component:default/k1s0-ts-camera-core
