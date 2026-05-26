@@ -103,14 +103,15 @@ describe("createStorageTransport", () => {
     expect(parsed.map((e: LogEntry) => e.message)).toEqual(["c", "d"]);
   });
 
-  // 壊れた JSON でも空配列にフォールバック
-  it("既存値が JSON でない場合は空配列から始める", async () => {
+  // 壊れた JSON は write を失敗させて既存ログを温存する
+  // (旧実装は catch で空配列に倒し、既存の壊れた値を新規 1 件で上書きしていた → ログ消失)
+  it("既存値が JSON でない場合は write が reject して既存値を温存する", async () => {
     const s = makeSyncStorage({ "k1s0-ts-logger:entries": "{not-json" });
     const t = createStorageTransport({ storage: s });
-    await t.write(entry("recovered"));
-    const parsed = JSON.parse(s.dump()["k1s0-ts-logger:entries"]!);
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0].message).toBe("recovered");
+    // write は store.get の JSON.parse 失敗を伝播して reject する
+    await expect(t.write(entry("recovered"))).rejects.toBeDefined();
+    // 既存の壊れた値はそのまま温存される (空配列で上書きされない)
+    expect(s.dump()["k1s0-ts-logger:entries"]).toBe("{not-json");
   });
 
   // JSON だが配列でない値も空配列扱い

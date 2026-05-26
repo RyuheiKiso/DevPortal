@@ -177,19 +177,30 @@ describe("createRemoteTransport", () => {
   });
 
   // 4xx はリトライしない（既定 shouldRetry）
-  it("4xx 応答ではリトライしないで flush が reject", async () => {
+  // 4xx は永続失敗扱いで items を破棄し、flush は正常終了する
+  // (旧実装は items を batcher にリバッファして無限再送 → 全件失敗ループになっていた)
+  // 観測は onPermanentFailure コールバックで行う
+  it("4xx 応答では永続失敗として items を破棄し、flush は正常終了する", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => ({ ok: false, status: 400 } as unknown as Response));
+    // 永続失敗の通知を観測する spy
+    const permanentFailures: Array<{ error: unknown; items: readonly unknown[] }> = [];
     const t = createRemoteTransport({
       endpoint: "http://x",
       fetchImpl,
       flushSize: 100,
       maxRetries: 5,
+      onPermanentFailure: (error, items) => {
+        permanentFailures.push({ error, items });
+      },
     });
     t.write(entry("a"));
-    // 明示 flush で例外を観測
-    await expect(t.flush()).rejects.toBeDefined();
-    // 1 回しか呼ばれない
+    // flush は items 破棄により正常終了する
+    await expect(t.flush()).resolves.toBeUndefined();
+    // fetch は 1 回しか呼ばれない (リトライしていない)
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+    // 永続失敗が通知されている (items 1 件)
+    expect(permanentFailures).toHaveLength(1);
+    expect(permanentFailures[0]?.items).toHaveLength(1);
   });
 
   // fetch が throw した場合もリトライ対象
@@ -215,19 +226,44 @@ describe("createRemoteTransport", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  // shouldRetry を false に固定するとリトライしない
-  it("shouldRetry が false ならリトライしない", async () => {
+  // onPermanentFailure コールバックが throw しても flush は正常終了する
+  it("onPermanentFailure コールバックの例外は飲み込まれて flush は正常終了する", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => ({ ok: false, status: 400 } as unknown as Response));
+    const t = createRemoteTransport({
+      endpoint: "http://x",
+      fetchImpl,
+      flushSize: 100,
+      maxRetries: 0,
+      onPermanentFailure: () => {
+        // 観測コールバックが例外を投げてもユーザコードに影響しないことを確認
+        throw new Error("callback exploded");
+      },
+    });
+    t.write(entry("a"));
+    // コールバック例外は飲み込まれ、flush は正常終了する
+    await expect(t.flush()).resolves.toBeUndefined();
+  });
+
+  // shouldRetry を false に固定すると永続失敗扱いで items を破棄、flush は正常終了
+  it("shouldRetry が false なら永続失敗として items を破棄し flush は正常終了する", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => ({ ok: false, status: 500 } as unknown as Response));
+    const permanentFailures: Array<{ error: unknown; items: readonly unknown[] }> = [];
     const t = createRemoteTransport({
       endpoint: "http://x",
       fetchImpl,
       flushSize: 100,
       maxRetries: 5,
       shouldRetry: () => false,
+      onPermanentFailure: (error, items) => {
+        permanentFailures.push({ error, items });
+      },
     });
     t.write(entry("a"));
-    await expect(t.flush()).rejects.toBeDefined();
+    // 永続失敗 → items 破棄 → flush は resolve する
+    await expect(t.flush()).resolves.toBeUndefined();
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+    // 永続失敗の通知 1 件
+    expect(permanentFailures).toHaveLength(1);
   });
 
   // リトライ上限到達で reject

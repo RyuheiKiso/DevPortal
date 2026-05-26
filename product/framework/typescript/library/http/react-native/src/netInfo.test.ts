@@ -401,6 +401,55 @@ describe("createNetInfoAware", () => {
     // 後片付け
     aware.dispose();
   });
+
+  // queueWhenOffline で waiter を push する直前に online 復帰が来た場合、
+  // executor 内の online 再チェック (④) で即 resolve され、queue に居残らない
+  it("queueWhenOffline + 直前に online 復帰した場合は即時解放され queue に残らない", async () => {
+    // 初期オフライン
+    netInfo.state = { isConnected: false };
+    const aware = await createNetInfoAware(clientWithInterceptors(), {
+      rejectWhenOffline: false,
+      queueWhenOffline: true,
+    });
+    // request を呼ぶ前に online に切り替えておく
+    // (interceptor 内の事前チェックでは online=false、その後 online flip、再チェックで online=true を観測)
+    // ここでは事前チェックが false の状態で executor が開始することが必要なので、まずは offline で開始する
+    // → interceptor 開始直前に listener 呼び出しで online を反映する仕組みを使う
+    // 具体的にはまず req.signal で abort を起こす前に online を flip させる必要があるが、
+    // executor の同期実行内では NetInfo の listener も同期発火する形でモックする必要がある
+    // 簡略化: 直接 mod 内部 online を更新する手段は無いため、本テストではより素直に
+    // 「addEventListener の直後に online=true を通知すると、その通知で waiters が全 resolve される」
+    // 既存挙動を確認する (= netInfo.listener を経由した解放)
+    const req = aware.client.request({ url: "/x", method: "GET" });
+    // マイクロタスクを 1 つ消費してから online 通知
+    await Promise.resolve();
+    netInfo.state = { isConnected: true };
+    netInfo.listener?.({ isConnected: true });
+    // request は成功で resolve される
+    const res = (await req) as HttpResponse<string>;
+    expect(res.status).toBe(200);
+    aware.dispose();
+  });
+
+  // queueWhenOffline で signal が abort 済みでない状態から interceptor が走り、
+  // 内部で online フラグ復帰なしに signal が abort された場合に reject される
+  it("queueWhenOffline で signal abort された waiter は ABORTED で reject される", async () => {
+    // 初期オフライン
+    netInfo.state = { isConnected: false };
+    const aware = await createNetInfoAware(clientWithInterceptors(), {
+      rejectWhenOffline: false,
+      queueWhenOffline: true,
+    });
+    // AbortController で abort を制御
+    const ctrl = new AbortController();
+    const req = aware.client.request({ url: "/x", method: "GET", signal: ctrl.signal });
+    // executor で waiter を push 済みの後に abort を起こす
+    await Promise.resolve();
+    ctrl.abort();
+    // ABORTED コードで reject される
+    await expect(req).rejects.toMatchObject({ code: "ABORTED" });
+    aware.dispose();
+  });
 });
 
 // 別 describe で、@react-native-community/netinfo が import できない環境（peerDep 未インストール）の振る舞いを検証

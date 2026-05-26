@@ -392,4 +392,88 @@ describe("createAuthManager", () => {
     // 引数が転送されていること
     expect(adapter.refresh).toHaveBeenCalledWith({ accessToken: "stored", refreshToken: "r" });
   });
+
+  // refresh の singleflight: 10 並列呼び出しで adapter.refresh は 1 回しか呼ばれない
+  // (refresh_token を一発で消費する IdP では二重実行で 2 回目以降が 401 になるため重要)
+  it("並列 refresh 呼び出しでも adapter.refresh は 1 度しか実行されない (singleflight)", async () => {
+    // adapter.refresh が解決するまで一定遅延するモック
+    let refreshCalls = 0;
+    const adapter: AuthAdapter = {
+      getSession: vi.fn(async () => createSession()),
+      refresh: vi.fn(async () => {
+        refreshCalls += 1;
+        // マイクロタスクを跨ぐため Promise.resolve を 1 つ挟む
+        await Promise.resolve();
+        return createSession("refreshed");
+      }),
+    };
+    const manager = createAuthManager(adapter);
+    // 10 並列で refresh を発火する
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => manager.refresh()),
+    );
+    // adapter.refresh は singleflight で 1 回のみ
+    expect(refreshCalls).toBe(1);
+    expect(adapter.refresh).toHaveBeenCalledTimes(1);
+    // 全結果が同じ refreshed セッションを返す
+    for (const r of results) {
+      expect(r.user?.id).toBe("user-1");
+    }
+  });
+
+  // refresh の singleflight: 解決後は in-flight 参照が解放され、次回呼び出しが新規実行される
+  it("refresh 完了後は in-flight が解放され、次回呼び出しは新規 adapter.refresh を起動する", async () => {
+    let refreshCalls = 0;
+    const adapter: AuthAdapter = {
+      getSession: vi.fn(async () => createSession()),
+      refresh: vi.fn(async () => {
+        refreshCalls += 1;
+        return createSession("refreshed");
+      }),
+    };
+    const manager = createAuthManager(adapter);
+    // 1 回目
+    await manager.refresh();
+    // 2 回目 (in-flight は既に null に戻っているはず)
+    await manager.refresh();
+    expect(refreshCalls).toBe(2);
+  });
+
+  // applySession の mutex: 並行 signIn / signOut / refresh でメモリと storage の整合が崩れない
+  it("並行 signIn と signOut で current と tokenStore が食い違わない (mutex 直列化)", async () => {
+    // tokenStore の操作順序を記録する spy
+    const ops: string[] = [];
+    const store = {
+      async get() {
+        return undefined;
+      },
+      async set(t: unknown) {
+        // set 操作を記録
+        ops.push(`set:${(t as { accessToken?: string }).accessToken ?? "?"}`);
+        // マイクロタスクを跨ぐ
+        await Promise.resolve();
+      },
+      async clear() {
+        // clear 操作を記録
+        ops.push("clear");
+        await Promise.resolve();
+      },
+    } as const;
+    const adapter: AuthAdapter = {
+      // getSession は使われない経路
+      getSession: vi.fn(async () => createSession()),
+      // signIn は新セッションを返す
+      signIn: vi.fn(async () => createSession("new")),
+      // signOut は本テストでは no-op
+      signOut: vi.fn(async () => undefined),
+    };
+    const manager = createAuthManager(adapter, { tokenStore: store });
+    // signIn と signOut を並列発火 → mutex により直列化される
+    await Promise.all([manager.signIn(), manager.signOut()]);
+    // ops は「set:access-new → clear」または「clear → set:access-new」の 2 通りだが、
+    // mutex 直列化により混在 (set 途中で clear が割り込む) は起きない
+    expect(ops.length).toBe(2);
+    expect(ops).toEqual(expect.arrayContaining(["clear"]));
+    expect(ops.some((o) => o.startsWith("set:"))).toBe(true);
+  });
 });

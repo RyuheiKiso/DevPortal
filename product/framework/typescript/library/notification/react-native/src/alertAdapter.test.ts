@@ -111,12 +111,18 @@ describe("createAlertConfirmAdapter", () => {
     await expect(result).resolves.toEqual({ dismissed: true, reason: undefined });
   });
 
-  it("passes non-dismissible dialogs as non-cancelable alerts", () => {
+  // dismissible=false でも onDismiss は登録される (Android OS 破棄や RN reload による
+  // Alert 強制終了で Promise が永久未解決になるのを防ぐため)
+  it("passes non-dismissible dialogs as non-cancelable but still registers onDismiss", async () => {
     const { manager } = setup();
-    void manager.dialog({ message: "locked", dismissible: false });
-
+    const result = manager.dialog({ message: "locked", dismissible: false });
+    // cancelable は false (UI 上のスワイプ/タップ dismiss を不許可)
     expect(alertMock.calls[0]?.options?.cancelable).toBe(false);
-    expect(alertMock.calls[0]?.options?.onDismiss).toBeUndefined();
+    // onDismiss はリーク防止のため常に登録されている
+    expect(alertMock.calls[0]?.options?.onDismiss).toBeDefined();
+    // onDismiss を呼べば Promise が resolve(dismissed:true) される
+    alertMock.calls[0]?.options?.onDismiss?.();
+    await expect(result).resolves.toEqual({ dismissed: true, reason: undefined });
   });
 
   it("shows already pending confirm notifications when the adapter is installed", async () => {

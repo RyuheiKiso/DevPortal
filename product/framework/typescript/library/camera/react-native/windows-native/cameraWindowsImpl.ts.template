@@ -204,14 +204,17 @@ export function createWindowsNativeImpl(): WindowsCameraImpl {
     },
 
     // アダプタ解放（現在の session を全て stop）
+    // Promise.allSettled で並列実行（HW 同時操作の制約が問題になる場合は for await に戻す）
     dispose: async () => {
-      for (const sessionId of state.previewMap.values()) {
-        try {
-          await native.stopPreview(sessionId);
-        } catch {
-          // 解放失敗は無視
-        }
-      }
+      // すべての session に対する stop Promise を並列起動
+      const stopPromises = Array.from(state.previewMap.values()).map((sessionId) =>
+        native.stopPreview(sessionId).catch(() => {
+          // 解放失敗は無視（dispose は best-effort）
+        }),
+      );
+      // 全部の完了を待つ（失敗があっても allSettled で全部待ち切る）
+      await Promise.allSettled(stopPromises);
+      // 内部 state をすべてクリア
       state.previewMap.clear();
       state.recordingMap.clear();
       state.recordingStartedAt.clear();

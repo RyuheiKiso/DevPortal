@@ -107,12 +107,16 @@ export function normalizeError(err: unknown, req: HttpRequest): HttpError {
       cause: err,
     });
   }
-  // DOMException(TimeoutError) はタイムアウト扱い（リトライ対象外、エラー種別を別に出す）
+  // DOMException(TimeoutError) はタイムアウト扱い
+  // retryable=true としてリトライ判定は retry 層 (resolveEffectiveRetryPolicy / shouldRetry) に委ねる。
+  // - per-attempt timeout: 次の attempt で再試行される (冪等性ガードを通過した場合のみ)
+  // - total timeout: 外側 withTimeout の signal.aborted により withRetry の次イテレーションで弾かれるため、
+  //   実際の再試行は発生しない (シグナル経由の中断は markRetryExhausted を経由しないが、攻撃面なし)
   if (err instanceof DOMException && err.name === "TimeoutError") {
     return new HttpError({
       message: "request timed out",
       code: "TIMEOUT",
-      retryable: false,
+      retryable: true,
       requestId: req.requestId,
       cause: err,
     });

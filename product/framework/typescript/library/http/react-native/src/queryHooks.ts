@@ -1,5 +1,5 @@
 // React の hook を取り込み
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // HTTP クライアント関連の型と HttpError を core から取り込み
 import { HttpError, isJsonContentType } from "@k1s0-ts-http/core";
 import type { HttpRequestInit, HttpResponse } from "@k1s0-ts-http/core";
@@ -128,6 +128,12 @@ export function useHttpQuery<T = unknown>(
   const initRef = useRef(init);
   initRef.current = init;
   const deps = options.deps;
+  // useCallback の依存配列に deps を直接 spread すると、レンダ毎に長さが変動した場合
+  // hooks ルール違反 (依存配列の長さ変動) でクラッシュする可能性がある。
+  // deps を useMemo で安定化し、固定長の依存配列を保持する。
+  // (deps 自身の参照値が変わったときだけ depsKey が新しい配列インスタンスに切り替わる)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const depsKey = useMemo(() => deps, deps ?? []);
   // fetch 実行ヘルパ（Promise を返す、B-15）
   const fetchOnce = useCallback((): Promise<void> => {
     ctrlRef.current?.abort();
@@ -164,8 +170,8 @@ export function useHttpQuery<T = unknown>(
           requestId: httpErr.requestId,
         });
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, enabled, parseAs, ...(deps ?? [])]);
+    // depsKey は useMemo で deps の内容変化を反映する単一参照キー (固定長 deps を維持)
+  }, [client, enabled, parseAs, depsKey]);
   useEffect(() => {
     void fetchOnce();
     return () => {

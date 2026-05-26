@@ -67,6 +67,31 @@ function headersToObject(headers: Headers): Record<string, string> {
   return out;
 }
 
+// 任意個の headers (任意のキー大小文字) を case-insensitive にマージする
+// 同名 (大小無視) のキーがあれば「後に来た定義」を採用し、最終的にユニークな出力にする
+// HTTP ヘッダは RFC 7230 §3.2 で大小無視のため、`Authorization` と `authorization` の
+// 両方が出力に含まれると一部サーバが 400 を返す事故が起きうる。これを構造的に防ぐ。
+function mergeHeadersCaseInsensitive(
+  ...sources: ReadonlyArray<Record<string, string> | undefined>
+): Record<string, string> {
+  // 小文字キー → { 元の大小文字キー名, 値 } のマップ
+  const byLower = new Map<string, { name: string; value: string }>();
+  // sources を順に走査 (後勝ち)
+  for (const src of sources) {
+    if (src === undefined) continue;
+    for (const [k, v] of Object.entries(src)) {
+      // 小文字キーで衝突判定
+      byLower.set(k.toLowerCase(), { name: k, value: v });
+    }
+  }
+  // 元のキー名 (後勝ちで採用) を保持したまま単一の Record として返却する
+  const out: Record<string, string> = {};
+  for (const { name, value } of byLower.values()) {
+    out[name] = value;
+  }
+  return out;
+}
+
 // body が「1 度しか読めない」ものなら true（ReadableStream / consumed Body）
 // retry を無効化すべきかの判定に使う（A5 対応）
 function isConsumableBody(body: unknown): boolean {
@@ -272,14 +297,22 @@ export function createHttpClient(rawConfig: HttpClientConfig = {}): HttpClient {
           // [G] withTimeout(perAttempt) で 1 試行ごとの時間制限
           return await withTimeout(timeout.perAttemptMs, totalSignal, async (signal) => {
             // [H] attempt 毎に auth ヘッダを取得（token refresh 対応、A3）
-            let attemptHeaders: Record<string, string> = { ...req.headers };
-            if (config.auth !== undefined) {
-              const authHeaders = await config.auth.getAuthHeaders();
-              attemptHeaders = { ...attemptHeaders, ...authHeaders };
-            }
+            // ヘッダは case-insensitive にマージし、`Authorization` と `authorization` の重複を防ぐ
+            // (一部サーバはヘッダ重複を 400 として弾くため、出力は必ずユニーク名にする)
+            const authHeaders =
+              config.auth !== undefined ? await config.auth.getAuthHeaders() : undefined;
             // [I] 相関 ID を最終的に付与（auth より後、interceptor の置換からも保護、A1）
             // ヘッダ名は config.requestIdHeader でカスタマイズ可能（既定 "X-Request-Id"、B-2）
-            attemptHeaders[requestIdHeader] = req.requestId;
+            // mergeHeadersCaseInsensitive により req.headers + authHeaders + requestId が
+            // すべて単一の名前 (大小無視で重複しない) で出力される
+            const attemptHeaders = mergeHeadersCaseInsensitive(
+              // ベース: ユーザ指定 + defaultHeaders マージ済みのリクエストヘッダ
+              req.headers,
+              // 認証ヘッダ (auth provider から都度取得、最新トークン反映)
+              authHeaders,
+              // 相関 ID は常に最後に上書きして確実に付与する
+              { [requestIdHeader]: req.requestId },
+            );
             // [J] fetch 本体を呼び出し、retry 層が判定できるよう fetch 由来の例外も正規化する
             let raw: Response;
             try {
@@ -308,10 +341,28 @@ export function createHttpClient(rawConfig: HttpClientConfig = {}): HttpClient {
               const canRetryMore =
                 attempt < effectiveRetryPolicy.maxRetries &&
                 effectiveRetryPolicy.maxRetries > 0;
-              const willActuallyRetry =
-                canRetryMore &&
-                (effectiveRetryPolicy.shouldRetry !== undefined ||
-                  effectiveRetryPolicy.retryableStatuses.includes(raw.status));
+              // shouldRetry が定義されている場合は実際に評価して boolean を採用する
+              // (旧実装は `shouldRetry !== undefined` のみで真扱いとしており、shouldRetry が
+              //  false を返しても retryable=true になる不整合があった)
+              // shouldRetry へは status / response 情報を持つ暫定 HttpError を渡す
+              let willActuallyRetry = false;
+              if (canRetryMore) {
+                if (effectiveRetryPolicy.shouldRetry !== undefined) {
+                  // shouldRetry 用に暫定 HttpError を生成 (retryable は判定結果に依存するため一旦 false)
+                  const prelimErr = new HttpError({
+                    message: `HTTP ${raw.status}`,
+                    status: raw.status,
+                    retryable: false,
+                    requestId: req.requestId,
+                    response: errResponse,
+                  });
+                  // shouldRetry 結果が厳密に true なら retry 確定
+                  willActuallyRetry = effectiveRetryPolicy.shouldRetry(prelimErr, attempt) === true;
+                } else {
+                  // shouldRetry 未指定なら既定の retryableStatuses 判定
+                  willActuallyRetry = effectiveRetryPolicy.retryableStatuses.includes(raw.status);
+                }
+              }
               const httpErr = new HttpError({
                 message: `HTTP ${raw.status}`,
                 status: raw.status,

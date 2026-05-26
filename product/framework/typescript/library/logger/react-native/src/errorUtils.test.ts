@@ -238,4 +238,35 @@ describe("installGlobalErrorHandler", () => {
     // 念のため、自分の handler は変わっていないこと
     expect(ours).not.toBe(foreign);
   });
+
+  // ErrorUtils.getGlobalHandler が undefined を返しても install / uninstall が安全に動くこと
+  // (旧実装は previous(error, isFatal) で `previous is not a function` を投げ、
+  //  uninstall でも setGlobalHandler(undefined) を呼んで環境によっては落ちていた)
+  it("getGlobalHandler が undefined を返しても handler 呼び出しと uninstall が落ちない", () => {
+    // current.handler に undefined を保持する ErrorUtils スタブを直接注入
+    let registered: unknown = undefined;
+    const errorUtils = {
+      // 初回 getGlobalHandler は undefined を返す (未登録環境を模倣)
+      getGlobalHandler: () => registered as never,
+      setGlobalHandler: (fn: (error: unknown, isFatal?: boolean) => void) => {
+        registered = fn;
+      },
+    } as unknown as RNErrorUtils;
+    (globalThis as unknown as { ErrorUtils: RNErrorUtils }).ErrorUtils = errorUtils;
+    const logger = makeLogger();
+    // install する (previous が undefined → null として正規化される)
+    const uninstall = installGlobalErrorHandler(logger, { callPreviousHandler: true });
+    // 登録された handler を取り出して呼ぶ (previous=null のため自前呼出はスキップされ throw しない)
+    const handler = registered as (error: unknown, isFatal?: boolean) => void;
+    expect(() => handler(new Error("oops"), true)).not.toThrow();
+    expect((logger.fatal as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+    // uninstall も throw しない (setGlobalHandler に no-op 関数が渡される)
+    expect(() => uninstall()).not.toThrow();
+    // setGlobalHandler 経由で関数 (no-op) が登録されたことを確認
+    expect(typeof registered).toBe("function");
+    // 登録された no-op 関数を呼んでも throw しないこと
+    // (coverage 観点で no-op 関数自体の実行を担保する)
+    const noop = registered as (error?: unknown, isFatal?: boolean) => void;
+    expect(() => noop()).not.toThrow();
+  });
 });

@@ -234,4 +234,34 @@ describe("AuthProvider", () => {
     // Context の session に伝わっていること
     expect(ref.current?.session.tokens?.accessToken).toBe("forced");
   });
+
+  // subscribe 登録直後に manager の最新スナップショットへ再同期される
+  // (Strict Mode の二重 mount / unmount→remount で subscribe〜unsubscribe〜subscribe の間に
+  //  manager 側で変化が起きても取り逃がさないことを担保する)
+  it("subscribe 登録直後に manager.getSnapshot で再同期される", async () => {
+    // 初期は匿名で始まる adapter
+    const adapter: AuthAdapter = {
+      getSession: vi.fn(async () => ({ status: "anonymous" })),
+    };
+    // 認証済みで初期化された manager (initialSession を渡しても良いが、
+    //  本テストでは「subscribe 直後の同期」だけを観察したいので、provider 構築直前に
+    //  setSession で値を書き込んでおく)
+    const manager = createAuthManager(adapter);
+    // provider が subscribe する前にセッションを更新しておく
+    await manager.setSession(makeAuthSession("pre-mount"));
+    // Probe で session を観察
+    const ref: { current: ContextProbe | undefined } = { current: undefined };
+    const Probe = makeProbe(ref);
+    // provider を mount
+    await act(async () => {
+      create(
+        <AuthProvider manager={manager} loadOnMount={false}>
+          <Probe />
+        </AuthProvider>,
+      );
+    });
+    // useState の初期値で取得した snapshot に加え、useEffect 内の再同期も走るため、
+    // 最終的には manager.getSnapshot 由来の値 (pre-mount) が反映される
+    expect(ref.current?.session.tokens?.accessToken).toBe("pre-mount");
+  });
 });

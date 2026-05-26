@@ -197,9 +197,10 @@ export function createNotificationManager(
     }
     // dedupeKey 一致の既存トーストがあれば置換（同じ ID を再利用）
     if (input.dedupeKey !== undefined) {
-      // 既存通知を探す
-      const existing = findByDedupeKey(queue, input.dedupeKey);
-      // 既存があり、かつ toast の場合に限り置換
+      // 既存通知を探す (kind="toast" のみを対象にする)
+      // (kindFilter を渡さないと先頭の dialog/confirm がヒットして toast の dedupe が壊れる)
+      const existing = findByDedupeKey(queue, input.dedupeKey, "toast");
+      // 既存があれば置換 (kindFilter により kind は必ず toast)
       if (existing !== null && existing.notification.kind === "toast") {
         // 既存のタイマーを停止（duration をリセット）
         clearTimer(existing.notification.id);

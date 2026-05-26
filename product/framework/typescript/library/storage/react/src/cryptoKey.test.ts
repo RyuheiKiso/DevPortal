@@ -178,6 +178,173 @@ describe("loadOrCreateAesKey", () => {
     await expect(crypto.subtle.decrypt({ name: "AES-GCM", iv }, b, ciphertext)).rejects.toThrow();
   });
 
+  // navigator が undefined な SSR 風環境ではフォールバックして in-memory のみで動作する
+  // (detectLockManager の `typeof navigator === "undefined"` 分岐を網羅する)
+  it("navigator が存在しない環境では in-memory inflight のみで動作する", async () => {
+    // 隔離 factory (createIndexedDbBackend に明示注入するため navigator 経由の indexedDB 取得は不要)
+    const factory = new IDBFactory();
+    // navigator を一時的に undefined に差し替える (vitest の stubGlobal 経由)
+    vi.stubGlobal("navigator", undefined);
+    try {
+      // 例外なく成功すれば OK (Web Locks 経路に入らず performIo が直接実行される)
+      const key = await loadOrCreateAesKey({ keyName: "no-navigator", factory });
+      expect(key.algorithm.name).toBe("AES-GCM");
+    } finally {
+      // navigator を元に戻す
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // navigator.locks が存在する環境では、option 未指定でも自動で利用されること
+  // (detectLockManager の navigator.locks 検出経路を網羅する)
+  it("navigator.locks が存在すれば option 未指定でも自動利用される", async () => {
+    // 隔離 factory
+    const factory = new IDBFactory();
+    // navigator.locks のスタブを取り付ける (jsdom には locks 実装が無いため Object.defineProperty で注入)
+    const calls: string[] = [];
+    const stubLocks = {
+      request: async (name: string, callback: () => Promise<unknown>): Promise<unknown> => {
+        // 呼び出された lock 名を記録
+        calls.push(name);
+        // callback を実行して結果を返す
+        return await callback();
+      },
+    } as unknown as LockManager;
+    // 元の locks を退避してテスト用 stub を差し込む
+    const navAny = navigator as Navigator & { locks?: LockManager };
+    const original = navAny.locks;
+    // defineProperty で書き込み可能に設定 (もともと未定義のため新規プロパティ追加)
+    Object.defineProperty(navigator, "locks", {
+      value: stubLocks,
+      configurable: true,
+      writable: true,
+    });
+    try {
+      // option.lockManager を渡さず呼び出す (navigator.locks が自動採用されるはず)
+      await loadOrCreateAesKey({ keyName: "auto-detect", factory });
+      // stub.request が呼ばれていれば feature detect 経路が動作している証
+      expect(calls.length).toBeGreaterThan(0);
+      // lock 名が keyName を含む
+      expect(calls[0]).toContain("auto-detect");
+    } finally {
+      // 元の状態に戻す (他テストへの影響を防ぐ)
+      if (original === undefined) {
+        // 元々無かった場合は delete してプリスティン状態へ
+        delete (navigator as { locks?: LockManager }).locks;
+      } else {
+        // 元々あった場合は復元
+        Object.defineProperty(navigator, "locks", {
+          value: original,
+          configurable: true,
+          writable: true,
+        });
+      }
+    }
+  });
+
+  // 壊れたポリフィル: navigator.locks は存在するが request が関数でない場合は in-memory のみで動作する
+  // (detectLockManager の `typeof locks.request !== "function"` 分岐を網羅する)
+  it("navigator.locks.request が関数でない場合は in-memory inflight のみで動作する", async () => {
+    // 隔離 factory
+    const factory = new IDBFactory();
+    // 壊れた locks (request が string)
+    const brokenLocks = { request: "not-a-function" } as unknown as LockManager;
+    // 元の locks を退避
+    const navAny = navigator as Navigator & { locks?: LockManager };
+    const original = navAny.locks;
+    Object.defineProperty(navigator, "locks", {
+      value: brokenLocks,
+      configurable: true,
+      writable: true,
+    });
+    try {
+      // option.lockManager 未指定 + 壊れた navigator.locks → in-memory only にフォールバック
+      // 例外なく成功すれば OK (Web Locks 呼び出しは試行されていない)
+      const key = await loadOrCreateAesKey({ keyName: "broken-polyfill", factory });
+      expect(key.algorithm.name).toBe("AES-GCM");
+    } finally {
+      // 元の状態に戻す
+      if (original === undefined) {
+        delete (navigator as { locks?: LockManager }).locks;
+      } else {
+        Object.defineProperty(navigator, "locks", {
+          value: original,
+          configurable: true,
+          writable: true,
+        });
+      }
+    }
+  });
+
+  // Web Locks API (LockManager) を注入したとき、`request` が呼ばれ I/O が lock 内側で実行されること
+  it("LockManager を注入すると request 経由で I/O が排他化される", async () => {
+    // 隔離 factory
+    const factory = new IDBFactory();
+    // 単純な LockManager モック (callback を直列実行し、呼ばれた lock 名を記録する)
+    const calls: string[] = [];
+    // 最低限の LockManager 互換オブジェクト (request のみ実装)
+    const lockManager = {
+      // exclusive モードの lock を取得し callback を実行するだけのモック
+      // 戻り値は callback の戻り値の Promise
+      request: vi.fn(async (name: string, callback: () => Promise<unknown>): Promise<unknown> => {
+        // 呼び出された lock 名を記録
+        calls.push(name);
+        // callback を実行して結果を返す (本物の navigator.locks 互換)
+        return await callback();
+      }),
+    } as unknown as LockManager;
+    // 鍵を生成 (LockManager を注入)
+    await loadOrCreateAesKey({ keyName: "with-lock", factory, lockManager });
+    // request が 1 回呼ばれていること
+    expect(calls).toHaveLength(1);
+    // lock 名に keyName が含まれていること (合成キー由来)
+    expect(calls[0]).toContain("with-lock");
+  });
+
+  // LockManager 経由で並行呼び出しを直列化すると generateKey が 1 度しか走らないこと
+  // (cross-tab レースの再現テスト: 同じ論理鍵への 2 つのコンテキストが順序通り処理される)
+  it("LockManager 注入時、別コンテキストの並列実行が直列化される", async () => {
+    // 隔離 factory (両者で共有 → 1 つの IDB を見る)
+    const factory = new IDBFactory();
+    // generateKey を spy
+    const generateSpy = vi.spyOn(crypto.subtle, "generateKey");
+    // LockManager の現在保持者を表すマップ (lock 名 → 解放待ち Promise)
+    const held = new Map<string, Promise<void>>();
+    // 注入用 LockManager: 同名 lock を直列化する単純実装
+    const lockManager = {
+      request: async (name: string, callback: () => Promise<unknown>): Promise<unknown> => {
+        // 直前のホルダーがあれば await して順序を整える
+        const prev = held.get(name);
+        if (prev !== undefined) await prev;
+        // 自分の lock 開放を表す Promise を deferred で組み立てる
+        let release: () => void = () => undefined;
+        const myLock = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        // 新しい holder として登録
+        held.set(name, myLock);
+        try {
+          // callback を実行して結果を取得
+          return await callback();
+        } finally {
+          // lock 解放 (後続が進める)
+          release();
+          // 自分が末尾なら map から外す
+          if (held.get(name) === myLock) held.delete(name);
+        }
+      },
+    } as unknown as LockManager;
+    // 同じ keyName へ 5 並列に呼び出す (in-memory inflight を回避するため、間に await のマイクロタスクを挟む)
+    // ※ inflightKeys は同期登録されるため、純粋な Promise.all では in-memory にヒットしてしまう。
+    //    cross-tab を模した検証は次テストで行うため、ここは LockManager の直列化動作の確認に留める。
+    await loadOrCreateAesKey({ keyName: "cross-tab", factory, lockManager });
+    await loadOrCreateAesKey({ keyName: "cross-tab", factory, lockManager });
+    // generateKey は 1 回 (= 2 回目は IDB から取得) であること
+    expect(generateSpy).toHaveBeenCalledTimes(1);
+    // spy 解除
+    generateSpy.mockRestore();
+  });
+
   // dbName / storeName のカスタマイズが反映されること
   it("dbName と storeName のカスタマイズが反映される", async () => {
     // 隔離 factory

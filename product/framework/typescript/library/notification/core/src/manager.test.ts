@@ -702,6 +702,26 @@ describe("createNotificationManager / 内部状態保護", () => {
     expect(() => manager.dismissAll("toast")).not.toThrow();
   });
 
+  // dedupe の kind フィルタ: 先頭に dialog があっても toast の dedupe は機能する
+  // (旧実装は先頭の dialog がヒットして toast の dedupe 経路を素通ししていた)
+  it("先頭に同一 dedupeKey の dialog があっても toast の dedupe は機能する", () => {
+    const manager = createNotificationManager();
+    // dialog を先に発行 (dedupeKey="x")
+    void manager.dialog({ title: "d", message: "x", actions: [{ id: "ok", label: "OK" }], dedupeKey: "x" });
+    // toast を 2 回発行 (dedupeKey="x")
+    const t1 = manager.toast({ message: "t1", dedupeKey: "x" });
+    const t2 = manager.toast({ message: "t2", dedupeKey: "x" });
+    // 2 回目の toast は dedupe で同一 ID に置換される
+    expect(t1).toBe(t2);
+    // キュー上は dialog + toast の 2 件 (toast は重複していない)
+    const all = manager.getAll();
+    expect(all).toHaveLength(2);
+    expect(all.filter((n) => n.kind === "toast")).toHaveLength(1);
+    // 後勝ちで message は "t2"
+    const remainingToast = all.find((n) => n.kind === "toast");
+    expect((remainingToast as { message: string }).message).toBe("t2");
+  });
+
   // listener へのイベント順序：通知発行と即時自動 dismiss
   it("listener は add -> remove の順でイベントを受け取る", () => {
     const fake = createFakeTimer();

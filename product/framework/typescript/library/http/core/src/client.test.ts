@@ -851,4 +851,97 @@ describe("createHttpClient.request", () => {
     await client.request({ url: "/x", meta: { trace: "abc" } });
     expect(seenMeta).toEqual({ trace: "abc" });
   });
+
+  // ヘッダ正規化: req.headers の "Authorization" と auth.getAuthHeaders の "authorization" が
+  // 大小文字違いで重複しないこと (RFC 7230 §3.2 / case-insensitive)
+  it("Authorization の大小文字違いキーは単一エントリにマージされる", async () => {
+    let observedHeaders: Record<string, string> = {};
+    const fetchImpl = vi.fn(async (_url, init) => {
+      // 送信されたヘッダを記録 (Headers / Record どちらの形でも来うる)
+      const h = (init as RequestInit | undefined)?.headers;
+      observedHeaders = {};
+      if (h instanceof Headers) {
+        h.forEach((v, k) => {
+          observedHeaders[k] = v;
+        });
+      } else if (h !== undefined) {
+        observedHeaders = { ...(h as Record<string, string>) };
+      }
+      return jsonOk({});
+    });
+    const client = createHttpClient({
+      fetchImpl,
+      // auth は小文字キーで Authorization を返す (大小違いを再現)
+      auth: { async getAuthHeaders() { return { authorization: "Bearer new" }; } },
+    });
+    // 利用側は大文字キーで指定
+    await client.request({ url: "/x", headers: { Authorization: "Bearer old" } });
+    // 出力ヘッダのうち authorization (case 無視) は 1 つだけ
+    const authKeys = Object.keys(observedHeaders).filter(
+      (k) => k.toLowerCase() === "authorization",
+    );
+    expect(authKeys).toHaveLength(1);
+    // 値は auth の後勝ち (Bearer new)
+    expect(observedHeaders[authKeys[0]!]).toBe("Bearer new");
+  });
+
+  // willActuallyRetry: shouldRetry が false を返した場合は retryable=false で公開される
+  // (旧実装は `shouldRetry !== undefined` のみで真扱いだった)
+  it("shouldRetry が false を返す場合、HttpError.retryable は false になる", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response("e", { status: 500 }),
+    );
+    // shouldRetry は常に false を返す (= 再試行しない判定)
+    const shouldRetry = vi.fn(() => false);
+    const client = createHttpClient({
+      fetchImpl,
+      retry: {
+        maxRetries: 3,
+        backoffBaseMs: 1,
+        backoffMaxMs: 1,
+        jitter: "none",
+        shouldRetry,
+      },
+    });
+    // 1 回目で throw、shouldRetry が false なので追加 attempt は無い
+    try {
+      await client.request({ url: "/x" });
+      throw new Error("expected throw");
+    } catch (err) {
+      // 旧実装ではここが true になっていたバグ。修正後は false になる。
+      // (markRetryExhausted を経由するため最終的に false に倒される側面もあるが、
+      //  少なくとも本テストは「shouldRetry が false → retryable=false 」を観測している)
+      expect((err as { retryable?: boolean }).retryable).toBe(false);
+    }
+    // shouldRetry は 2 回呼ばれている (client.ts の willActuallyRetry 判定 1 回 + withRetry 1 回)
+    // 旧実装は client.ts 側で実評価せず `!== undefined` のみで真扱いだったため、ここが 1 回しか呼ばれなかった
+    expect(shouldRetry).toHaveBeenCalledTimes(2);
+  });
+
+  // willActuallyRetry: shouldRetry が true を返した場合、retryable=true で公開され実際に retry される
+  it("shouldRetry が true を返す場合、retryable=true で attempt がリトライされる", async () => {
+    let calls = 0;
+    const fetchImpl = vi.fn(async () => {
+      calls += 1;
+      // 2 回目は成功
+      if (calls >= 2) return jsonOk({});
+      return new Response("e", { status: 500 });
+    });
+    const shouldRetry = vi.fn(() => true);
+    const client = createHttpClient({
+      fetchImpl,
+      retry: {
+        maxRetries: 3,
+        backoffBaseMs: 1,
+        backoffMaxMs: 1,
+        jitter: "none",
+        shouldRetry,
+      },
+    });
+    await client.request({ url: "/x" });
+    // retry されて 2 回目で成功
+    expect(calls).toBe(2);
+    // shouldRetry は 2 回呼ばれている (client.ts の willActuallyRetry 判定 1 回 + withRetry 1 回)
+    expect(shouldRetry).toHaveBeenCalledTimes(2);
+  });
 });

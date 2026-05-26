@@ -38,4 +38,44 @@ describe("findByDedupeKey", () => {
   it("空配列の場合は null を返す", () => {
     expect(findByDedupeKey([], "k1")).toBeNull();
   });
+
+  // kindFilter 指定時は別 kind を素通しする
+  it("kindFilter 指定時、別 kind の通知はスキップして次の同 kind を返す", () => {
+    // dialog (kind 不一致, key 一致) と toast (kind 一致, key 一致) が混在
+    const queue: AppNotification[] = [
+      // dialog: 先頭で見つかるが kindFilter で除外したい
+      {
+        id: "d1",
+        kind: "dialog",
+        title: "t",
+        message: "m",
+        actions: [],
+        createdAt: 0,
+        dedupeKey: "k1",
+      },
+      // toast: kindFilter で採用される側
+      toast("t1", "k1"),
+    ];
+    // kindFilter="toast" で探すと toast t1 がヒットする
+    const result = findByDedupeKey(queue, "k1", "toast");
+    expect(result?.notification.id).toBe("t1");
+    expect(result?.index).toBe(1);
+  });
+
+  // kindFilter 指定時に該当 kind が無ければ null
+  it("kindFilter 指定で該当 kind が無ければ null を返す", () => {
+    const queue: AppNotification[] = [
+      {
+        id: "d1",
+        kind: "dialog",
+        title: "t",
+        message: "m",
+        actions: [],
+        createdAt: 0,
+        dedupeKey: "k1",
+      },
+    ];
+    // kindFilter="toast" で探しても dialog しか無いので null
+    expect(findByDedupeKey(queue, "k1", "toast")).toBeNull();
+  });
 });
