@@ -237,6 +237,70 @@ describe("createNotificationManager / dialog", () => {
     expect(result.dismissed).toBe(true);
     expect(result.reason).toBeUndefined();
   });
+
+  // listener が emit("add") の中で同期的に resolveDialog を呼んでも Promise が解決されること
+  // (Critical: pending 登録が emit より前に行われない実装だと永久未解決になっていた)
+  it("listener が add イベント内で同期的に resolveDialog しても Promise が解決される", async () => {
+    const manager = createNotificationManager({ idFactory: createSequentialIdFactory() });
+    // add イベントの中で即座に resolveDialog を呼ぶ listener を仕掛ける
+    manager.subscribe((ev: NotificationEvent) => {
+      // dialog の add だけ反応
+      if (ev.type === "add" && ev.notification.kind === "dialog") {
+        // 同期的に解決を要求 (pending 未登録なら no-op になり Promise は永久未解決)
+        manager.resolveDialog(ev.notification.id, "auto");
+      }
+    });
+    // dialog を発行
+    const p = manager.dialog({ message: "sync resolve" });
+    // 同期解決が走っているはずなので即座に解決する
+    const result = await p;
+    expect(result.dismissed).toBe(true);
+    expect(result.reason).toBe("auto");
+    // 同期解決により queue 上からも削除されている
+    expect(manager.getAll()).toEqual([]);
+  });
+
+  // listener が add イベント内で同期的に dismiss しても Promise が解決されること
+  it("listener が add イベント内で同期的に dismiss しても Promise が解決される", async () => {
+    const manager = createNotificationManager({ idFactory: createSequentialIdFactory() });
+    manager.subscribe((ev: NotificationEvent) => {
+      if (ev.type === "add" && ev.notification.kind === "dialog") {
+        // dismiss でも pending が登録済みなら解決される
+        manager.dismiss(ev.notification.id);
+      }
+    });
+    const p = manager.dialog({ message: "sync dismiss" });
+    const result = await p;
+    expect(result.dismissed).toBe(true);
+    // dismiss 経路では reason は付かない
+    expect(result.reason).toBeUndefined();
+  });
+
+  // 同期解決 listener が居ても、他の listener にも add / remove 両イベントが到達すること
+  // (emit 内の Array.from(listeners) スナップショット走査が壊れていないことの確認)
+  it("同期解決 listener が居ても他の listener にも add / remove 両イベントが届く", async () => {
+    const manager = createNotificationManager({ idFactory: createSequentialIdFactory() });
+    // 同期解決 listener
+    manager.subscribe((ev: NotificationEvent) => {
+      if (ev.type === "add" && ev.notification.kind === "dialog") {
+        manager.resolveDialog(ev.notification.id, "auto");
+      }
+    });
+    // 観測用 listener
+    const observed: NotificationEvent[] = [];
+    manager.subscribe((ev: NotificationEvent) => {
+      observed.push(ev);
+    });
+    const p = manager.dialog({ message: "x" });
+    await p;
+    // 観測用 listener には add と remove が 1 件ずつ届くはず (順序は recursive emit の影響で前後しうる)
+    expect(observed.length).toBe(2);
+    const types = observed.map((e) => e.type).sort();
+    expect(types).toEqual(["add", "remove"]);
+    // add イベントの notification.kind は dialog であること
+    const addEvent = observed.find((e) => e.type === "add");
+    expect(addEvent?.type === "add" && addEvent.notification.kind).toBe("dialog");
+  });
 });
 
 describe("createNotificationManager / confirm", () => {
@@ -268,6 +332,22 @@ describe("createNotificationManager / confirm", () => {
     const p = manager.confirm({ message: "x" });
     manager.dismiss("id-1");
     expect(await p).toBe(false);
+  });
+
+  // listener が emit("add") の中で同期的に resolveConfirm を呼んでも Promise が解決されること
+  // (Critical: pending 登録が emit より前に行われない実装だと永久未解決になっていた)
+  it("listener が add イベント内で同期的に resolveConfirm しても Promise が解決される", async () => {
+    const manager = createNotificationManager({ idFactory: createSequentialIdFactory() });
+    manager.subscribe((ev: NotificationEvent) => {
+      if (ev.type === "add" && ev.notification.kind === "confirm") {
+        // 同期的に true で解決
+        manager.resolveConfirm(ev.notification.id, true);
+      }
+    });
+    const p = manager.confirm({ message: "delete?" });
+    // 同期解決で true が返るはず (永久未解決にならない)
+    expect(await p).toBe(true);
+    expect(manager.getAll()).toEqual([]);
   });
 });
 
