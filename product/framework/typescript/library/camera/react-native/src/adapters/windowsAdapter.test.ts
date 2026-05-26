@@ -3,9 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 // テスト対象
 import { createWindowsAdapter, type WindowsCameraImpl } from "./windowsAdapter.js";
 // core エラー
-import { DeviceUnavailableError, RecordingError, ScannerError } from "@k1s0-ts-camera/core";
+import {
+  CameraControlError,
+  DeviceUnavailableError,
+  RecordingError,
+  ScannerError,
+} from "@k1s0-ts-camera/core";
 // 型
-import type { PreviewHandle, RecordingHandle } from "@k1s0-ts-camera/core";
+import type { CameraCapabilities, PreviewHandle, RecordingHandle } from "@k1s0-ts-camera/core";
 
 // プレビュー / 録画ハンドル fixtures
 const previewHandle: PreviewHandle = { __brand: "PreviewHandle", id: "p1", native: { x: 1 } };
@@ -113,5 +118,66 @@ describe("createWindowsAdapter 注入実装あり", () => {
     await expect(adapter.takePicture(previewHandle)).rejects.toBeInstanceOf(DeviceUnavailableError);
     // dispose 関数が無くても OK
     await expect(adapter.dispose()).resolves.toBeUndefined();
+  });
+});
+
+// capability 系の委譲とフォールバック
+describe("createWindowsAdapter capability メソッド", () => {
+  // フルキャパビリティの参考値（impl 経由でそのまま返す用途）
+  const fullCaps: CameraCapabilities = {
+    torch: true,
+    zoom: { min: 1, max: 5 },
+    focus: { tap: true, continuous: true },
+    flash: true,
+    exposureMode: ["continuous"],
+    whiteBalanceMode: ["continuous"],
+    iso: { min: 100, max: 1600 },
+    brightness: { min: -1, max: 1 },
+    hdr: false,
+    lowLightBoost: false,
+  };
+
+  it("setTorch / setZoom / setFocus / getCapabilities が impl 委譲される", async () => {
+    const setTorch = vi.fn(async () => {});
+    const setZoom = vi.fn(async () => {});
+    const setFocus = vi.fn(async () => {});
+    const getCapabilities = vi.fn(async () => fullCaps);
+    const impl: WindowsCameraImpl = { setTorch, setZoom, setFocus, getCapabilities };
+    const adapter = createWindowsAdapter({ mediaCapture: impl });
+    // ハンドルは impl 内で展開済みの { id, native } 形に変換される
+    await adapter.setTorch!(previewHandle, "on");
+    expect(setTorch).toHaveBeenCalledWith({ id: "p1", native: { x: 1 } }, "on");
+    await adapter.setZoom!(previewHandle, 2);
+    expect(setZoom).toHaveBeenCalledWith({ id: "p1", native: { x: 1 } }, 2);
+    await adapter.setFocus!(previewHandle, { x: 0.5, y: 0.5 });
+    expect(setFocus).toHaveBeenCalledWith({ id: "p1", native: { x: 1 } }, { x: 0.5, y: 0.5 });
+    const caps = await adapter.getCapabilities!(previewHandle);
+    expect(caps).toEqual(fullCaps);
+  });
+
+  it("impl 未実装なら setTorch/setZoom/setFocus は CameraControlError(UNSUPPORTED)", async () => {
+    const adapter = createWindowsAdapter();
+    await expect(adapter.setTorch!(previewHandle, "on")).rejects.toBeInstanceOf(
+      CameraControlError,
+    );
+    await expect(adapter.setZoom!(previewHandle, 1)).rejects.toBeInstanceOf(CameraControlError);
+    await expect(adapter.setFocus!(previewHandle)).rejects.toBeInstanceOf(CameraControlError);
+  });
+
+  it("impl 未実装 getCapabilities は全 false の安全フォールバック", async () => {
+    const adapter = createWindowsAdapter();
+    const caps = await adapter.getCapabilities!(previewHandle);
+    expect(caps).toEqual({
+      torch: false,
+      zoom: false,
+      focus: false,
+      flash: false,
+      exposureMode: false,
+      whiteBalanceMode: false,
+      iso: false,
+      brightness: false,
+      hdr: false,
+      lowLightBoost: false,
+    });
   });
 });

@@ -1,5 +1,6 @@
 // core からの型・エラー・util を取り込み
 import {
+  CameraControlError,
   CameraError,
   DeviceUnavailableError,
   PermissionDeniedError,
@@ -10,7 +11,9 @@ import {
   type BarcodeFormat,
   type BarcodeScanResult,
   type CameraAdapter,
+  type CameraCapabilities,
   type CameraDevice,
+  type FocusPoint,
   type PermissionDescriptor,
   type PermissionStatus,
   type PhotoOptions,
@@ -21,6 +24,7 @@ import {
   type RecordingOptions,
   type RecordingResult,
   type ScannerConfig,
+  type TorchMode,
 } from "@k1s0-ts-camera/core";
 // BarcodeDetector ファクトリ
 import {
@@ -45,9 +49,40 @@ export interface WebAdapterOptions {
   };
 }
 
+// MediaTrackCapabilities の最小サブセット型（lib.dom.d.ts と互換のうえで member を絞る）
+// 端末や Chrome バージョンによって有無が分かれるため optional でモデル化する
+interface MediaTrackCapabilitiesLike {
+  // トーチサポート可否（boolean 配列で渡る環境もあるため unknown で受ける）
+  torch?: boolean | readonly boolean[];
+  // ズーム range（min/max/step を持つオブジェクト）
+  zoom?: { min: number; max: number; step?: number };
+  // フォーカスモード一覧
+  focusMode?: readonly string[];
+  // 露出モード一覧
+  exposureMode?: readonly string[];
+  // ホワイトバランスモード一覧
+  whiteBalanceMode?: readonly string[];
+  // ISO range
+  iso?: { min: number; max: number };
+  // 明度 range
+  brightness?: { min: number; max: number; step?: number };
+}
+
+// MediaStreamTrack の最小サブセット型（kind は元から必須、capabilities/applyConstraints は optional）
+type MediaStreamTrackLike = {
+  // 停止
+  stop: () => void;
+  // トラック種別（"video" / "audio"）
+  readonly kind: string;
+  // 能力情報の取得（Chromium 系のみ提供）
+  getCapabilities?: () => MediaTrackCapabilitiesLike;
+  // 動的な constraints 適用（Chromium 系のみ提供）
+  applyConstraints?: (constraints: { advanced?: ReadonlyArray<Record<string, unknown>> }) => Promise<void>;
+};
+
 // MediaStream 用の minimum 型（lib.dom.d.ts と互換のうえで member を絞る）
 type MediaStreamLike = {
-  getTracks: () => Array<{ stop: () => void; readonly kind: string }>;
+  getTracks: () => Array<MediaStreamTrackLike>;
 };
 
 // MediaRecorder の minimum 型
@@ -695,6 +730,145 @@ export function createWebAdapter(options: WebAdapterOptions = {}): CameraAdapter
     return cancel;
   }
 
+  // プレビューのアクティブな video トラックを取り出す（無ければ CameraControlError）
+  function requireVideoTrack(handle: PreviewHandle): MediaStreamTrackLike {
+    // ハンドル整合性チェック
+    if (state.preview === undefined || state.preview.handle.id !== handle.id) {
+      throw new CameraError("Preview handle is not active", { code: "INVALID_HANDLE" });
+    }
+    // video トラックを探す
+    const track = state.preview.native.stream.getTracks().find((t) => t.kind === "video");
+    // 無い場合は制御不能とみなす
+    if (track === undefined) {
+      throw new CameraControlError("UNSUPPORTED", {
+        message: "No video track is available on the current preview",
+      });
+    }
+    return track;
+  }
+
+  // OverconstrainedError 名のエラーを CameraControlError("OUT_OF_RANGE") にラップ、それ以外は APPLY_FAILED
+  function wrapApplyError(err: unknown): CameraControlError {
+    // DOMException 系の name で分岐
+    const errLike = err as { name?: string };
+    // 範囲外指定は OUT_OF_RANGE として通知
+    if (errLike.name === "OverconstrainedError") {
+      return new CameraControlError("OUT_OF_RANGE", { cause: err });
+    }
+    // それ以外は適用失敗
+    return new CameraControlError("APPLY_FAILED", { cause: err });
+  }
+
+  // トーチモード切替（applyConstraints で advanced 制約を渡す）
+  async function setTorch(handle: PreviewHandle, mode: TorchMode): Promise<void> {
+    // video トラックを取得
+    const track = requireVideoTrack(handle);
+    // applyConstraints 自体が無い環境は UNSUPPORTED
+    if (track.applyConstraints === undefined) {
+      throw new CameraControlError("UNSUPPORTED", {
+        message: "applyConstraints is not supported on this MediaStreamTrack",
+      });
+    }
+    // mode === "on" のみ true を送る
+    try {
+      await track.applyConstraints({ advanced: [{ torch: mode === "on" }] });
+    } catch (err) {
+      throw wrapApplyError(err);
+    }
+  }
+
+  // ズーム倍率の設定
+  async function setZoom(handle: PreviewHandle, zoom: number): Promise<void> {
+    // video トラックを取得
+    const track = requireVideoTrack(handle);
+    // applyConstraints 未対応なら UNSUPPORTED
+    if (track.applyConstraints === undefined) {
+      throw new CameraControlError("UNSUPPORTED", {
+        message: "applyConstraints is not supported on this MediaStreamTrack",
+      });
+    }
+    // advanced 制約で zoom を送る
+    try {
+      await track.applyConstraints({ advanced: [{ zoom }] });
+    } catch (err) {
+      throw wrapApplyError(err);
+    }
+  }
+
+  // フォーカス制御（point ありで manual、なしで continuous）
+  async function setFocus(handle: PreviewHandle, point?: FocusPoint): Promise<void> {
+    // video トラックを取得
+    const track = requireVideoTrack(handle);
+    // applyConstraints 未対応なら UNSUPPORTED
+    if (track.applyConstraints === undefined) {
+      throw new CameraControlError("UNSUPPORTED", {
+        message: "applyConstraints is not supported on this MediaStreamTrack",
+      });
+    }
+    // point 指定有無で manual / continuous を切り替える
+    const constraint: Record<string, unknown> =
+      point !== undefined
+        ? { focusMode: "manual", pointsOfInterest: [{ x: point.x, y: point.y }] }
+        : { focusMode: "continuous" };
+    try {
+      await track.applyConstraints({ advanced: [constraint] });
+    } catch (err) {
+      throw wrapApplyError(err);
+    }
+  }
+
+  // 能力情報の取得（MediaTrackCapabilities を CameraCapabilities にマップ）
+  async function getCapabilities(handle: PreviewHandle): Promise<CameraCapabilities> {
+    // video トラックを取得
+    const track = requireVideoTrack(handle);
+    // getCapabilities 未対応なら全 false で返す
+    if (track.getCapabilities === undefined) {
+      return {
+        torch: false,
+        zoom: false,
+        focus: false,
+        flash: false,
+        exposureMode: false,
+        whiteBalanceMode: false,
+        iso: false,
+        brightness: false,
+        hdr: false,
+        lowLightBoost: false,
+      };
+    }
+    // 生の能力情報を取得
+    const caps = track.getCapabilities();
+    // torch は boolean かもしれないし [true] のような配列で返る環境もあるため両対応で判定
+    const torchSupported = caps.torch === true || (Array.isArray(caps.torch) && caps.torch.includes(true));
+    // focusMode 一覧から tap / continuous を抽出
+    const focusModes = caps.focusMode ?? [];
+    const focus = focusModes.length > 0
+      ? { tap: focusModes.includes("manual") || focusModes.includes("single-shot"), continuous: focusModes.includes("continuous") }
+      : (false as const);
+    // CameraCapabilities にマップ
+    return {
+      // torch サポート（applyConstraints の有無も考慮）
+      torch: torchSupported && track.applyConstraints !== undefined,
+      // ズーム range（min < max のときのみオブジェクト化）
+      zoom: caps.zoom !== undefined ? { min: caps.zoom.min, max: caps.zoom.max, step: caps.zoom.step } : (false as const),
+      // フォーカス能力
+      focus,
+      // フラッシュは Web 標準で別 API（ImageCapture.setOptions）が必要なため getCapabilities ではトーチと同義に揃える
+      flash: torchSupported,
+      // 露出モード一覧
+      exposureMode: caps.exposureMode !== undefined && caps.exposureMode.length > 0 ? caps.exposureMode : (false as const),
+      // ホワイトバランス一覧
+      whiteBalanceMode: caps.whiteBalanceMode !== undefined && caps.whiteBalanceMode.length > 0 ? caps.whiteBalanceMode : (false as const),
+      // ISO range
+      iso: caps.iso !== undefined ? { min: caps.iso.min, max: caps.iso.max } : (false as const),
+      // 明度 range
+      brightness: caps.brightness !== undefined ? { min: caps.brightness.min, max: caps.brightness.max, step: caps.brightness.step } : (false as const),
+      // HDR / 低照度ブーストは Web では標準 API 無し
+      hdr: false,
+      lowLightBoost: false,
+    };
+  }
+
   // dispose
   async function dispose(): Promise<void> {
     // スキャナを止める
@@ -734,6 +908,10 @@ export function createWebAdapter(options: WebAdapterOptions = {}): CameraAdapter
     pauseRecording,
     resumeRecording,
     scanBarcode,
+    setTorch,
+    setZoom,
+    setFocus,
+    getCapabilities,
     dispose,
   };
 }

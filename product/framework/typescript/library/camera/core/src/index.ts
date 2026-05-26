@@ -22,6 +22,10 @@ export type {
   CameraListener,
   CameraManagerConfig,
   CameraManager,
+  TorchMode,
+  FocusPoint,
+  CapabilityRange,
+  CameraCapabilities,
 } from "./types.js";
 
 // CapturedMedia 型と type guard
@@ -36,6 +40,7 @@ export {
   DeviceUnavailableError,
   RecordingError,
   ScannerError,
+  CameraControlError,
 } from "./errors.js";
 
 // 権限ヘルパ

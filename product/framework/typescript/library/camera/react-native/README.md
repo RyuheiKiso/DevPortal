@@ -27,6 +27,107 @@ export function App() {
 }
 ```
 
+## Capabilities & Controls
+
+torch / zoom / tap focus / 能力情報取得を hook 経由で提供します。RN の各カメラライブラリは API が異なるため、adapter コンストラクタに `controls` を**注入**するパターンで統一しています。
+
+### vision-camera の例（controls 注入）
+
+```tsx
+import { useMemo, useRef, useState } from "react";
+import { View, type LayoutChangeEvent } from "react-native";
+import { Camera, useCameraDevice } from "react-native-vision-camera";
+import * as VisionLib from "react-native-vision-camera";
+import { CameraProvider } from "@k1s0-ts-camera/react-native";
+import { createVisionCameraAdapter } from "@k1s0-ts-camera/react-native/adapters/vision";
+
+function App() {
+  // <Camera> ref と props を React state で持つ
+  const cameraRef = useRef<Camera>(null);
+  const device = useCameraDevice("back");
+  const [torch, setTorch] = useState<"on" | "off">("off");
+  const [zoom, setZoom] = useState(1);
+  // プレビュー View のサイズ（onLayout で取得し、focus の相対→絶対 px 変換に使う）
+  const [layout, setLayout] = useState({ width: 0, height: 0 });
+  // onLayout コールバック（再生成を抑止するため useCallback 推奨だが例では省略）
+  const onCameraLayout = (e: LayoutChangeEvent) => {
+    setLayout({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height });
+  };
+
+  // adapter に ref / device / controls を注入
+  const adapter = useMemo(
+    () =>
+      createVisionCameraAdapter({
+        library: VisionLib as never,
+        cameraRef: () => cameraRef.current as never,
+        device: () => device as never,
+        controls: {
+          // hook からの setTorch 呼び出し → React state へ流す → <Camera torch={...}> に反映
+          setTorch: (mode) => setTorch(mode),
+          setZoom: (z) => setZoom(z),
+          // tap focus は vision-camera v4 の Camera.focus({x,y}) 経由
+          // 重要: vision-camera は絶対 px を期待するため、core から渡る 0..1 相対座標を View サイズで変換する
+          setFocus: (point) => {
+            if (point !== undefined && layout.width > 0 && layout.height > 0) {
+              cameraRef.current?.focus({
+                x: point.x * layout.width,
+                y: point.y * layout.height,
+              });
+            }
+          },
+        },
+      }),
+    // layout が更新されたら adapter を作り直す（最新値を closure に取り込むため）
+    [device, layout],
+  );
+
+  return (
+    <CameraProvider adapter={adapter}>
+      <View onLayout={onCameraLayout} style={{ flex: 1 }}>
+        {device && <Camera ref={cameraRef} device={device} torch={torch} zoom={zoom} isActive />}
+      </View>
+      <Controls />
+    </CameraProvider>
+  );
+}
+```
+
+> **座標変換のポイント**: core が `setFocus({ x, y })` に渡す座標は `0..1` の相対値です。Web の `MediaTrackConstraints.pointsOfInterest` は spec 上相対座標を受け付けますが、vision-camera の `Camera.focus()` は absolute px を期待します。adapter 利用者は `onLayout` 等で View サイズを取得し、`controls.setFocus` 内で相対→絶対変換するか、絶対 px サポートが追加されるまで `point.x * width` で常時換算してください。
+
+### hook 側（react / react-native 共通）
+
+```tsx
+import { useTorch, useZoom, useFocus, useCameraCapabilities } from "@k1s0-ts-camera/react-native";
+
+function Controls() {
+  const { capabilities } = useCameraCapabilities();
+  const { mode, set: setTorch, supported: torchOk } = useTorch();
+  const { zoom, set: setZoom, range, supported: zoomOk } = useZoom();
+  const { focus, supported: focusOk } = useFocus();
+  // ...同じ API で全プラットフォーム共通
+}
+```
+
+### Capability マトリクス
+
+| 機能 | Web | vision-camera | expo-camera | windows |
+|------|-----|---------------|-------------|---------|
+| torch | ✅ applyConstraints | controls.setTorch 注入 | controls.setTorch 注入 | impl.setTorch 必要 |
+| zoom | ✅ (range 取得可) | device.min/maxZoom + controls 注入 | controls 注入（**0..1 の正規化値** ⚠️） | impl.setZoom 必要 |
+| tap focus | ✅ (相対 0..1) | controls.setFocus 注入（要 相対→絶対 px 変換） | controls.setFocus 注入 | impl.setFocus 必要 |
+| getCapabilities | ✅ MediaTrackCapabilities | device API + controls から推定 | controls から推定 | impl.getCapabilities 必要 |
+
+未対応のときは `CameraControlError("UNSUPPORTED")` が投げられます。`useTorch().supported` 等で feature detection してから UI を出してください。`setFocus` の `point.x` / `point.y` は core が `0..1` 範囲外を `CameraControlError("OUT_OF_RANGE")` で reject します。
+
+> **⚠️ expo-camera の zoom 仕様**: `<CameraView zoom={...}>` prop は**倍率ではなく `0..1` の正規化された値**です（`0` = 等倍、`1` = 最大ズーム）。vision-camera のように `device.maxZoom` 相当（例: 5 倍）の値を渡すと範囲外として無視されます。`useZoom()` から `set()` を呼ぶときは必ず `0..1` 範囲の値を渡してください。expoCameraAdapter の `getCapabilities` も `{ min: 0, max: 1, step: 0.01 }` を固定で返すため、`useZoom().range` を参考にスライダ UI を組むと自動的に正しい範囲になります。
+
+## Backlog
+
+- `focus` に絶対 px 座標オプション（現状は相対 0..1）
+- `capability-change` / `torch-change` イベント
+- vision-camera の Frame Processor を使った barcode scan 実装
+- Windows MediaCapture の TorchControl / ZoomControl / FocusControl 同梱サンプル
+
 ---
 
 ## Windows 対応ガイド (C++/WinRT ネイティブモジュール実装)

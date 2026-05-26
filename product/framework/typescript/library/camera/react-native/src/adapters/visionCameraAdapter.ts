@@ -1,5 +1,6 @@
 // core からの型・エラー
 import {
+  CameraControlError,
   CameraError,
   PermissionDeniedError,
   RecordingError,
@@ -7,8 +8,10 @@ import {
   createDefaultIdFactory,
   type BarcodeScanResult,
   type CameraAdapter,
+  type CameraCapabilities,
   type CameraDevice,
   type CameraFacing,
+  type FocusPoint,
   type PermissionDescriptor,
   type PermissionStatus,
   type PhotoOptions,
@@ -19,6 +22,7 @@ import {
   type RecordingOptions,
   type RecordingResult,
   type ScannerConfig,
+  type TorchMode,
 } from "@k1s0-ts-camera/core";
 
 // react-native-vision-camera v4 の最小限の型（duck typed、本体は optional peer）
@@ -44,6 +48,17 @@ export interface VisionCameraDevice {
   name: string;
   // 位置（"front" / "back" / "external"）
   position: string;
+  // フラッシュ／トーチ保有
+  hasFlash?: boolean;
+  // ズーム下限・上限（device 由来）
+  minZoom?: number;
+  maxZoom?: number;
+  // フォーカスロックの可否
+  supportsFocusLocking?: boolean;
+  // 露出ロックの可否
+  supportsExposureLocking?: boolean;
+  // 低照度ブーストの可否
+  supportsLowLightBoost?: boolean;
 }
 
 // CameraView ref が公開する API のサブセット（撮影・録画の即時呼び出し用）
@@ -59,12 +74,31 @@ export interface VisionCameraRef {
 // 利用者が提供する Camera ref 取得関数（Provider で <Camera ref={...} /> をレンダリングし、その ref を adapter に渡す）
 export type VisionCameraRefAccessor = () => VisionCameraRef | null;
 
+// 利用者が提供する device 取得関数（capabilities 構築・controls の対象 device を識別するために使う）
+export type VisionCameraDeviceAccessor = () => VisionCameraDevice | null;
+
+// torch / zoom / focus を adapter から命令的に発火するための注入関数群
+// vision-camera v4 では `<Camera>` に渡す state を React 側で持つのが基本のため、
+// 利用者はそれぞれの setter を adapter に注入する
+export interface VisionCameraControls {
+  // トーチモード切替（"on" / "off"）
+  setTorch?: (mode: TorchMode) => void | Promise<void>;
+  // ズーム倍率の設定（device.minZoom..maxZoom）
+  setZoom?: (zoom: number) => void | Promise<void>;
+  // フォーカス制御（point ありで tap、なしで autofocus へ戻す）
+  setFocus?: (point?: FocusPoint) => void | Promise<void>;
+}
+
 // createVisionCameraAdapter のオプション
 export interface VisionCameraAdapterOptions {
   // vision-camera ライブラリ参照（必須）
   library: VisionCameraLibrary;
   // Camera ref（利用者がレンダリングして渡す）
   cameraRef: VisionCameraRefAccessor;
+  // 現在 device を取得する関数（capabilities 構築用、optional）
+  device?: VisionCameraDeviceAccessor;
+  // torch / zoom / focus の注入（無いものは UNSUPPORTED として扱う）
+  controls?: VisionCameraControls;
   // ID 生成（テスト用）
   idFactory?: () => string;
   // 時刻取得（テスト用）
@@ -299,6 +333,102 @@ export function createVisionCameraAdapter(options: VisionCameraAdapterOptions): 
         message:
           "vision-camera barcode scanning requires a Frame Processor plugin. Use a custom adapter for this feature.",
       });
+    },
+    setTorch: async (handle: PreviewHandle, mode: TorchMode): Promise<void> => {
+      // ハンドル整合性チェック
+      if (currentPreview?.id !== handle.id) {
+        throw new CameraError("Preview handle is not active", { code: "INVALID_HANDLE" });
+      }
+      // controls.setTorch が無ければ UNSUPPORTED
+      const setter = options.controls?.setTorch;
+      if (setter === undefined) {
+        throw new CameraControlError("UNSUPPORTED", {
+          message: "controls.setTorch was not provided to createVisionCameraAdapter",
+        });
+      }
+      // 同期 / 非同期両対応で待機
+      try {
+        await Promise.resolve(setter(mode));
+      } catch (err) {
+        throw new CameraControlError("APPLY_FAILED", { cause: err });
+      }
+    },
+    setZoom: async (handle: PreviewHandle, zoom: number): Promise<void> => {
+      // ハンドル整合性チェック
+      if (currentPreview?.id !== handle.id) {
+        throw new CameraError("Preview handle is not active", { code: "INVALID_HANDLE" });
+      }
+      // controls.setZoom が無ければ UNSUPPORTED
+      const setter = options.controls?.setZoom;
+      if (setter === undefined) {
+        throw new CameraControlError("UNSUPPORTED", {
+          message: "controls.setZoom was not provided to createVisionCameraAdapter",
+        });
+      }
+      // 同期 / 非同期両対応で待機
+      try {
+        await Promise.resolve(setter(zoom));
+      } catch (err) {
+        throw new CameraControlError("APPLY_FAILED", { cause: err });
+      }
+    },
+    setFocus: async (handle: PreviewHandle, point?: FocusPoint): Promise<void> => {
+      // ハンドル整合性チェック
+      if (currentPreview?.id !== handle.id) {
+        throw new CameraError("Preview handle is not active", { code: "INVALID_HANDLE" });
+      }
+      // controls.setFocus が無ければ UNSUPPORTED
+      const setter = options.controls?.setFocus;
+      if (setter === undefined) {
+        throw new CameraControlError("UNSUPPORTED", {
+          message: "controls.setFocus was not provided to createVisionCameraAdapter",
+        });
+      }
+      // 同期 / 非同期両対応で待機
+      try {
+        await Promise.resolve(setter(point));
+      } catch (err) {
+        throw new CameraControlError("APPLY_FAILED", { cause: err });
+      }
+    },
+    getCapabilities: async (handle: PreviewHandle): Promise<CameraCapabilities> => {
+      // ハンドル整合性チェック
+      if (currentPreview?.id !== handle.id) {
+        throw new CameraError("Preview handle is not active", { code: "INVALID_HANDLE" });
+      }
+      // device 取得関数が無ければ controls の有無のみから推定（device 由来情報は全て false）
+      const device = options.device?.() ?? null;
+      const controls = options.controls;
+      // zoom range は device 由来。両方とも数値なら range を組み立てる
+      const zoomRange =
+        device?.minZoom !== undefined && device?.maxZoom !== undefined
+          ? { min: device.minZoom, max: device.maxZoom }
+          : (false as const);
+      // CameraCapabilities にマップ
+      return {
+        // torch は controls.setTorch があり、device.hasFlash が true のときのみ true
+        torch: controls?.setTorch !== undefined && device?.hasFlash === true,
+        // zoom は controls.setZoom があり、device 由来 range が取れるときのみ
+        zoom: controls?.setZoom !== undefined ? zoomRange : (false as const),
+        // focus は controls.setFocus があり、device.supportsFocusLocking が true のときのみ
+        focus:
+          controls?.setFocus !== undefined && device?.supportsFocusLocking === true
+            ? { tap: true, continuous: true }
+            : (false as const),
+        // フラッシュ自体は device.hasFlash で判定
+        flash: device?.hasFlash === true,
+        // 露出モードは device.supportsExposureLocking から推定
+        exposureMode: device?.supportsExposureLocking === true ? (["continuous", "manual"] as const) : (false as const),
+        // ホワイトバランスは vision-camera v4 では device API がないため未対応で返す
+        whiteBalanceMode: false,
+        // ISO / 明度は device API なし
+        iso: false,
+        brightness: false,
+        // HDR は vision-camera では Camera component prop なので adapter 経由では未対応
+        hdr: false,
+        // 低照度ブースト
+        lowLightBoost: device?.supportsLowLightBoost === true,
+      };
     },
     dispose: async (): Promise<void> => {
       // adapter 固有の state を解放

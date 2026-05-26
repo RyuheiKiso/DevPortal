@@ -1,7 +1,9 @@
 // 型のみ取り込み（実体は manager / 利用側で生成）
 import type {
   BarcodeScanResult,
+  CameraCapabilities,
   CameraDevice,
+  FocusPoint,
   PermissionDescriptor,
   PermissionStatus,
   PhotoOptions,
@@ -12,6 +14,7 @@ import type {
   RecordingOptions,
   RecordingResult,
   ScannerConfig,
+  TorchMode,
 } from "./types.js";
 
 // プラットフォーム固有の生 API を抽象化する責務
@@ -45,6 +48,14 @@ export interface CameraAdapter {
     config: ScannerConfig,
     onScan: (result: BarcodeScanResult) => void,
   ): Promise<() => void>;
+  // トーチ（持続点灯）モードの切替（対応端末のみ実装）
+  setTorch?(handle: PreviewHandle, mode: TorchMode): Promise<void>;
+  // ズーム倍率の設定（対応端末のみ実装）
+  setZoom?(handle: PreviewHandle, zoom: number): Promise<void>;
+  // フォーカス制御（対応端末のみ実装。point 未指定で連続 AF へ戻す想定）
+  setFocus?(handle: PreviewHandle, point?: FocusPoint): Promise<void>;
+  // 現在のプレビューに紐づく能力情報を取得（対応端末のみ実装）
+  getCapabilities?(handle: PreviewHandle): Promise<CameraCapabilities>;
   // アダプタ自体の解放（ハードウェア閉鎖、event 購読解除）
   dispose(): Promise<void>;
 }

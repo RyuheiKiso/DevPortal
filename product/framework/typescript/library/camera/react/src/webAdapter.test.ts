@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createWebAdapter } from "./webAdapter.js";
 // 期待エラー
 import {
+  CameraControlError,
   CameraError,
   DeviceUnavailableError,
   PermissionDeniedError,
@@ -1095,5 +1096,303 @@ describe("createWebAdapter dispose", () => {
     const adapter = createWebAdapter();
     await adapter.dispose();
     await expect(adapter.dispose()).resolves.toBeUndefined();
+  });
+});
+
+// 能力系（torch / zoom / focus / capabilities）テストに使う MediaStreamTrack の fake セットアップ
+// 個別 test 内で track.applyConstraints / getCapabilities の挙動を差し替えられるように setter を返す
+function installFakeNavigatorWithCapabilities(
+  options: {
+    // applyConstraints の挙動を制御（reject させたり、何もしないなど）
+    applyConstraints?: (c: unknown) => Promise<void>;
+    // getCapabilities の戻り値（undefined を返せばメソッド自体を消す）
+    capabilities?: Record<string, unknown> | undefined;
+    // applyConstraints メソッドを定義しないモードに切り替える
+    noApplyConstraints?: boolean;
+    // getCapabilities メソッドを定義しないモードに切り替える
+    noGetCapabilities?: boolean;
+    // video トラックを含めない（kind!=="video" のみ）モード
+    noVideoTrack?: boolean;
+  } = {},
+) {
+  // applyConstraints の引数を後から検証するための記録配列
+  const calls: unknown[] = [];
+  // 既定 applyConstraints: 引数を記録して resolve
+  const defaultApply = async (c: unknown): Promise<void> => {
+    calls.push(c);
+  };
+  // track 配列の組み立て（noVideoTrack の場合は audio のみ）
+  const tracks: Array<Record<string, unknown>> = [];
+  if (options.noVideoTrack !== true) {
+    const videoTrack: Record<string, unknown> = {
+      kind: "video",
+      stop: vi.fn(),
+    };
+    if (options.noApplyConstraints !== true) {
+      videoTrack.applyConstraints = options.applyConstraints ?? defaultApply;
+    }
+    if (options.noGetCapabilities !== true) {
+      videoTrack.getCapabilities = () => options.capabilities ?? {};
+    }
+    tracks.push(videoTrack);
+  }
+  // audio トラックを 1 つ常に入れておく（フィルタ動作の検証用）
+  tracks.push({ kind: "audio", stop: vi.fn() });
+  // navigator.mediaDevices の最小 stub
+  const stream = { getTracks: () => tracks };
+  vi.stubGlobal("navigator", {
+    mediaDevices: {
+      getUserMedia: async () => stream,
+      enumerateDevices: async () => [],
+    },
+  });
+  return { tracks, calls };
+}
+
+describe("createWebAdapter setTorch", () => {
+  it("applyConstraints に {torch: true} を送る (mode='on')", async () => {
+    const { calls } = installFakeNavigatorWithCapabilities();
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    await adapter.setTorch!(h, "on");
+    expect(calls).toEqual([{ advanced: [{ torch: true }] }]);
+  });
+
+  it("applyConstraints に {torch: false} を送る (mode='off')", async () => {
+    const { calls } = installFakeNavigatorWithCapabilities();
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    await adapter.setTorch!(h, "off");
+    expect(calls).toEqual([{ advanced: [{ torch: false }] }]);
+  });
+
+  it("ハンドル不一致なら CameraError(INVALID_HANDLE)", async () => {
+    installFakeNavigatorWithCapabilities();
+    const adapter = createWebAdapter();
+    await adapter.startPreview({});
+    // 別 ID の偽ハンドル
+    const fake: PreviewHandle = { __brand: "PreviewHandle", id: "other", native: null };
+    await expect(adapter.setTorch!(fake, "on")).rejects.toBeInstanceOf(CameraError);
+  });
+
+  it("video トラックが無ければ CameraControlError(UNSUPPORTED)", async () => {
+    installFakeNavigatorWithCapabilities({ noVideoTrack: true });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    await expect(adapter.setTorch!(h, "on")).rejects.toBeInstanceOf(CameraControlError);
+  });
+
+  it("applyConstraints 未対応なら CameraControlError(UNSUPPORTED)", async () => {
+    installFakeNavigatorWithCapabilities({ noApplyConstraints: true });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    await expect(adapter.setTorch!(h, "on")).rejects.toMatchObject({ reason: "UNSUPPORTED" });
+  });
+
+  it("OverconstrainedError を OUT_OF_RANGE に変換", async () => {
+    const err = Object.assign(new Error("over"), { name: "OverconstrainedError" });
+    installFakeNavigatorWithCapabilities({
+      applyConstraints: async () => {
+        throw err;
+      },
+    });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    await expect(adapter.setTorch!(h, "on")).rejects.toMatchObject({
+      reason: "OUT_OF_RANGE",
+      cause: err,
+    });
+  });
+
+  it("その他の例外を APPLY_FAILED に変換", async () => {
+    const err = new Error("boom");
+    installFakeNavigatorWithCapabilities({
+      applyConstraints: async () => {
+        throw err;
+      },
+    });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    await expect(adapter.setTorch!(h, "on")).rejects.toMatchObject({
+      reason: "APPLY_FAILED",
+      cause: err,
+    });
+  });
+});
+
+describe("createWebAdapter setZoom", () => {
+  it("applyConstraints に {zoom: N} を送る", async () => {
+    const { calls } = installFakeNavigatorWithCapabilities();
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    await adapter.setZoom!(h, 3.5);
+    expect(calls).toEqual([{ advanced: [{ zoom: 3.5 }] }]);
+  });
+
+  it("applyConstraints 未対応で UNSUPPORTED", async () => {
+    installFakeNavigatorWithCapabilities({ noApplyConstraints: true });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    await expect(adapter.setZoom!(h, 2)).rejects.toMatchObject({ reason: "UNSUPPORTED" });
+  });
+
+  it("OverconstrainedError を OUT_OF_RANGE に変換", async () => {
+    const err = Object.assign(new Error("over"), { name: "OverconstrainedError" });
+    installFakeNavigatorWithCapabilities({
+      applyConstraints: async () => {
+        throw err;
+      },
+    });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    await expect(adapter.setZoom!(h, 99)).rejects.toMatchObject({ reason: "OUT_OF_RANGE" });
+  });
+});
+
+describe("createWebAdapter setFocus", () => {
+  it("point ありなら focusMode=manual + pointsOfInterest を送る", async () => {
+    const { calls } = installFakeNavigatorWithCapabilities();
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    await adapter.setFocus!(h, { x: 0.5, y: 0.7 });
+    expect(calls).toEqual([
+      { advanced: [{ focusMode: "manual", pointsOfInterest: [{ x: 0.5, y: 0.7 }] }] },
+    ]);
+  });
+
+  it("point なしなら focusMode=continuous を送る", async () => {
+    const { calls } = installFakeNavigatorWithCapabilities();
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    await adapter.setFocus!(h);
+    expect(calls).toEqual([{ advanced: [{ focusMode: "continuous" }] }]);
+  });
+
+  it("applyConstraints 未対応で UNSUPPORTED", async () => {
+    installFakeNavigatorWithCapabilities({ noApplyConstraints: true });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    await expect(adapter.setFocus!(h, { x: 0, y: 0 })).rejects.toMatchObject({
+      reason: "UNSUPPORTED",
+    });
+  });
+
+  it("適用失敗を APPLY_FAILED に変換", async () => {
+    const err = new Error("apply fail");
+    installFakeNavigatorWithCapabilities({
+      applyConstraints: async () => {
+        throw err;
+      },
+    });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    await expect(adapter.setFocus!(h)).rejects.toMatchObject({ reason: "APPLY_FAILED" });
+  });
+});
+
+describe("createWebAdapter getCapabilities", () => {
+  it("フル能力を CameraCapabilities にマップする", async () => {
+    installFakeNavigatorWithCapabilities({
+      capabilities: {
+        torch: true,
+        zoom: { min: 1, max: 10, step: 0.1 },
+        focusMode: ["continuous", "manual"],
+        exposureMode: ["continuous", "manual"],
+        whiteBalanceMode: ["continuous"],
+        iso: { min: 100, max: 3200 },
+        brightness: { min: -1, max: 1, step: 0.1 },
+      },
+    });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    const caps = await adapter.getCapabilities!(h);
+    expect(caps).toEqual({
+      torch: true,
+      zoom: { min: 1, max: 10, step: 0.1 },
+      focus: { tap: true, continuous: true },
+      flash: true,
+      exposureMode: ["continuous", "manual"],
+      whiteBalanceMode: ["continuous"],
+      iso: { min: 100, max: 3200 },
+      brightness: { min: -1, max: 1, step: 0.1 },
+      hdr: false,
+      lowLightBoost: false,
+    });
+  });
+
+  it("空 capabilities を全 false 系で返す", async () => {
+    installFakeNavigatorWithCapabilities({ capabilities: {} });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    const caps = await adapter.getCapabilities!(h);
+    expect(caps).toEqual({
+      torch: false,
+      zoom: false,
+      focus: false,
+      flash: false,
+      exposureMode: false,
+      whiteBalanceMode: false,
+      iso: false,
+      brightness: false,
+      hdr: false,
+      lowLightBoost: false,
+    });
+  });
+
+  it("torch が配列で渡る環境（[true]）にも対応", async () => {
+    installFakeNavigatorWithCapabilities({
+      capabilities: { torch: [true] },
+    });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    const caps = await adapter.getCapabilities!(h);
+    expect(caps.torch).toBe(true);
+  });
+
+  it("torch が [false] のみなら未対応扱い", async () => {
+    installFakeNavigatorWithCapabilities({
+      capabilities: { torch: [false] },
+    });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    const caps = await adapter.getCapabilities!(h);
+    expect(caps.torch).toBe(false);
+  });
+
+  it("focusMode に single-shot のみあれば tap=true、continuous=false", async () => {
+    installFakeNavigatorWithCapabilities({
+      capabilities: { focusMode: ["single-shot"] },
+    });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    const caps = await adapter.getCapabilities!(h);
+    expect(caps.focus).toEqual({ tap: true, continuous: false });
+  });
+
+  it("getCapabilities 未対応トラックなら全 false", async () => {
+    installFakeNavigatorWithCapabilities({ noGetCapabilities: true });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    const caps = await adapter.getCapabilities!(h);
+    expect(caps.torch).toBe(false);
+    expect(caps.zoom).toBe(false);
+  });
+
+  it("video トラックが無ければ UNSUPPORTED", async () => {
+    installFakeNavigatorWithCapabilities({ noVideoTrack: true });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    await expect(adapter.getCapabilities!(h)).rejects.toBeInstanceOf(CameraControlError);
+  });
+
+  it("torch サポートかつ applyConstraints 未対応なら torch=false", async () => {
+    installFakeNavigatorWithCapabilities({
+      capabilities: { torch: true },
+      noApplyConstraints: true,
+    });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    const caps = await adapter.getCapabilities!(h);
+    expect(caps.torch).toBe(false);
   });
 });

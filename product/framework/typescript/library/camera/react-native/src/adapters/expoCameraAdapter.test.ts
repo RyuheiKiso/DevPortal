@@ -8,11 +8,14 @@ import {
 } from "./expoCameraAdapter.js";
 // core エラー
 import {
+  CameraControlError,
   CameraError,
   PermissionDeniedError,
   RecordingError,
   ScannerError,
 } from "@k1s0-ts-camera/core";
+// 型
+import type { PreviewHandle } from "@k1s0-ts-camera/core";
 
 // ref / permissionApi mock
 function makeRef(overrides: Partial<ExpoCameraRef> = {}): ExpoCameraRef {
@@ -336,5 +339,215 @@ describe("createExpoCameraAdapter", () => {
     });
     await adapter.startPreview({});
     await expect(adapter.dispose()).resolves.toBeUndefined();
+  });
+});
+
+// controls 注入による capability テスト群
+describe("createExpoCameraAdapter controls", () => {
+  it("setTorch: 注入ありなら呼ばれる", async () => {
+    const setTorch = vi.fn();
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => makeRef(),
+      permissionApi: makeApi(),
+      controls: { setTorch },
+    });
+    const h = await adapter.startPreview({});
+    await adapter.setTorch!(h, "on");
+    expect(setTorch).toHaveBeenCalledWith("on");
+  });
+
+  it("setTorch: 注入無しなら UNSUPPORTED", async () => {
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => makeRef(),
+      permissionApi: makeApi(),
+    });
+    const h = await adapter.startPreview({});
+    await expect(adapter.setTorch!(h, "off")).rejects.toBeInstanceOf(CameraControlError);
+  });
+
+  it("setTorch: ハンドル不一致なら CameraError", async () => {
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => makeRef(),
+      permissionApi: makeApi(),
+      controls: { setTorch: vi.fn() },
+    });
+    await adapter.startPreview({});
+    const fake: PreviewHandle = { __brand: "PreviewHandle", id: "x", native: null };
+    await expect(adapter.setTorch!(fake, "on")).rejects.toBeInstanceOf(CameraError);
+  });
+
+  it("setTorch: setter throw を APPLY_FAILED に変換", async () => {
+    const err = new Error("boom");
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => makeRef(),
+      permissionApi: makeApi(),
+      controls: {
+        setTorch: () => {
+          throw err;
+        },
+      },
+    });
+    const h = await adapter.startPreview({});
+    await expect(adapter.setTorch!(h, "on")).rejects.toMatchObject({
+      reason: "APPLY_FAILED",
+      cause: err,
+    });
+  });
+
+  it("setZoom: 注入ありなら呼ばれる", async () => {
+    const setZoom = vi.fn();
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => makeRef(),
+      permissionApi: makeApi(),
+      controls: { setZoom },
+    });
+    const h = await adapter.startPreview({});
+    await adapter.setZoom!(h, 0.4);
+    expect(setZoom).toHaveBeenCalledWith(0.4);
+  });
+
+  it("setZoom: 注入無しなら UNSUPPORTED", async () => {
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => makeRef(),
+      permissionApi: makeApi(),
+    });
+    const h = await adapter.startPreview({});
+    await expect(adapter.setZoom!(h, 0.5)).rejects.toMatchObject({ reason: "UNSUPPORTED" });
+  });
+
+  it("setZoom: ハンドル不一致なら CameraError", async () => {
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => makeRef(),
+      permissionApi: makeApi(),
+      controls: { setZoom: vi.fn() },
+    });
+    await adapter.startPreview({});
+    const fake: PreviewHandle = { __brand: "PreviewHandle", id: "x", native: null };
+    await expect(adapter.setZoom!(fake, 0.1)).rejects.toBeInstanceOf(CameraError);
+  });
+
+  it("setZoom: setter throw は APPLY_FAILED", async () => {
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => makeRef(),
+      permissionApi: makeApi(),
+      controls: {
+        setZoom: () => {
+          throw new Error("z");
+        },
+      },
+    });
+    const h = await adapter.startPreview({});
+    await expect(adapter.setZoom!(h, 0.5)).rejects.toMatchObject({ reason: "APPLY_FAILED" });
+  });
+
+  it("setFocus: 注入あり、point を渡す", async () => {
+    const setFocus = vi.fn();
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => makeRef(),
+      permissionApi: makeApi(),
+      controls: { setFocus },
+    });
+    const h = await adapter.startPreview({});
+    await adapter.setFocus!(h, { x: 0.2, y: 0.8 });
+    expect(setFocus).toHaveBeenCalledWith({ x: 0.2, y: 0.8 });
+  });
+
+  it("setFocus: point 無し", async () => {
+    const setFocus = vi.fn();
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => makeRef(),
+      permissionApi: makeApi(),
+      controls: { setFocus },
+    });
+    const h = await adapter.startPreview({});
+    await adapter.setFocus!(h);
+    expect(setFocus).toHaveBeenCalledWith(undefined);
+  });
+
+  it("setFocus: 注入無しなら UNSUPPORTED", async () => {
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => makeRef(),
+      permissionApi: makeApi(),
+    });
+    const h = await adapter.startPreview({});
+    await expect(adapter.setFocus!(h)).rejects.toMatchObject({ reason: "UNSUPPORTED" });
+  });
+
+  it("setFocus: ハンドル不一致なら CameraError", async () => {
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => makeRef(),
+      permissionApi: makeApi(),
+      controls: { setFocus: vi.fn() },
+    });
+    await adapter.startPreview({});
+    const fake: PreviewHandle = { __brand: "PreviewHandle", id: "x", native: null };
+    await expect(adapter.setFocus!(fake)).rejects.toBeInstanceOf(CameraError);
+  });
+
+  it("setFocus: setter throw は APPLY_FAILED", async () => {
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => makeRef(),
+      permissionApi: makeApi(),
+      controls: {
+        setFocus: () => {
+          throw new Error("f");
+        },
+      },
+    });
+    const h = await adapter.startPreview({});
+    await expect(adapter.setFocus!(h)).rejects.toMatchObject({ reason: "APPLY_FAILED" });
+  });
+
+  it("getCapabilities: フル controls なら全 true 系（zoom range は固定 0..1）", async () => {
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => makeRef(),
+      permissionApi: makeApi(),
+      controls: { setTorch: vi.fn(), setZoom: vi.fn(), setFocus: vi.fn() },
+    });
+    const h = await adapter.startPreview({});
+    const caps = await adapter.getCapabilities!(h);
+    expect(caps).toEqual({
+      torch: true,
+      zoom: { min: 0, max: 1, step: 0.01 },
+      focus: { tap: true, continuous: false },
+      flash: true,
+      exposureMode: false,
+      whiteBalanceMode: false,
+      iso: false,
+      brightness: false,
+      hdr: false,
+      lowLightBoost: false,
+    });
+  });
+
+  it("getCapabilities: controls 無しなら全 false 系", async () => {
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => makeRef(),
+      permissionApi: makeApi(),
+    });
+    const h = await adapter.startPreview({});
+    const caps = await adapter.getCapabilities!(h);
+    expect(caps).toEqual({
+      torch: false,
+      zoom: false,
+      focus: false,
+      flash: false,
+      exposureMode: false,
+      whiteBalanceMode: false,
+      iso: false,
+      brightness: false,
+      hdr: false,
+      lowLightBoost: false,
+    });
+  });
+
+  it("getCapabilities: ハンドル不一致なら CameraError", async () => {
+    const adapter = createExpoCameraAdapter({
+      cameraRef: () => makeRef(),
+      permissionApi: makeApi(),
+    });
+    await adapter.startPreview({});
+    const fake: PreviewHandle = { __brand: "PreviewHandle", id: "x", native: null };
+    await expect(adapter.getCapabilities!(fake)).rejects.toBeInstanceOf(CameraError);
   });
 });

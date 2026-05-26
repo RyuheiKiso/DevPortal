@@ -5,6 +5,7 @@ import { createCameraManager } from "./manager.js";
 // 型・エラー
 import type { CameraAdapter } from "./adapter.js";
 import {
+  CameraControlError,
   CameraError,
   CameraNotReadyError,
   PermissionDeniedError,
@@ -13,6 +14,7 @@ import {
 } from "./errors.js";
 import type {
   BarcodeScanResult,
+  CameraCapabilities,
   CameraDevice,
   CameraEvent,
   PermissionDescriptor,
@@ -562,5 +564,299 @@ describe("createCameraManager イベント順序", () => {
     const stopIndex = types.indexOf("preview-stop");
     expect(startIndex).toBeLessThan(photoIndex);
     expect(photoIndex).toBeLessThan(stopIndex);
+  });
+});
+
+// 期待される完全対応 capabilities（adapter 実装あり時の戻り値テスト用）
+const fullCapabilities: CameraCapabilities = {
+  // トーチ対応
+  torch: true,
+  // ズーム対応（1〜10 倍、step 0.1）
+  zoom: { min: 1, max: 10, step: 0.1 },
+  // フォーカス対応
+  focus: { tap: true, continuous: true },
+  // フラッシュ対応
+  flash: true,
+  // 露出モード一覧
+  exposureMode: ["continuous", "manual"],
+  // ホワイトバランス一覧
+  whiteBalanceMode: ["continuous", "manual"],
+  // ISO 範囲
+  iso: { min: 100, max: 3200 },
+  // 明度範囲
+  brightness: { min: -1, max: 1, step: 0.1 },
+  // HDR 対応
+  hdr: true,
+  // 低照度ブースト対応
+  lowLightBoost: true,
+};
+
+// setTorch のテスト群
+describe("CameraManager.setTorch", () => {
+  it("プレビュー開始済みなら adapter.setTorch を呼ぶ", async () => {
+    // adapter に setTorch を実装した setup を作る
+    const setTorch = vi.fn(async () => {});
+    const { manager } = setup({ setTorch });
+    // プレビューを開始
+    await manager.startPreview();
+    // setTorch を呼ぶ
+    await manager.setTorch("on");
+    // adapter に handle + mode が渡る
+    expect(setTorch).toHaveBeenCalledWith(previewHandle, "on");
+  });
+
+  it("adapter 未実装なら CameraControlError(UNSUPPORTED) を投げる", async () => {
+    // adapter.setTorch を持たない setup
+    const { manager } = setup();
+    await manager.startPreview();
+    // UNSUPPORTED の reason で投げられること
+    await expect(manager.setTorch("on")).rejects.toBeInstanceOf(CameraControlError);
+    await expect(manager.setTorch("on")).rejects.toMatchObject({
+      reason: "UNSUPPORTED",
+    });
+  });
+
+  it("プレビュー未開始なら CameraNotReadyError を投げる", async () => {
+    // setTorch 実装あり
+    const setTorch = vi.fn(async () => {});
+    const { manager } = setup({ setTorch });
+    // preview 未開始のまま呼ぶ
+    await expect(manager.setTorch("on")).rejects.toBeInstanceOf(CameraNotReadyError);
+    // adapter は呼ばれない
+    expect(setTorch).not.toHaveBeenCalled();
+  });
+
+  it("dispose 後は CameraNotReadyError を投げる", async () => {
+    const setTorch = vi.fn(async () => {});
+    const { manager } = setup({ setTorch });
+    await manager.startPreview();
+    await manager.dispose();
+    // dispose 後は ensureNotDisposed の CameraNotReadyError が出る
+    await expect(manager.setTorch("on")).rejects.toBeInstanceOf(CameraNotReadyError);
+  });
+
+  it("adapter が throw した場合は error event を emit して rethrow", async () => {
+    // 失敗する adapter
+    const err = new CameraControlError("APPLY_FAILED");
+    const setTorch = vi.fn(async () => {
+      throw err;
+    });
+    const { manager, events } = setup({ setTorch });
+    await manager.startPreview();
+    // rethrow されること
+    await expect(manager.setTorch("on")).rejects.toBe(err);
+    // error event が emit されていること
+    expect(events.some((e) => e.type === "error" && e.error === err)).toBe(true);
+  });
+});
+
+// setZoom のテスト群
+describe("CameraManager.setZoom", () => {
+  it("プレビュー開始済みなら adapter.setZoom を呼ぶ", async () => {
+    const setZoom = vi.fn(async () => {});
+    const { manager } = setup({ setZoom });
+    await manager.startPreview();
+    await manager.setZoom(2.5);
+    expect(setZoom).toHaveBeenCalledWith(previewHandle, 2.5);
+  });
+
+  it("adapter 未実装なら CameraControlError(UNSUPPORTED) を投げる", async () => {
+    const { manager } = setup();
+    await manager.startPreview();
+    await expect(manager.setZoom(2)).rejects.toMatchObject({
+      reason: "UNSUPPORTED",
+    });
+  });
+
+  it("プレビュー未開始なら CameraNotReadyError を投げる", async () => {
+    const setZoom = vi.fn(async () => {});
+    const { manager } = setup({ setZoom });
+    await expect(manager.setZoom(2)).rejects.toBeInstanceOf(CameraNotReadyError);
+    expect(setZoom).not.toHaveBeenCalled();
+  });
+
+  it("dispose 後は CameraNotReadyError を投げる", async () => {
+    const setZoom = vi.fn(async () => {});
+    const { manager } = setup({ setZoom });
+    await manager.startPreview();
+    await manager.dispose();
+    await expect(manager.setZoom(2)).rejects.toBeInstanceOf(CameraNotReadyError);
+  });
+
+  it("adapter が OUT_OF_RANGE を投げると同じエラーを rethrow し event 化", async () => {
+    const err = new CameraControlError("OUT_OF_RANGE");
+    const setZoom = vi.fn(async () => {
+      throw err;
+    });
+    const { manager, events } = setup({ setZoom });
+    await manager.startPreview();
+    await expect(manager.setZoom(100)).rejects.toBe(err);
+    expect(events.some((e) => e.type === "error" && e.error === err)).toBe(true);
+  });
+});
+
+// setFocus のテスト群
+describe("CameraManager.setFocus", () => {
+  it("point ありで adapter.setFocus を呼ぶ", async () => {
+    const setFocus = vi.fn(async () => {});
+    const { manager } = setup({ setFocus });
+    await manager.startPreview();
+    // タップフォーカス
+    await manager.setFocus({ x: 0.5, y: 0.5 });
+    expect(setFocus).toHaveBeenCalledWith(previewHandle, { x: 0.5, y: 0.5 });
+  });
+
+  it("point なしで adapter.setFocus(undefined) を呼ぶ", async () => {
+    const setFocus = vi.fn(async () => {});
+    const { manager } = setup({ setFocus });
+    await manager.startPreview();
+    // 連続 AF へ戻す
+    await manager.setFocus();
+    expect(setFocus).toHaveBeenCalledWith(previewHandle, undefined);
+  });
+
+  it("adapter 未実装なら CameraControlError(UNSUPPORTED) を投げる", async () => {
+    const { manager } = setup();
+    await manager.startPreview();
+    await expect(manager.setFocus({ x: 0.5, y: 0.5 })).rejects.toMatchObject({
+      reason: "UNSUPPORTED",
+    });
+  });
+
+  it("プレビュー未開始なら CameraNotReadyError を投げる", async () => {
+    const setFocus = vi.fn(async () => {});
+    const { manager } = setup({ setFocus });
+    await expect(manager.setFocus({ x: 0.1, y: 0.2 })).rejects.toBeInstanceOf(
+      CameraNotReadyError,
+    );
+    expect(setFocus).not.toHaveBeenCalled();
+  });
+
+  it("dispose 後は CameraNotReadyError を投げる", async () => {
+    const setFocus = vi.fn(async () => {});
+    const { manager } = setup({ setFocus });
+    await manager.startPreview();
+    await manager.dispose();
+    await expect(manager.setFocus()).rejects.toBeInstanceOf(CameraNotReadyError);
+  });
+
+  it("x < 0 なら OUT_OF_RANGE で reject（adapter は呼ばれない）", async () => {
+    const setFocus = vi.fn(async () => {});
+    const { manager } = setup({ setFocus });
+    await manager.startPreview();
+    // 規約違反値（負数）
+    await expect(manager.setFocus({ x: -0.1, y: 0.5 })).rejects.toMatchObject({
+      reason: "OUT_OF_RANGE",
+    });
+    expect(setFocus).not.toHaveBeenCalled();
+  });
+
+  it("x > 1 なら OUT_OF_RANGE で reject", async () => {
+    const setFocus = vi.fn(async () => {});
+    const { manager } = setup({ setFocus });
+    await manager.startPreview();
+    await expect(manager.setFocus({ x: 1.5, y: 0.5 })).rejects.toMatchObject({
+      reason: "OUT_OF_RANGE",
+    });
+    expect(setFocus).not.toHaveBeenCalled();
+  });
+
+  it("y < 0 なら OUT_OF_RANGE で reject", async () => {
+    const setFocus = vi.fn(async () => {});
+    const { manager } = setup({ setFocus });
+    await manager.startPreview();
+    await expect(manager.setFocus({ x: 0.5, y: -0.01 })).rejects.toMatchObject({
+      reason: "OUT_OF_RANGE",
+    });
+    expect(setFocus).not.toHaveBeenCalled();
+  });
+
+  it("y > 1 なら OUT_OF_RANGE で reject", async () => {
+    const setFocus = vi.fn(async () => {});
+    const { manager } = setup({ setFocus });
+    await manager.startPreview();
+    await expect(manager.setFocus({ x: 0.5, y: 1.01 })).rejects.toMatchObject({
+      reason: "OUT_OF_RANGE",
+    });
+    expect(setFocus).not.toHaveBeenCalled();
+  });
+
+  it("NaN は OUT_OF_RANGE として弾かれる", async () => {
+    const setFocus = vi.fn(async () => {});
+    const { manager } = setup({ setFocus });
+    await manager.startPreview();
+    await expect(manager.setFocus({ x: Number.NaN, y: 0.5 })).rejects.toMatchObject({
+      reason: "OUT_OF_RANGE",
+    });
+  });
+
+  it("境界値 {x:0,y:0} と {x:1,y:1} は成功", async () => {
+    const setFocus = vi.fn(async () => {});
+    const { manager } = setup({ setFocus });
+    await manager.startPreview();
+    // 最小境界
+    await manager.setFocus({ x: 0, y: 0 });
+    // 最大境界
+    await manager.setFocus({ x: 1, y: 1 });
+    expect(setFocus).toHaveBeenCalledTimes(2);
+    expect(setFocus).toHaveBeenNthCalledWith(1, previewHandle, { x: 0, y: 0 });
+    expect(setFocus).toHaveBeenNthCalledWith(2, previewHandle, { x: 1, y: 1 });
+  });
+});
+
+// getCapabilities のテスト群
+describe("CameraManager.getCapabilities", () => {
+  it("adapter 実装ありなら adapter.getCapabilities を呼んで結果を返す", async () => {
+    const getCapabilities = vi.fn(async () => fullCapabilities);
+    const { manager } = setup({ getCapabilities });
+    await manager.startPreview();
+    const caps = await manager.getCapabilities();
+    expect(getCapabilities).toHaveBeenCalledWith(previewHandle);
+    expect(caps).toEqual(fullCapabilities);
+  });
+
+  it("adapter 未実装なら全 false のフォールバックを返す", async () => {
+    const { manager } = setup();
+    await manager.startPreview();
+    const caps = await manager.getCapabilities();
+    // すべてのフィールドが false 系の値
+    expect(caps).toEqual({
+      torch: false,
+      zoom: false,
+      focus: false,
+      flash: false,
+      exposureMode: false,
+      whiteBalanceMode: false,
+      iso: false,
+      brightness: false,
+      hdr: false,
+      lowLightBoost: false,
+    });
+  });
+
+  it("プレビュー未開始なら CameraNotReadyError を投げる", async () => {
+    const getCapabilities = vi.fn(async () => fullCapabilities);
+    const { manager } = setup({ getCapabilities });
+    await expect(manager.getCapabilities()).rejects.toBeInstanceOf(CameraNotReadyError);
+    expect(getCapabilities).not.toHaveBeenCalled();
+  });
+
+  it("dispose 後は CameraNotReadyError を投げる", async () => {
+    const getCapabilities = vi.fn(async () => fullCapabilities);
+    const { manager } = setup({ getCapabilities });
+    await manager.startPreview();
+    await manager.dispose();
+    await expect(manager.getCapabilities()).rejects.toBeInstanceOf(CameraNotReadyError);
+  });
+
+  it("adapter が throw した場合は error event を emit して rethrow", async () => {
+    const err = new CameraControlError("APPLY_FAILED");
+    const getCapabilities = vi.fn(async () => {
+      throw err;
+    });
+    const { manager, events } = setup({ getCapabilities });
+    await manager.startPreview();
+    await expect(manager.getCapabilities()).rejects.toBe(err);
+    expect(events.some((e) => e.type === "error" && e.error === err)).toBe(true);
   });
 });

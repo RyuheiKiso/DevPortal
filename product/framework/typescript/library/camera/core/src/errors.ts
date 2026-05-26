@@ -142,3 +142,25 @@ export class ScannerError extends BaseCameraError {
     this.retryable = options?.retryable ?? false;
   }
 }
+
+// カメラ制御操作（torch / zoom / focus / capabilities）のエラー
+// RecordingError と分離することで UI 側のハンドリングを区別しやすくする
+export class CameraControlError extends BaseCameraError {
+  // 固定 code（reason で詳細を区別）
+  readonly code = "CAMERA_CONTROL_ERROR" as const;
+  // 再試行可否（"OUT_OF_RANGE" は呼出側で値を絞れば再試行可、"UNSUPPORTED" は不可）
+  readonly retryable: boolean;
+  // 詳細サブコード（"UNSUPPORTED" / "OUT_OF_RANGE" / "APPLY_FAILED" 等）
+  readonly reason: string;
+  // constructor: reason 必須
+  constructor(
+    reason: string,
+    options?: { message?: string; retryable?: boolean; cause?: unknown },
+  ) {
+    // message が未指定なら reason を使う
+    super(options?.message ?? `Camera control error: ${reason}`, { cause: options?.cause });
+    // フィールド設定
+    this.reason = reason;
+    this.retryable = options?.retryable ?? false;
+  }
+}

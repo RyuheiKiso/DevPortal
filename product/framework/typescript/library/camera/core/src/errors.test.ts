@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 // テスト対象エラー群
 import {
+  CameraControlError,
   CameraError,
   CameraNotReadyError,
   DeviceUnavailableError,
@@ -146,5 +147,37 @@ describe("ScannerError", () => {
     expect(err.message).toBe("fmt");
     expect(err.retryable).toBe(true);
     expect(err.cause).toBe(cause);
+  });
+});
+
+// CameraControlError
+describe("CameraControlError", () => {
+  it("reason を元にした既定 message を持つ", () => {
+    // UNSUPPORTED 固定
+    const err = new CameraControlError("UNSUPPORTED");
+    expect(err.code).toBe("CAMERA_CONTROL_ERROR");
+    expect(err.reason).toBe("UNSUPPORTED");
+    expect(err.retryable).toBe(false);
+    expect(err.message).toContain("UNSUPPORTED");
+  });
+
+  it("message / retryable / cause を上書きできる", () => {
+    // 原因例外を内包
+    const cause = new Error("range");
+    const err = new CameraControlError("OUT_OF_RANGE", {
+      message: "zoom out",
+      retryable: true,
+      cause,
+    });
+    expect(err.message).toBe("zoom out");
+    expect(err.retryable).toBe(true);
+    expect(err.cause).toBe(cause);
+  });
+
+  it("APPLY_FAILED 等の任意 reason を保持する", () => {
+    // 動的 reason の利用例
+    const err = new CameraControlError("APPLY_FAILED");
+    expect(err.reason).toBe("APPLY_FAILED");
+    expect(err.name).toBe("CameraControlError");
   });
 });

@@ -9,7 +9,7 @@ metadata:
   # Component の一意な名前
   name: k1s0-ts-camera-core
   # UI 表示用の説明文 (package.json の description より)
-  description: "DevPortal common headless camera core for photo capture, video recording, live preview, and barcode scanning."
+  description: "DevPortal common headless camera core for photo capture, video recording, live preview, barcode scanning, torch, zoom, tap focus, and capabilities."
   # 検索・フィルタ用タグ
   tags:
     - typescript

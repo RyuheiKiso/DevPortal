@@ -2,6 +2,7 @@
 import type { CapturedMedia } from "./media.js";
 // 各種エラーの型を取り込み（CameraEvent で参照するため）
 import type {
+  CameraControlError,
   CameraError,
   CameraNotReadyError,
   DeviceUnavailableError,
@@ -178,6 +179,54 @@ export interface BarcodeScanResult {
   boundingBox?: { x: number; y: number; width: number; height: number };
 }
 
+// トーチ（持続点灯ライト）モード
+// "on" = 点灯維持 / "off" = 消灯
+export type TorchMode = "on" | "off";
+
+// タップフォーカスの座標（プレビュー画面の相対座標）
+// 左上 (0,0) 〜 右下 (1,1) で指定する
+export interface FocusPoint {
+  // X 座標（0..1）
+  x: number;
+  // Y 座標（0..1）
+  y: number;
+}
+
+// レンジ表現（最小値・最大値・任意 step）
+export interface CapabilityRange {
+  // 取りうる最小値
+  min: number;
+  // 取りうる最大値
+  max: number;
+  // 連続可変が前提のときの推奨ステップ（未指定なら任意精度）
+  step?: number;
+}
+
+// カメラデバイスの能力情報（MediaTrackCapabilities 相当の拡張版）
+// 未対応の項目は `false` で示し、対応している項目は具体オブジェクトを格納する
+export interface CameraCapabilities {
+  // トーチ（持続点灯）対応の可否
+  torch: boolean;
+  // ズーム対応の可否と range（false = 未対応）
+  zoom: CapabilityRange | false;
+  // フォーカス能力（tap = タップフォーカス、continuous = 連続 AF）
+  focus: { tap: boolean; continuous: boolean } | false;
+  // フラッシュ（撮影時の瞬間発光）対応の可否
+  flash: boolean;
+  // 露出モード一覧（"continuous" / "manual" / "single-shot" 等。false = 未対応）
+  exposureMode: readonly string[] | false;
+  // ホワイトバランスモード一覧（"continuous" / "manual" 等。false = 未対応）
+  whiteBalanceMode: readonly string[] | false;
+  // ISO 感度 range（false = 未対応）
+  iso: CapabilityRange | false;
+  // 明度 range（false = 未対応）
+  brightness: CapabilityRange | false;
+  // HDR 対応の可否
+  hdr: boolean;
+  // 低照度ブースト対応の可否
+  lowLightBoost: boolean;
+}
+
 // 権限ステータス（W3C Permissions API と RN PermissionStatus の統合）
 export type PermissionStatus = "granted" | "denied" | "prompt" | "blocked" | "unavailable";
 
@@ -224,7 +273,8 @@ export type CameraEvent =
         | PermissionDeniedError
         | DeviceUnavailableError
         | RecordingError
-        | ScannerError;
+        | ScannerError
+        | CameraControlError;
       at: number;
     };
 
@@ -268,6 +318,14 @@ export interface CameraManager {
   ): Promise<() => void>;
   // 現在のスキャン中フラグ
   isScanning(): boolean;
+  // トーチ（持続点灯）モードの切替（adapter 未対応なら CameraControlError("UNSUPPORTED")）
+  setTorch(mode: TorchMode): Promise<void>;
+  // ズーム倍率の設定（adapter 未対応なら CameraControlError("UNSUPPORTED")、範囲外なら "OUT_OF_RANGE"）
+  setZoom(zoom: number): Promise<void>;
+  // フォーカス制御（point 指定でタップフォーカス、未指定で連続 AF へ戻す）
+  setFocus(point?: FocusPoint): Promise<void>;
+  // 現在のプレビューに対する能力情報を取得（adapter 未対応時は全 false の安全フォールバック）
+  getCapabilities(): Promise<CameraCapabilities>;
   // イベント購読（戻り値は購読解除関数）
   subscribe(listener: CameraListener): () => void;
   // マネージャ全体の後始末（プレビュー停止 + アダプタ dispose）

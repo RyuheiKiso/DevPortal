@@ -1,11 +1,14 @@
 // core からの型とエラー
 import {
+  CameraControlError,
   DeviceUnavailableError,
   RecordingError,
   ScannerError,
   type BarcodeScanResult,
   type CameraAdapter,
+  type CameraCapabilities,
   type CameraDevice,
+  type FocusPoint,
   type PermissionDescriptor,
   type PermissionStatus,
   type PhotoOptions,
@@ -16,6 +19,7 @@ import {
   type RecordingOptions,
   type RecordingResult,
   type ScannerConfig,
+  type TorchMode,
 } from "@k1s0-ts-camera/core";
 
 // Windows 用カメラ実装の最小インターフェイス（react-native-windows の MediaCapture をラップする想定）
@@ -38,6 +42,14 @@ export interface WindowsCameraImpl {
   stopRecording?(recording: { id: string; native: unknown }): Promise<RecordingResult>;
   // バーコード
   scanBarcode?(handle: { id: string; native: unknown }, config: ScannerConfig, onScan: (r: BarcodeScanResult) => void): Promise<() => void>;
+  // トーチ（Windows.Media.Capture の TorchControl をラップする想定）
+  setTorch?(handle: { id: string; native: unknown }, mode: TorchMode): Promise<void>;
+  // ズーム（ZoomControl をラップする想定）
+  setZoom?(handle: { id: string; native: unknown }, zoom: number): Promise<void>;
+  // フォーカス（FocusControl をラップする想定）
+  setFocus?(handle: { id: string; native: unknown }, point?: FocusPoint): Promise<void>;
+  // 能力情報（VideoDeviceController の各 Control サポート状態から構築する想定）
+  getCapabilities?(handle: { id: string; native: unknown }): Promise<CameraCapabilities>;
   // 解放
   dispose?(): Promise<void>;
 }
@@ -137,6 +149,55 @@ export function createWindowsAdapter(options: WindowsAdapterOptions = {}): Camer
         });
       }
       return await impl.scanBarcode({ id: handle.id, native: handle.native }, config, onScan);
+    },
+    setTorch: async (handle: PreviewHandle, mode: TorchMode) => {
+      // impl が無ければ UNSUPPORTED
+      if (impl?.setTorch === undefined) {
+        throw new CameraControlError("UNSUPPORTED", {
+          message: "Windows MediaCapture torch control is not provided",
+        });
+      }
+      // impl 委譲
+      await impl.setTorch({ id: handle.id, native: handle.native }, mode);
+    },
+    setZoom: async (handle: PreviewHandle, zoom: number) => {
+      // impl が無ければ UNSUPPORTED
+      if (impl?.setZoom === undefined) {
+        throw new CameraControlError("UNSUPPORTED", {
+          message: "Windows MediaCapture zoom control is not provided",
+        });
+      }
+      // impl 委譲
+      await impl.setZoom({ id: handle.id, native: handle.native }, zoom);
+    },
+    setFocus: async (handle: PreviewHandle, point?: FocusPoint) => {
+      // impl が無ければ UNSUPPORTED
+      if (impl?.setFocus === undefined) {
+        throw new CameraControlError("UNSUPPORTED", {
+          message: "Windows MediaCapture focus control is not provided",
+        });
+      }
+      // impl 委譲
+      await impl.setFocus({ id: handle.id, native: handle.native }, point);
+    },
+    getCapabilities: async (handle: PreviewHandle) => {
+      // impl が無ければ全 false の安全フォールバック
+      if (impl?.getCapabilities === undefined) {
+        return {
+          torch: false,
+          zoom: false,
+          focus: false,
+          flash: false,
+          exposureMode: false,
+          whiteBalanceMode: false,
+          iso: false,
+          brightness: false,
+          hdr: false,
+          lowLightBoost: false,
+        };
+      }
+      // impl 委譲
+      return await impl.getCapabilities({ id: handle.id, native: handle.native });
     },
     dispose: async () => {
       if (impl?.dispose !== undefined) {

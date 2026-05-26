@@ -1,11 +1,13 @@
 // 型一式を取り込み
 import type {
   BarcodeScanResult,
+  CameraCapabilities,
   CameraDevice,
   CameraEvent,
   CameraListener,
   CameraManager,
   CameraManagerConfig,
+  FocusPoint,
   PermissionDescriptor,
   PermissionStatus,
   PhotoOptions,
@@ -17,11 +19,13 @@ import type {
   RecordingSession,
   RecordingState,
   ScannerConfig,
+  TorchMode,
 } from "./types.js";
 // アダプタ型
 import type { CameraAdapter } from "./adapter.js";
 // 各種エラー
 import {
+  CameraControlError,
   CameraNotReadyError,
   RecordingError,
   ScannerError,
@@ -365,6 +369,115 @@ export function createCameraManager(
     return scannerUnsubscribe !== undefined;
   }
 
+  // 全 false の能力情報（adapter 未対応時のフォールバック）
+  function emptyCapabilities(): CameraCapabilities {
+    // 「対応無し」を全フィールドで明示する安全側の値
+    return {
+      // トーチ未対応
+      torch: false,
+      // ズーム未対応
+      zoom: false,
+      // フォーカス未対応
+      focus: false,
+      // フラッシュ未対応
+      flash: false,
+      // 露出モード未対応
+      exposureMode: false,
+      // ホワイトバランス未対応
+      whiteBalanceMode: false,
+      // ISO 未対応
+      iso: false,
+      // 明度未対応
+      brightness: false,
+      // HDR 未対応
+      hdr: false,
+      // 低照度ブースト未対応
+      lowLightBoost: false,
+    };
+  }
+
+  // トーチモード切替
+  async function setTorch(mode: TorchMode): Promise<void> {
+    // dispose 後は不可
+    ensureNotDisposed();
+    // プレビュー未開始なら CameraNotReadyError
+    const handle = ensurePreviewReady();
+    // adapter 未対応なら UNSUPPORTED
+    if (adapter.setTorch === undefined) {
+      throw new CameraControlError("UNSUPPORTED", {
+        message: "Torch control is not supported by this adapter",
+      });
+    }
+    // adapter 呼び出し（エラーは event 化して rethrow）
+    await runAdapter(() =>
+      (adapter.setTorch as NonNullable<typeof adapter.setTorch>)(handle, mode),
+    );
+  }
+
+  // ズーム倍率の設定
+  async function setZoom(zoom: number): Promise<void> {
+    // dispose 後は不可
+    ensureNotDisposed();
+    // プレビュー未開始なら CameraNotReadyError
+    const handle = ensurePreviewReady();
+    // adapter 未対応なら UNSUPPORTED
+    if (adapter.setZoom === undefined) {
+      throw new CameraControlError("UNSUPPORTED", {
+        message: "Zoom control is not supported by this adapter",
+      });
+    }
+    // adapter 呼び出し
+    await runAdapter(() =>
+      (adapter.setZoom as NonNullable<typeof adapter.setZoom>)(handle, zoom),
+    );
+  }
+
+  // フォーカス制御
+  async function setFocus(point?: FocusPoint): Promise<void> {
+    // dispose 後は不可
+    ensureNotDisposed();
+    // 入力検証: point が渡されているなら x, y はいずれも 0..1 範囲内（NaN も拒否）
+    // 相対座標規約に反する値を adapter 側に流さず、core で早期 reject する
+    if (point !== undefined) {
+      // NaN / 範囲外をまとめて検出（Number.isFinite + 比較）
+      const inRange = (v: number): boolean => Number.isFinite(v) && v >= 0 && v <= 1;
+      if (!inRange(point.x) || !inRange(point.y)) {
+        // OUT_OF_RANGE で reject（adapter は呼ばないため error event も emit しない）
+        throw new CameraControlError("OUT_OF_RANGE", {
+          message: `FocusPoint x/y must be in 0..1, got: x=${point.x}, y=${point.y}`,
+        });
+      }
+    }
+    // プレビュー未開始なら CameraNotReadyError
+    const handle = ensurePreviewReady();
+    // adapter 未対応なら UNSUPPORTED
+    if (adapter.setFocus === undefined) {
+      throw new CameraControlError("UNSUPPORTED", {
+        message: "Focus control is not supported by this adapter",
+      });
+    }
+    // adapter 呼び出し
+    await runAdapter(() =>
+      (adapter.setFocus as NonNullable<typeof adapter.setFocus>)(handle, point),
+    );
+  }
+
+  // 能力情報の取得
+  async function getCapabilities(): Promise<CameraCapabilities> {
+    // dispose 後は不可
+    ensureNotDisposed();
+    // プレビュー未開始なら CameraNotReadyError
+    const handle = ensurePreviewReady();
+    // adapter 未対応なら全 false のフォールバックを返す
+    if (adapter.getCapabilities === undefined) {
+      return emptyCapabilities();
+    }
+    // adapter 呼び出し
+    return await runAdapter(() =>
+      (adapter.getCapabilities as NonNullable<typeof adapter.getCapabilities>)(handle),
+    );
+  }
+
   // イベント購読
   function subscribe(listener: CameraListener): () => void {
     // emitter にそのまま委譲
@@ -433,6 +546,10 @@ export function createCameraManager(
     getRecordingState,
     startScanning,
     isScanning,
+    setTorch,
+    setZoom,
+    setFocus,
+    getCapabilities,
     subscribe,
     dispose,
   };

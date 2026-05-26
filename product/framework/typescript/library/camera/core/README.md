@@ -35,6 +35,38 @@ const photo = await manager.takePicture({ quality: 0.8 });
 await manager.dispose();
 ```
 
+## Capabilities & Controls
+
+`CameraManager` は torch / zoom / tap focus / 能力情報取得を統一 API で提供します。adapter 未対応時は `CameraControlError("UNSUPPORTED")` を投げます。
+
+```ts
+// トーチ（持続点灯）
+await manager.setTorch("on");
+await manager.setTorch("off");
+
+// ズーム倍率（adapter 側で device range に clamp / 範囲外で OUT_OF_RANGE）
+await manager.setZoom(2.5);
+
+// タップフォーカス（相対座標 0..1。左上 (0,0) 〜 右下 (1,1)）
+await manager.setFocus({ x: 0.5, y: 0.5 });
+// 連続オートフォーカスへ戻す
+await manager.setFocus();
+
+// 能力情報（torch / zoom range / focus / flash / exposureMode / WB / iso / brightness / hdr / lowLightBoost）
+const caps = await manager.getCapabilities();
+if (caps.torch) { /* 利用可能 */ }
+if (caps.zoom !== false) { /* {min,max,step} で range が取れる */ }
+```
+
+`CameraCapabilities` は `MediaTrackCapabilities` 相当の拡張版で、未対応項目は `false` で示します。
+
+## Backlog
+
+- `focus` に絶対 px 座標サポートを追加（現状は相対 0..1 のみ）
+- `capability-change` / `torch-change` イベントの追加
+- `PhotoOptions.flash` と torch の自動連動
+- Windows MediaCapture API の完全実装（現状は DI スタブ）
+
 ## ライセンス
 
 UNLICENSED (社内利用)

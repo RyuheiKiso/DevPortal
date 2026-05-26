@@ -9,7 +9,7 @@ metadata:
   # Component の一意な名前
   name: k1s0-ts-camera-react-native
   # UI 表示用の説明文 (package.json の description より)
-  description: "DevPortal React Native bindings for the headless camera framework (vision-camera / expo-camera / Windows MediaCapture)."
+  description: "DevPortal React Native bindings for the headless camera framework (vision-camera / expo-camera / Windows MediaCapture) with torch, zoom, tap focus, and capabilities hooks via controls injection."
   # 検索・フィルタ用タグ
   tags:
     - typescript

@@ -47,3 +47,13 @@ product/scaffold/**/.metro-health-check*
 
 # Ruby / CocoaPods
 product/scaffold/**/vendor/bundle/
+
+# ============================================================
+# framework/typescript 配下ライブラリのビルド成果物
+# 各パッケージにも個別 .gitignore があるが、新規パッケージ追加時の
+# 個別配置忘れがあっても誤コミットされないようにルートでも保険する
+# ============================================================
+product/framework/typescript/**/node_modules/
+product/framework/typescript/**/dist/
+product/framework/typescript/**/coverage/
+product/framework/typescript/**/*.tgz

@@ -9,7 +9,7 @@ metadata:
   # Component の一意な名前
   name: k1s0-ts-camera-react
   # UI 表示用の説明文 (package.json の description より)
-  description: "DevPortal React bindings for the headless camera framework (Web / MediaDevices)."
+  description: "DevPortal React bindings for the headless camera framework (Web / MediaDevices) with torch, zoom, tap focus, and capabilities hooks."
   # 検索・フィルタ用タグ
   tags:
     - typescript

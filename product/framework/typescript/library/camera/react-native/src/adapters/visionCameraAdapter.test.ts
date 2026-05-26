@@ -3,16 +3,20 @@ import { describe, expect, it, vi } from "vitest";
 // テスト対象
 import {
   createVisionCameraAdapter,
+  type VisionCameraDevice,
   type VisionCameraLibrary,
   type VisionCameraRef,
 } from "./visionCameraAdapter.js";
 // core エラー
 import {
+  CameraControlError,
   CameraError,
   PermissionDeniedError,
   RecordingError,
   ScannerError,
 } from "@k1s0-ts-camera/core";
+// 型
+import type { PreviewHandle } from "@k1s0-ts-camera/core";
 
 // ライブラリ mock を生成
 function makeLibrary(overrides: Partial<VisionCameraLibrary["Camera"]> = {}): VisionCameraLibrary {
@@ -296,5 +300,242 @@ describe("createVisionCameraAdapter", () => {
     });
     await adapter.startPreview({});
     await expect(adapter.dispose()).resolves.toBeUndefined();
+  });
+});
+
+// controls 注入と device モックを使った capability 系テスト
+describe("createVisionCameraAdapter controls", () => {
+  // フル装備の device モック（capability 構築の全分岐を踏ませる用）
+  const fullDevice: VisionCameraDevice = {
+    id: "d1",
+    name: "Back",
+    position: "back",
+    hasFlash: true,
+    minZoom: 1,
+    maxZoom: 10,
+    supportsFocusLocking: true,
+    supportsExposureLocking: true,
+    supportsLowLightBoost: true,
+  };
+
+  it("setTorch: controls 注入ありなら呼ばれる", async () => {
+    const setTorch = vi.fn();
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => makeRef(),
+      controls: { setTorch },
+    });
+    const h = await adapter.startPreview({});
+    await adapter.setTorch!(h, "on");
+    expect(setTorch).toHaveBeenCalledWith("on");
+  });
+
+  it("setTorch: controls 未注入なら UNSUPPORTED", async () => {
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => makeRef(),
+    });
+    const h = await adapter.startPreview({});
+    await expect(adapter.setTorch!(h, "off")).rejects.toBeInstanceOf(CameraControlError);
+  });
+
+  it("setTorch: ハンドル不一致なら CameraError", async () => {
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => makeRef(),
+      controls: { setTorch: vi.fn() },
+    });
+    await adapter.startPreview({});
+    const fake: PreviewHandle = { __brand: "PreviewHandle", id: "x", native: null };
+    await expect(adapter.setTorch!(fake, "on")).rejects.toBeInstanceOf(CameraError);
+  });
+
+  it("setTorch: setter が throw したら APPLY_FAILED", async () => {
+    const err = new Error("boom");
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => makeRef(),
+      controls: {
+        setTorch: () => {
+          throw err;
+        },
+      },
+    });
+    const h = await adapter.startPreview({});
+    await expect(adapter.setTorch!(h, "on")).rejects.toMatchObject({
+      reason: "APPLY_FAILED",
+      cause: err,
+    });
+  });
+
+  it("setZoom: 注入ありなら呼ばれる", async () => {
+    const setZoom = vi.fn();
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => makeRef(),
+      controls: { setZoom },
+    });
+    const h = await adapter.startPreview({});
+    await adapter.setZoom!(h, 3);
+    expect(setZoom).toHaveBeenCalledWith(3);
+  });
+
+  it("setZoom: ハンドル不一致なら CameraError", async () => {
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => makeRef(),
+      controls: { setZoom: vi.fn() },
+    });
+    await adapter.startPreview({});
+    const fake: PreviewHandle = { __brand: "PreviewHandle", id: "x", native: null };
+    await expect(adapter.setZoom!(fake, 2)).rejects.toBeInstanceOf(CameraError);
+  });
+
+  it("setZoom: 注入無しなら UNSUPPORTED", async () => {
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => makeRef(),
+    });
+    const h = await adapter.startPreview({});
+    await expect(adapter.setZoom!(h, 2)).rejects.toMatchObject({ reason: "UNSUPPORTED" });
+  });
+
+  it("setZoom: setter throw を APPLY_FAILED に変換", async () => {
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => makeRef(),
+      controls: {
+        setZoom: () => {
+          throw new Error("zoom fail");
+        },
+      },
+    });
+    const h = await adapter.startPreview({});
+    await expect(adapter.setZoom!(h, 1)).rejects.toMatchObject({ reason: "APPLY_FAILED" });
+  });
+
+  it("setFocus: 注入ありなら point を渡す", async () => {
+    const setFocus = vi.fn();
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => makeRef(),
+      controls: { setFocus },
+    });
+    const h = await adapter.startPreview({});
+    await adapter.setFocus!(h, { x: 0.3, y: 0.6 });
+    expect(setFocus).toHaveBeenCalledWith({ x: 0.3, y: 0.6 });
+  });
+
+  it("setFocus: point 無しは undefined を渡す", async () => {
+    const setFocus = vi.fn();
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => makeRef(),
+      controls: { setFocus },
+    });
+    const h = await adapter.startPreview({});
+    await adapter.setFocus!(h);
+    expect(setFocus).toHaveBeenCalledWith(undefined);
+  });
+
+  it("setFocus: 注入無しなら UNSUPPORTED", async () => {
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => makeRef(),
+    });
+    const h = await adapter.startPreview({});
+    await expect(adapter.setFocus!(h)).rejects.toMatchObject({ reason: "UNSUPPORTED" });
+  });
+
+  it("setFocus: ハンドル不一致なら CameraError", async () => {
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => makeRef(),
+      controls: { setFocus: vi.fn() },
+    });
+    await adapter.startPreview({});
+    const fake: PreviewHandle = { __brand: "PreviewHandle", id: "x", native: null };
+    await expect(adapter.setFocus!(fake)).rejects.toBeInstanceOf(CameraError);
+  });
+
+  it("setFocus: setter throw は APPLY_FAILED に変換", async () => {
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => makeRef(),
+      controls: {
+        setFocus: () => {
+          throw new Error("focus fail");
+        },
+      },
+    });
+    const h = await adapter.startPreview({});
+    await expect(adapter.setFocus!(h)).rejects.toMatchObject({ reason: "APPLY_FAILED" });
+  });
+
+  it("getCapabilities: フル device + フル controls なら全部 true 系", async () => {
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => makeRef(),
+      device: () => fullDevice,
+      controls: { setTorch: vi.fn(), setZoom: vi.fn(), setFocus: vi.fn() },
+    });
+    const h = await adapter.startPreview({});
+    const caps = await adapter.getCapabilities!(h);
+    expect(caps).toEqual({
+      torch: true,
+      zoom: { min: 1, max: 10 },
+      focus: { tap: true, continuous: true },
+      flash: true,
+      exposureMode: ["continuous", "manual"],
+      whiteBalanceMode: false,
+      iso: false,
+      brightness: false,
+      hdr: false,
+      lowLightBoost: true,
+    });
+  });
+
+  it("getCapabilities: device 無し / controls 無しなら全 false 系", async () => {
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => makeRef(),
+    });
+    const h = await adapter.startPreview({});
+    const caps = await adapter.getCapabilities!(h);
+    expect(caps).toEqual({
+      torch: false,
+      zoom: false,
+      focus: false,
+      flash: false,
+      exposureMode: false,
+      whiteBalanceMode: false,
+      iso: false,
+      brightness: false,
+      hdr: false,
+      lowLightBoost: false,
+    });
+  });
+
+  it("getCapabilities: device.minZoom/maxZoom 未定義なら zoom=false", async () => {
+    const partial: VisionCameraDevice = { ...fullDevice, minZoom: undefined, maxZoom: undefined };
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => makeRef(),
+      device: () => partial,
+      controls: { setZoom: vi.fn() },
+    });
+    const h = await adapter.startPreview({});
+    const caps = await adapter.getCapabilities!(h);
+    expect(caps.zoom).toBe(false);
+  });
+
+  it("getCapabilities: ハンドル不一致なら CameraError", async () => {
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => makeRef(),
+    });
+    await adapter.startPreview({});
+    const fake: PreviewHandle = { __brand: "PreviewHandle", id: "x", native: null };
+    await expect(adapter.getCapabilities!(fake)).rejects.toBeInstanceOf(CameraError);
   });
 });
