@@ -313,6 +313,49 @@ describe("useZoom", () => {
     expect(captured?.zoom).toBe(2);
   });
 
+  it("preview 切替時に range が未取得なら zoom は 1 に fallback する", async () => {
+    // getCapabilities を永遠に保留する manager を作り、range が undefined のまま preview-start を流す
+    const manager = makeManager({
+      getCapabilities: vi.fn(() => new Promise<CameraCapabilities>(() => {})),
+    });
+    let captured: ReturnType<typeof useZoom> | undefined;
+    function P() {
+      captured = useZoom();
+      return null;
+    }
+    act(() => {
+      TestRenderer.create(
+        <CameraProvider manager={manager}>
+          <P />
+        </CameraProvider>,
+      );
+    });
+    // 1 回目の preview-start（range は未取得のまま）
+    act(() => {
+      (manager as { __emit?: (e: CameraEvent) => void }).__emit?.({
+        type: "preview-start",
+        handle: { __brand: "PreviewHandle", id: "p-a", native: null },
+        at: 0,
+      });
+    });
+    await flush();
+    // ユーザが set
+    await act(async () => {
+      await captured?.set(4);
+    });
+    expect(captured?.zoom).toBe(4);
+    // 別 preview-start（別ハンドル）→ range 未取得 → 1 fallback
+    act(() => {
+      (manager as { __emit?: (e: CameraEvent) => void }).__emit?.({
+        type: "preview-start",
+        handle: { __brand: "PreviewHandle", id: "p-b", native: null },
+        at: 1,
+      });
+    });
+    await flush();
+    expect(captured?.zoom).toBe(1);
+  });
+
   it("同一 preview ID で preview-start が複数回来てもユーザ set した zoom は維持される", async () => {
     const manager = makeManager();
     let captured: ReturnType<typeof useZoom> | undefined;

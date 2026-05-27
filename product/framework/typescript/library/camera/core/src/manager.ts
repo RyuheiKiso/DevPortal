@@ -25,8 +25,8 @@ import type {
 import type { CameraAdapter } from "./adapter.js";
 // 各種エラー
 import {
+  BaseCameraError,
   CameraControlError,
-  CameraError,
   CameraNotReadyError,
   RecordingError,
   ScannerError,
@@ -63,6 +63,11 @@ export function createCameraManager(
   // 直近スキャン結果（throttle 判定で参照、現状 manager では呼出側で重複抑止）
   // dispose 済みフラグ（dispose 後の操作を弾く）
   let disposed = false;
+  // 並行 start* を 1 リクエストに集約するための in-flight Promise キャッシュ
+  // 2 つ目以降の呼出は同じ Promise を返し、settle 後に undefined に戻す
+  let inflightStartPreview: Promise<PreviewHandle> | undefined;
+  let inflightStartRecording: Promise<RecordingSession> | undefined;
+  let inflightStartScanning: Promise<() => void> | undefined;
 
   // 内部: dispose 済みなら CameraError 風に弾く（ただし冪等性のため getter は除外）
   function ensureNotDisposed(): void {
@@ -89,30 +94,17 @@ export function createCameraManager(
       // adapter 呼び出し
       return await operation();
     } catch (err) {
-      // CameraError 系統のみ event に乗せる（型ガードで判定するのは大袈裟なので CameraError 系の duck typing）
+      // CameraError 系統のみ event に乗せる（BaseCameraError instanceof で厳密判定）
       const at = now();
-      // 既知 CameraError 系統なら event 化（CameraError union への代入は emit シグネチャに合わせて局所 cast する）
-      if (isCameraErrorLike(err)) {
-        // emit の error 型は CameraError 系の union だが、duck typing で同形と判明済みのため局所 cast で渡す
-        emitter.emit({ type: "error", error: err as CameraError, at });
+      // 既知 CameraError 系統（= BaseCameraError サブクラス）なら event 化
+      if (err instanceof BaseCameraError) {
+        // emit の error 型は CameraError 系の union。instanceof で narrow 済みなので
+        // 安全性は runtime で担保されている。union の 1 メンバーに cast して TS の代入互換性を通す
+        emitter.emit({ type: "error", error: err as import("./errors.js").CameraError, at });
       }
       // 元の例外を rethrow（呼出側で握る）
       throw err;
     }
-  }
-
-  // 内部 duck typing: CameraError 系統 (code + retryable プロパティ) を持つかで判定
-  // 戻り値の type predicate は `code: string; retryable: boolean` を持つ任意オブジェクト
-  function isCameraErrorLike(
-    value: unknown,
-  ): value is { code: string; retryable: boolean; message?: string } {
-    // null / プリミティブは即 false
-    if (value === null || typeof value !== "object") {
-      return false;
-    }
-    // code が string、retryable が boolean、ともに Error 由来か
-    const candidate = value as { code?: unknown; retryable?: unknown };
-    return typeof candidate.code === "string" && typeof candidate.retryable === "boolean";
   }
 
   // listDevices: adapter にそのまま委譲
@@ -146,8 +138,21 @@ export function createCameraManager(
     return status;
   }
 
-  // プレビュー開始
-  async function startPreview(previewConfig: PreviewConfig = {}): Promise<PreviewHandle> {
+  // プレビュー開始（並行呼出は in-flight Promise を共有する）
+  function startPreview(previewConfig: PreviewConfig = {}): Promise<PreviewHandle> {
+    // 既に走っている呼出があれば同じ Promise を返す
+    if (inflightStartPreview !== undefined) {
+      return inflightStartPreview;
+    }
+    // 本処理を実行し、settle 時に in-flight キャッシュをクリア
+    inflightStartPreview = startPreviewImpl(previewConfig).finally(() => {
+      inflightStartPreview = undefined;
+    });
+    return inflightStartPreview;
+  }
+
+  // プレビュー開始本体（内部実装）
+  async function startPreviewImpl(previewConfig: PreviewConfig = {}): Promise<PreviewHandle> {
     // dispose 後は不可
     ensureNotDisposed();
     // 既に開始済みなら一度停止してから上書き
@@ -165,12 +170,11 @@ export function createCameraManager(
     const handle = await runAdapter(() => adapter.startPreview(previewConfig));
     // await 中に dispose されていた場合、取得した handle を即時解放してリークを防ぐ
     if (disposed) {
-      // adapter 側に handle 解放を依頼し、失敗は無視（既に adapter.dispose 済みのことがある）
-      try {
-        await adapter.stopPreview(handle);
-      } catch {
-        // 解放失敗は無視
-      }
+      // runAdapter 経由で stopPreview を呼ぶことで、解放失敗時も error event を emit する
+      // rethrow は本関数の CameraNotReadyError に置換するため握る
+      await runAdapter(() => adapter.stopPreview(handle)).catch(() => {
+        // runAdapter で event 化済み。呼出側には CameraNotReadyError を返すので rethrow は不要
+      });
       // 呼出側には CameraNotReadyError を返す（dispose 後の状態を明確に伝える）
       throw new CameraNotReadyError("CameraManager has been disposed");
     }
@@ -228,8 +232,19 @@ export function createCameraManager(
     return result;
   }
 
-  // 録画開始
-  async function startRecording(options?: RecordingOptions): Promise<RecordingSession> {
+  // 録画開始（並行呼出は in-flight Promise を共有する）
+  function startRecording(options?: RecordingOptions): Promise<RecordingSession> {
+    if (inflightStartRecording !== undefined) {
+      return inflightStartRecording;
+    }
+    inflightStartRecording = startRecordingImpl(options).finally(() => {
+      inflightStartRecording = undefined;
+    });
+    return inflightStartRecording;
+  }
+
+  // 録画開始本体
+  async function startRecordingImpl(options?: RecordingOptions): Promise<RecordingSession> {
     // dispose 後は不可
     ensureNotDisposed();
     // プレビュー未開始なら CameraNotReadyError
@@ -243,12 +258,10 @@ export function createCameraManager(
     const recording = await runAdapter(() => adapter.startRecording(handle, options));
     // await 中に dispose されていた場合、取得した RecordingHandle を即時解放してリーク回避
     if (disposed) {
-      // adapter 側に録画停止を依頼し、失敗は無視
-      try {
-        await adapter.stopRecording(recording);
-      } catch {
-        // 解放失敗は無視
-      }
+      // runAdapter 経由で stopRecording を呼ぶ（失敗時に error event 化）
+      await runAdapter(() => adapter.stopRecording(recording)).catch(() => {
+        // event 化済みのため呼出側には CameraNotReadyError を返す
+      });
       // 呼出側には CameraNotReadyError を返す
       throw new CameraNotReadyError("CameraManager has been disposed");
     }
@@ -344,8 +357,22 @@ export function createCameraManager(
     return stateMachine.state;
   }
 
-  // バーコードスキャン購読開始
-  async function startScanning(
+  // バーコードスキャン購読開始（並行呼出は in-flight Promise を共有する）
+  function startScanning(
+    scannerConfig: ScannerConfig,
+    onScan: (result: BarcodeScanResult) => void,
+  ): Promise<() => void> {
+    if (inflightStartScanning !== undefined) {
+      return inflightStartScanning;
+    }
+    inflightStartScanning = startScanningImpl(scannerConfig, onScan).finally(() => {
+      inflightStartScanning = undefined;
+    });
+    return inflightStartScanning;
+  }
+
+  // バーコードスキャン購読開始本体
+  async function startScanningImpl(
     scannerConfig: ScannerConfig,
     onScan: (result: BarcodeScanResult) => void,
   ): Promise<() => void> {
@@ -368,7 +395,8 @@ export function createCameraManager(
     );
     // await 中に dispose されていた場合、取得した unsubscribe を即時呼んでスキャナを止める
     if (disposed) {
-      // adapter 側のスキャナ停止を試行し、失敗は無視
+      // unsubscribe 自体は adapter 呼出ではない（プレーン関数）ため runAdapter は使わない
+      // 解除失敗は通常の例外として握りつぶす（次回起動時の影響は無い）
       try {
         unsubscribeFromAdapter();
       } catch {
@@ -524,7 +552,9 @@ export function createCameraManager(
     if (disposed) {
       return;
     }
-    // フラグを立てる
+    // フラグを立てる（in-flight な start* は disposed を見て race 解放経路に進む）
+    // dispose 側は in-flight Promise の解決を待たず並行で進める：呼出側が両方を await できるよう、
+    // adapter 側のメソッドは冪等性（state チェックや handle 一致確認）に依存する設計
     disposed = true;
     // スキャナ停止
     if (scannerUnsubscribe !== undefined) {

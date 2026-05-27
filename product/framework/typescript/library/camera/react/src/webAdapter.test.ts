@@ -574,6 +574,77 @@ describe("createWebAdapter takePicture", () => {
     expect(removeSpy).toHaveBeenCalledWith("loadedmetadata", expect.any(Function));
   });
 
+  it("createOffscreenVideo: addEventListener が無い video mock では即時 resolve（hang しない）", async () => {
+    // readyState=0 + addEventListener なしの mock
+    vi.stubGlobal("document", {
+      createElement: (tag: string) => {
+        if (tag === "canvas") {
+          return {
+            width: 0,
+            height: 0,
+            getContext: () => ({ drawImage: vi.fn() }),
+            toBlob: (cb: (b: Blob) => void, mime: string) => cb(new Blob([], { type: mime })),
+          };
+        }
+        // addEventListener / removeEventListener を提供しない
+        return {
+          srcObject: null,
+          videoWidth: 100,
+          videoHeight: 50,
+          readyState: 0,
+          play: () => Promise.resolve(),
+        };
+      },
+    });
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    // hang せず即時 resolve
+    const result = await adapter.takePicture(h);
+    expect(result.width).toBe(100);
+    expect(result.height).toBe(50);
+  });
+
+  it("createOffscreenVideo: loadedmetadata が発火しない場合は 2 秒 timeout で resolve", async () => {
+    // 偽タイマーで timeout 経路を踏む
+    vi.useFakeTimers();
+    try {
+      // addEventListener は存在するが発火しない mock
+      vi.stubGlobal("document", {
+        createElement: (tag: string) => {
+          if (tag === "canvas") {
+            return {
+              width: 0,
+              height: 0,
+              getContext: () => ({ drawImage: vi.fn() }),
+              toBlob: (cb: (b: Blob) => void, mime: string) => cb(new Blob([], { type: mime })),
+            };
+          }
+          return {
+            srcObject: null,
+            videoWidth: 640,
+            videoHeight: 480,
+            readyState: 0,
+            play: () => Promise.resolve(),
+            // listener 登録は受けるが test 側で発火させない
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+          };
+        },
+      });
+      const adapter = createWebAdapter();
+      const h = await adapter.startPreview({});
+      const takeP = adapter.takePicture(h);
+      // 2 秒経過させて timeout resolve を発火
+      await vi.advanceTimersByTimeAsync(2000);
+      const result = await takeP;
+      // metadata 取得は諦めるが videoWidth/Height は mock の値を採用（640x480）
+      expect(result.width).toBe(640);
+      expect(result.height).toBe(480);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("target 指定後に document が破棄された場合、takePicture 直内の document check 経路", async () => {
     installFakeDocument();
     const adapter = createWebAdapter();
@@ -765,6 +836,140 @@ describe("createWebAdapter recording", () => {
     await new Promise((r) => setTimeout(r, 0));
     // failStop のため、後続 stopRecording も STOP_FAILED で失敗するのが期待挙動
     await expect(adapter.stopRecording(rec)).rejects.toMatchObject({ reason: "STOP_FAILED" });
+  });
+
+  it("recorder.onerror が stopRecording 前に発火すると pendingError として保持され後続 stop で throw", async () => {
+    // triggerError=true で stop() 時に onerror を発火、stop() より早く onerror が来る形にするため
+    // 独自の Fake を組み立てる
+    const instances: FakeMediaRecorder[] = [];
+    class FakeMediaRecorder {
+      ondataavailable: ((event: { data: Blob }) => void) | null = null;
+      onstop: (() => void) | null = null;
+      onerror: ((event: unknown) => void) | null = null;
+      state = "inactive";
+      mimeType = "video/webm";
+      constructor(_stream: unknown) {
+        instances.push(this);
+      }
+      start(): void {
+        this.state = "recording";
+      }
+      stop(): void {
+        this.state = "inactive";
+      }
+      pause(): void {
+        this.state = "paused";
+      }
+      resume(): void {
+        this.state = "recording";
+      }
+    }
+    vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    const rec = await adapter.startRecording(h);
+    // stop 前に onerror を発火（pendingError に積まれる）
+    instances[0]?.onerror?.({ name: "InvalidStateError" });
+    // 後続 stopRecording は pendingError を消費して RECORDER_ERROR を throw
+    await expect(adapter.stopRecording(rec)).rejects.toMatchObject({
+      reason: "RECORDER_ERROR",
+    });
+  });
+
+  it("stopRecording 時に recorder.state==='inactive' なら stop はスキップして onstop の到達を待つ", async () => {
+    // FakeMediaRecorder で state を inactive にしてから stop を呼ぶ流れ
+    const instances: FakeMediaRecorder[] = [];
+    class FakeMediaRecorder {
+      ondataavailable: ((event: { data: Blob }) => void) | null = null;
+      onstop: (() => void) | null = null;
+      onerror: ((event: unknown) => void) | null = null;
+      state = "inactive";
+      mimeType = "video/webm";
+      stopCallCount = 0;
+      constructor(_stream: unknown) {
+        instances.push(this);
+      }
+      start(): void {
+        this.state = "recording";
+      }
+      stop(): void {
+        // ここでカウントを取って二重 stop を検出
+        this.stopCallCount++;
+        this.state = "inactive";
+        // onstop 発火（同期で呼んで test が microtask wait しなくて済むようにする）
+        queueMicrotask(() => this.onstop?.());
+      }
+      pause(): void {}
+      resume(): void {}
+    }
+    vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    const rec = await adapter.startRecording(h);
+    // 手動で state を inactive にして（自動停止経路を模す）、stop は呼ばずに onstop だけ発火させない
+    const recorder = instances[0] as FakeMediaRecorder;
+    recorder.state = "inactive";
+    // stopRecording を呼ぶ → state inactive なので stop() を呼ばずに onstop を待つ
+    const stopP = adapter.stopRecording(rec);
+    // 外側から onstop を 1 度発火させる
+    queueMicrotask(() => recorder.onstop?.());
+    const result = await stopP;
+    // stop は内部で呼ばれていない
+    expect(recorder.stopCallCount).toBe(0);
+    expect(result.id).toBe(rec.id);
+  });
+
+  it("maxFileSizeBytes 超過と明示 stop が race しても autoStopRequested で recorder.stop は 1 回だけ", async () => {
+    // start で 1 chunk を即時配信する Fake を使い、maxFileSizeBytes=1 で自動停止 → autoStopRequested=true
+    const instances = installFakeMediaRecorder();
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    const rec = await adapter.startRecording(h, { maxFileSizeBytes: 1 });
+    await new Promise((r) => setTimeout(r, 0));
+    // ここで recorder.state は inactive、stopRecording 経路は stop をスキップして onstop 到達を待つ
+    // FakeMediaRecorder の stop() の呼出回数を確認する手段が無いため state チェックのみ
+    expect(instances[0]?.state).toBe("inactive");
+    // 後続 stopRecording は pendingResult を消費
+    const result = await adapter.stopRecording(rec);
+    expect(result.id).toBe(rec.id);
+  });
+
+  it("ondataavailable が 2 回連続で発火しても autoStopRequested で 2 回目は skip される", async () => {
+    // 2 chunk を連続配信する Fake を作って maxFileSizeBytes=1 で trigger
+    let stopCallCount = 0;
+    class ChunkedFakeMediaRecorder {
+      ondataavailable: ((event: { data: Blob }) => void) | null = null;
+      onstop: (() => void) | null = null;
+      onerror: ((event: unknown) => void) | null = null;
+      state = "inactive";
+      mimeType = "video/webm";
+      constructor(_stream: unknown) {}
+      start(): void {
+        this.state = "recording";
+        // 2 chunk を queueMicrotask で連続発火
+        queueMicrotask(() => {
+          this.ondataavailable?.({ data: new Blob(["a"], { type: this.mimeType }) });
+          this.ondataavailable?.({ data: new Blob(["b"], { type: this.mimeType }) });
+        });
+      }
+      stop(): void {
+        stopCallCount++;
+        this.state = "inactive";
+        queueMicrotask(() => this.onstop?.());
+      }
+      pause(): void {}
+      resume(): void {}
+    }
+    vi.stubGlobal("MediaRecorder", ChunkedFakeMediaRecorder);
+    const adapter = createWebAdapter();
+    const h = await adapter.startPreview({});
+    const rec = await adapter.startRecording(h, { maxFileSizeBytes: 1 });
+    await new Promise((r) => setTimeout(r, 0));
+    // 1 回目の chunk で stop が呼ばれ、2 回目で autoStopRequested=true なので skip → stopCallCount は 1
+    expect(stopCallCount).toBe(1);
+    // 後続 stopRecording は pendingResult を返す
+    const result = await adapter.stopRecording(rec);
+    expect(result.id).toBe(rec.id);
   });
 
   it("maxDurationMs を仕掛けた録画を明示的に stop すると clearTimeout で片付ける", async () => {

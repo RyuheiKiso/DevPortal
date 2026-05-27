@@ -986,6 +986,70 @@ describe("createCameraManager dispose race condition", () => {
     expect(manager.isScanning()).toBe(false);
   });
 
+  it("並行 startPreview は in-flight Promise を共有し adapter.startPreview は 1 回だけ呼ばれる", async () => {
+    // adapter.startPreview を resolver で手動制御
+    let resolvePreview: (h: PreviewHandle) => void = () => {};
+    const startPromise = new Promise<PreviewHandle>((res) => {
+      resolvePreview = res;
+    });
+    const startSpy = vi.fn(async () => startPromise);
+    const adapter = makeAdapter({ startPreview: startSpy });
+    const manager = createCameraManager(adapter);
+    // 並行に 2 回呼ぶ
+    const p1 = manager.startPreview();
+    const p2 = manager.startPreview();
+    // Promise は同一参照（in-flight 共有）
+    expect(p1).toBe(p2);
+    // adapter 解決
+    resolvePreview(previewHandle);
+    const [h1, h2] = await Promise.all([p1, p2]);
+    // 同じ handle が返る
+    expect(h1).toBe(previewHandle);
+    expect(h2).toBe(previewHandle);
+    // adapter.startPreview は 1 回だけ呼ばれる
+    expect(startSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("並行 startRecording は in-flight Promise を共有", async () => {
+    let resolveStart: (h: RecordingHandle) => void = () => {};
+    const startPromise = new Promise<RecordingHandle>((res) => {
+      resolveStart = res;
+    });
+    const startSpy = vi.fn(async () => startPromise);
+    const adapter = makeAdapter({ startRecording: startSpy });
+    const manager = createCameraManager(adapter);
+    await manager.startPreview();
+    // 並行 2 回
+    const p1 = manager.startRecording();
+    const p2 = manager.startRecording();
+    expect(p1).toBe(p2);
+    resolveStart(recordingHandle);
+    const [s1, s2] = await Promise.all([p1, p2]);
+    // session オブジェクト自体は同一参照（同 Promise が解決した値）
+    expect(s1).toBe(s2);
+    expect(startSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("並行 startScanning は in-flight Promise を共有", async () => {
+    // adapter.scanBarcode を resolver 制御
+    const unsub = vi.fn();
+    let resolveScan: (fn: () => void) => void = () => {};
+    const scanPromise = new Promise<() => void>((res) => {
+      resolveScan = res;
+    });
+    const scanSpy = vi.fn(async () => scanPromise);
+    const adapter = makeAdapter({ scanBarcode: scanSpy });
+    const manager = createCameraManager(adapter);
+    await manager.startPreview();
+    const p1 = manager.startScanning({ formats: ["qr_code"] }, () => {});
+    const p2 = manager.startScanning({ formats: ["qr_code"] }, () => {});
+    expect(p1).toBe(p2);
+    resolveScan(unsub);
+    const [u1, u2] = await Promise.all([p1, p2]);
+    expect(u1).toBe(u2);
+    expect(scanSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("startScanning の race 解放時に unsubscribe が throw しても CameraNotReadyError", async () => {
     // unsubscribe が throw
     const unsub = vi.fn(() => {

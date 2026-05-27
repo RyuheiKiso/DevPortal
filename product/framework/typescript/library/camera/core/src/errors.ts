@@ -2,7 +2,8 @@
 import type { PermissionDescriptor } from "./types.js";
 
 // CameraError の共通フィールドを抽出した抽象基底
-abstract class BaseCameraError extends Error {
+// instanceof 判定で type predicate に使うため export する（runAdapter 内の duck typing を厳密化する用途）
+export abstract class BaseCameraError extends Error {
   // ドメイン固有のエラーコード（"PERMISSION_DENIED" など）
   abstract readonly code: string;
   // 再試行可能フラグ（UI で再実行ボタンを出す判断材料）

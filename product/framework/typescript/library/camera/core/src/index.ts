@@ -34,6 +34,7 @@ export { isBlobMedia, isDataUrlMedia, isFilePathMedia } from "./media.js";
 
 // エラー群
 export {
+  BaseCameraError,
   CameraError,
   CameraNotReadyError,
   PermissionDeniedError,

@@ -103,6 +103,9 @@ export function createExpoCameraAdapter(options: ExpoCameraAdapterOptions): Came
   let pendingRecordingResult: { uri: string } | undefined;
   let pendingRecordingError: unknown | undefined;
   let recordingStartedAt: number | undefined;
+  // 現在の録画セッションを識別するトークン（startRecording 毎に更新、dispose で undefined）
+  // 旧セッションの recordAsync の .then closure が遅延 resolve しても、トークン不一致で silent drop
+  let currentRecordingSessionId: string | undefined;
 
   // ref 取得（無ければ throw）
   function requireRef(): ExpoCameraRef {
@@ -212,6 +215,10 @@ export function createExpoCameraAdapter(options: ExpoCameraAdapterOptions): Came
       // これを忘れると新セッションの stopRecording が古い録画結果を返してしまう
       pendingRecordingResult = undefined;
       pendingRecordingError = undefined;
+      // 新セッションの識別トークンを発行し currentRecordingSessionId に登録
+      // 旧セッションの .then closure はこの id を捕捉し、currentRecordingSessionId と一致しなければ silent drop
+      const sessionId = id;
+      currentRecordingSessionId = sessionId;
       recordingStartedAt = now();
       // recordAsync は録画完了で resolve する Promise を返す
       // resolve / reject 両方を捕捉し、stopRecording が後で来た場合に備えて pending にも保存
@@ -221,6 +228,10 @@ export function createExpoCameraAdapter(options: ExpoCameraAdapterOptions): Came
           maxFileSize: opts?.maxFileSizeBytes,
         })
         .then((result) => {
+          // 旧セッションの closure が遅延 resolve したら無視（新セッションの pending を汚染しない）
+          if (sessionId !== currentRecordingSessionId) {
+            return;
+          }
           // stopRecording 既存時はその場で resolve
           if (recordingResolve !== null) {
             recordingResolve(result);
@@ -232,12 +243,19 @@ export function createExpoCameraAdapter(options: ExpoCameraAdapterOptions): Came
           }
         })
         .catch((err) => {
+          // 旧セッションの遅延 reject も無視
+          if (sessionId !== currentRecordingSessionId) {
+            return;
+          }
+          // native の素エラーを RecordingError("RECORDER_ERROR") にラップして
+          // webAdapter / runAdapter / event 化と整合させる
+          const wrapped = new RecordingError("RECORDER_ERROR", { cause: err });
           if (recordingReject !== null) {
-            recordingReject(err);
+            recordingReject(wrapped);
             recordingResolve = null;
             recordingReject = null;
           } else {
-            pendingRecordingError = err;
+            pendingRecordingError = wrapped;
           }
         });
       return {
@@ -398,6 +416,8 @@ export function createExpoCameraAdapter(options: ExpoCameraAdapterOptions): Came
       // pending も明示的にクリアして次セッションへの混入を完全に断つ
       pendingRecordingResult = undefined;
       pendingRecordingError = undefined;
+      // セッショントークンを undefined にすることで、dispose 後の callback も silent drop される
+      currentRecordingSessionId = undefined;
     },
   };
 }

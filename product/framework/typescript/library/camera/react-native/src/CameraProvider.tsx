@@ -1,5 +1,5 @@
 // React の hook と型
-import { useEffect, useRef, type ReactElement, type ReactNode } from "react";
+import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 // core
 import {
   createCameraManager,
@@ -30,31 +30,36 @@ export type CameraProviderProps =
     };
 
 // React Native 用 CameraProvider
+// useState 初期化関数で manager を 1 度だけ生成し、useEffect は dispose のみを担当する
 export function CameraProvider(props: CameraProviderProps): ReactElement {
-  // 外部 manager
+  // 外部 manager（明示指定の優先）
   const externalManager = props.manager;
-  // 内部 manager の保持先
-  const internalManagerRef = useRef<CameraManager | null>(null);
-
-  // 内部 manager 未生成かつ外部 manager 無しなら生成
-  if (externalManager === undefined && internalManagerRef.current === null) {
-    // adapter は必須型のため確実に存在する
-    internalManagerRef.current = createCameraManager(props.adapter, props.config);
-  }
+  // adapter / config を初期化関数のクロージャで読むため変数化
+  const adapterProp = externalManager === undefined ? props.adapter : undefined;
+  const configProp = externalManager === undefined ? props.config : undefined;
+  // 内部 manager を useState 初期化関数で生成
+  const [internalManager] = useState<CameraManager | null>(() => {
+    // 外部 manager 指定時は内部生成しない
+    if (externalManager !== undefined) {
+      return null;
+    }
+    // React Native では adapter 必須型（プロップ型で保証されているが安全側にガード）
+    if (adapterProp === undefined) {
+      return null;
+    }
+    return createCameraManager(adapterProp, configProp);
+  });
 
   // unmount で dispose
   useEffect(() => {
     return () => {
-      const m = internalManagerRef.current;
-      internalManagerRef.current = null;
-      if (m !== null) {
-        void m.dispose();
+      if (internalManager !== null) {
+        void internalManager.dispose();
       }
     };
-  }, []);
+  }, [internalManager]);
 
-  // useMemo を使うと strict mode の double mount で古い dispose 済み manager を返す可能性があるため
-  // 毎 render で ref から直接 value を取得する
-  const value: CameraManager | null = externalManager ?? internalManagerRef.current;
+  // 外部 manager 優先、無ければ内部 manager
+  const value: CameraManager | null = externalManager ?? internalManager;
   return <CameraContext.Provider value={value}>{props.children}</CameraContext.Provider>;
 }

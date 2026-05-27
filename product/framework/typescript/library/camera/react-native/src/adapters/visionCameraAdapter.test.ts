@@ -316,7 +316,7 @@ describe("createVisionCameraAdapter", () => {
     expect(result.media).toMatchObject({ kind: "filePath", path: "/tmp/auto.mp4" });
   });
 
-  it("stopRecording 前に onRecordingError が発火した場合は pending error を投げる", async () => {
+  it("stopRecording 前に onRecordingError が発火すると RecordingError(RECORDER_ERROR) でラップされて pending throw", async () => {
     let errorCb: ((err: unknown) => void) | undefined;
     const ref = makeRef({
       startRecording: vi.fn((opts: { onRecordingError: typeof errorCb }) => {
@@ -333,8 +333,11 @@ describe("createVisionCameraAdapter", () => {
     const err = new Error("device fail");
     errorCb?.(err);
     await new Promise((r) => setTimeout(r, 0));
-    // 後続 stopRecording は pending error を投げる
-    await expect(adapter.stopRecording(rec)).rejects.toBe(err);
+    // 後続 stopRecording は RecordingError(RECORDER_ERROR) を投げる（cause に元の err が入る）
+    await expect(adapter.stopRecording(rec)).rejects.toMatchObject({
+      reason: "RECORDER_ERROR",
+      cause: err,
+    });
   });
 
   it("自然完了で pending に残った結果は次の startRecording で確実にクリアされる", async () => {
@@ -363,6 +366,84 @@ describe("createVisionCameraAdapter", () => {
     // stopRecording は新 URI を返す（旧 URI が混入しない）
     const result = await adapter.stopRecording(rec2);
     expect(result.media).toMatchObject({ kind: "filePath", path: "/tmp/new.mp4" });
+  });
+
+  it("旧セッションの onRecordingFinished が新セッション後に発火しても silent drop される", async () => {
+    // 1 回目と 2 回目の callback を別保持
+    const finishedCbs: Array<(v: { path: string; duration: number }) => void> = [];
+    const ref = makeRef({
+      startRecording: vi.fn((opts: { onRecordingFinished: (v: { path: string; duration: number }) => void }) => {
+        finishedCbs.push(opts.onRecordingFinished);
+      }),
+    });
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => ref,
+    });
+    const h = await adapter.startPreview({});
+    // session A
+    await adapter.startRecording(h);
+    // session B（sessionId 更新、pending クリア）
+    const recB = await adapter.startRecording(h);
+    // session A の遅延 finished → silent drop
+    finishedCbs[0]?.({ path: "/tmp/A.mp4", duration: 1 });
+    // session B の finished
+    finishedCbs[1]?.({ path: "/tmp/B.mp4", duration: 2 });
+    await new Promise((r) => setTimeout(r, 0));
+    // stopRecording は B の URI を返す
+    const result = await adapter.stopRecording(recB);
+    expect(result.media).toMatchObject({ kind: "filePath", path: "/tmp/B.mp4" });
+  });
+
+  it("旧セッションの onRecordingError が新セッション後に発火しても silent drop される", async () => {
+    const errorCbs: Array<(err: unknown) => void> = [];
+    const finishedCbs: Array<(v: { path: string; duration: number }) => void> = [];
+    const ref = makeRef({
+      startRecording: vi.fn(
+        (opts: {
+          onRecordingFinished: (v: { path: string; duration: number }) => void;
+          onRecordingError: (err: unknown) => void;
+        }) => {
+          finishedCbs.push(opts.onRecordingFinished);
+          errorCbs.push(opts.onRecordingError);
+        },
+      ),
+    });
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => ref,
+    });
+    const h = await adapter.startPreview({});
+    await adapter.startRecording(h);
+    const recB = await adapter.startRecording(h);
+    // session A の遅延 error → silent drop
+    errorCbs[0]?.(new Error("A failed"));
+    // session B の finished で正常完了
+    finishedCbs[1]?.({ path: "/tmp/B.mp4", duration: 2 });
+    await new Promise((r) => setTimeout(r, 0));
+    const result = await adapter.stopRecording(recB);
+    expect(result.media).toMatchObject({ kind: "filePath", path: "/tmp/B.mp4" });
+  });
+
+  it("dispose 後に旧セッションの callback が発火しても pending に書き込まれない", async () => {
+    let finishedCb: ((v: { path: string; duration: number }) => void) | undefined;
+    const ref = makeRef({
+      startRecording: vi.fn((opts: { onRecordingFinished: typeof finishedCb }) => {
+        finishedCb = opts.onRecordingFinished;
+      }),
+    });
+    const adapter = createVisionCameraAdapter({
+      library: makeLibrary(),
+      cameraRef: () => ref,
+    });
+    const h = await adapter.startPreview({});
+    await adapter.startRecording(h);
+    // dispose で sessionId が undefined になる
+    await adapter.dispose();
+    // 旧 callback の遅延発火 → silent drop（sessionId 不一致）
+    finishedCb?.({ path: "/tmp/disposed.mp4", duration: 1 });
+    await new Promise((r) => setTimeout(r, 0));
+    // dispose 後の adapter は再利用しない
   });
 
   it("dispose で pending result がクリアされる", async () => {

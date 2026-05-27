@@ -1,5 +1,5 @@
 // React の hook と型を取り込み
-import { useEffect, useRef, type ReactElement, type ReactNode } from "react";
+import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 // core から CameraManager 生成関数と関連型
 import {
   createCameraManager,
@@ -35,37 +35,36 @@ export type CameraProviderProps =
     };
 
 // CameraProvider 本体
+// 初回 render で即 manager を利用できるよう useState 初期化関数で生成し、
+// useEffect では dispose だけを担当する（render 中の ref 代入を避け Concurrent と整合）
 export function CameraProvider(props: CameraProviderProps): ReactElement {
   // 外部 manager（明示指定の優先）
   const externalManager = props.manager;
-  // 内部 manager の保持先（マウント時に生成、unmount で dispose）
-  const internalManagerRef = useRef<CameraManager | null>(null);
-
-  // 外部 manager が無く、内部 manager 未生成なら生成する
-  if (externalManager === undefined && internalManagerRef.current === null) {
+  // adapter / config を初期化関数のクロージャで読むため変数化
+  const adapterProp = externalManager === undefined ? props.adapter : undefined;
+  const configProp = externalManager === undefined ? props.config : undefined;
+  // 内部 manager を useState 初期化関数で 1 度だけ生成する（StrictMode の double-invoke は dev only）
+  const [internalManager] = useState<CameraManager | null>(() => {
+    // 外部 manager 指定時は内部生成しない
+    if (externalManager !== undefined) {
+      return null;
+    }
     // adapter 未指定なら createWebAdapter を使う
-    const adapter = props.adapter ?? createWebAdapter();
-    internalManagerRef.current = createCameraManager(adapter, props.config);
-  }
+    const adapter = adapterProp ?? createWebAdapter();
+    return createCameraManager(adapter, configProp);
+  });
 
-  // unmount で内部 manager を dispose
+  // unmount で内部 manager を dispose（外部 manager は呼出側責務）
   useEffect(() => {
     return () => {
-      // 内部 manager があれば dispose（adapter も内部で dispose される）
-      const m = internalManagerRef.current;
-      // null クリアは先に行い、二重 dispose を防ぐ
-      internalManagerRef.current = null;
-      if (m !== null) {
-        // 非同期だが await はしない（unmount は同期）
-        void m.dispose();
+      if (internalManager !== null) {
+        void internalManager.dispose();
       }
     };
-  }, []);
+  }, [internalManager]);
 
-  // Context value は毎 render で ref から直接取得する
-  // useMemo を使うと strict mode の double mount で再生成された manager がキャッシュに遅れて反映され
-  // 古い dispose 済み manager を返してしまうリスクがあるため、メモ化を諦めて常に最新の ref を読む
-  const value: CameraManager | null = externalManager ?? internalManagerRef.current;
+  // Context value は外部 manager 優先、無ければ内部 manager
+  const value: CameraManager | null = externalManager ?? internalManager;
   // Provider を返す
   return <CameraContext.Provider value={value}>{props.children}</CameraContext.Provider>;
 }

@@ -254,6 +254,47 @@ describe("useZoom (RN)", () => {
     expect(captured?.zoom).toBe(1);
   });
 
+  it("preview 切替時に range が未取得なら zoom は 1 に fallback", async () => {
+    // getCapabilities を永遠に保留
+    const manager = makeManager({
+      getCapabilities: vi.fn(() => new Promise<CameraCapabilities>(() => {})),
+    });
+    let captured: ReturnType<typeof useZoom> | undefined;
+    function P() {
+      captured = useZoom();
+      return null;
+    }
+    act(() => {
+      TestRenderer.create(
+        <CameraProvider manager={manager}>
+          <P />
+        </CameraProvider>,
+      );
+    });
+    act(() => {
+      (manager as { __emit?: (e: CameraEvent) => void }).__emit?.({
+        type: "preview-start",
+        handle: { __brand: "PreviewHandle", id: "p-a", native: null },
+        at: 0,
+      });
+    });
+    await flush();
+    await act(async () => {
+      await captured?.set(4);
+    });
+    expect(captured?.zoom).toBe(4);
+    // 別ハンドル ID（range は依然 undefined）
+    act(() => {
+      (manager as { __emit?: (e: CameraEvent) => void }).__emit?.({
+        type: "preview-start",
+        handle: { __brand: "PreviewHandle", id: "p-b", native: null },
+        at: 1,
+      });
+    });
+    await flush();
+    expect(captured?.zoom).toBe(1);
+  });
+
   it("別 preview ハンドル ID に切り替わったら zoom が新 range.min へリセット", async () => {
     const capsA = { ...zoomSupportedCaps, zoom: { min: 1, max: 5 } };
     const capsB = { ...zoomSupportedCaps, zoom: { min: 2, max: 10 } };

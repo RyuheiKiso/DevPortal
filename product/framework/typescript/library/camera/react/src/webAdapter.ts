@@ -152,6 +152,10 @@ interface RecordingNative {
   // 自動停止（maxDurationMs / maxFileSizeBytes）で onstop が先行したとき、
   // ユーザの stopRecording 呼出を待たずに保持する pending 結果
   pendingResult?: RecordingResult;
+  // recorder.onerror が stopRecording 呼出前に発火したときに保持する error
+  pendingError?: Error;
+  // 自動停止が既に要求済みかどうか（durationTimer と maxFileSizeBytes の二重発火防止）
+  autoStopRequested?: boolean;
 }
 
 // 内部 state（adapter インスタンス間で共有しない、createWebAdapter ごとに独立）
@@ -501,6 +505,7 @@ export function createWebAdapter(options: WebAdapterOptions = {}): CameraAdapter
 
   // 一時 video 要素を作る（target 未指定の takePicture 用）
   // metadata（videoWidth/Height）が反映されるよう play + loadedmetadata 待機までを一括で行う
+  // loadedmetadata が永遠に発火しない環境向けに 2 秒の timeout を設けて hang を回避する
   async function createOffscreenVideo(stream: MediaStreamLike): Promise<HTMLVideoElement> {
     // document の存在チェック（テスト環境で破棄され得るため）
     const document = (globalThis as { document?: Document }).document;
@@ -520,20 +525,40 @@ export function createWebAdapter(options: WebAdapterOptions = {}): CameraAdapter
     } catch {
       // play 失敗は致命ではない（後続の drawImage で 0px のリスクは残る）
     }
-    // readyState が読めない mock 環境では 1 を返したとみなして待機をスキップ
-    const readyState = (v as unknown as { readyState?: number }).readyState ?? 1;
-    // HAVE_METADATA (=1) 未満なら loadedmetadata イベントを 1 度だけ待つ
+    // readyState が読めない mock 環境では「既に metadata あり」とみなして待機スキップ
+    // 注: `??` だと readyState===0（HAVE_NOTHING）まで吸ってしまうため、`in` で存在判定する
+    const readyState =
+      typeof v === "object" && v !== null && "readyState" in v
+        ? (v as { readyState: number }).readyState
+        : 1;
+    // HAVE_METADATA (=1) 未満なら loadedmetadata イベントを 1 度だけ待つ（2 秒 timeout 付き）
     if (readyState < 1) {
+      // metadata 用 listener と timeout の両方が同じ Promise を resolve する
+      // Promise の resolve は 2 度目以降は no-op になるため重複呼出を気にしない
+      let metaListener: (() => void) | undefined;
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
       await new Promise<void>((resolve) => {
-        // 1 度発火したら listener を外して resolve
-        const onMeta = (): void => {
-          (v as unknown as { removeEventListener?: (e: string, cb: () => void) => void })
-            .removeEventListener?.("loadedmetadata", onMeta);
+        // listener / timer の resolve は冪等（Promise.resolve 2 度目は無視）
+        metaListener = resolve;
+        timeoutHandle = setTimeout(resolve, 2000);
+        const addListener = (v as unknown as {
+          addEventListener?: (e: string, cb: () => void) => void;
+        }).addEventListener;
+        if (typeof addListener === "function") {
+          addListener.call(v, "loadedmetadata", metaListener);
+        } else {
+          // listener API 未提供：metadata 取得は諦め即時 resolve
           resolve();
-        };
-        (v as unknown as { addEventListener?: (e: string, cb: () => void) => void })
-          .addEventListener?.("loadedmetadata", onMeta);
+        }
       });
+      // 必ず timer と listener を片付ける
+      clearTimeout(timeoutHandle);
+      const removeListener = (v as unknown as {
+        removeEventListener?: (e: string, cb: () => void) => void;
+      }).removeEventListener;
+      if (typeof removeListener === "function" && metaListener !== undefined) {
+        removeListener.call(v, "loadedmetadata", metaListener);
+      }
     }
     return v;
   }
@@ -586,16 +611,23 @@ export function createWebAdapter(options: WebAdapterOptions = {}): CameraAdapter
     let totalBytes = 0;
     // maxDurationMs 監視用のタイマー
     let durationTimer: ReturnType<typeof setTimeout> | undefined;
+    // 自動停止を冪等に行うヘルパ：autoStopRequested フラグで二重要求を防ぐ
+    // recorder が既に inactive のときは内部の try/catch で InvalidStateError を握りつぶす
+    const requestAutoStop = (): void => {
+      // 既に自動停止を要求している（または明示 stop 済み）なら何もしない
+      if (recordingNative.autoStopRequested === true) {
+        return;
+      }
+      recordingNative.autoStopRequested = true;
+      try {
+        recorder.stop();
+      } catch {
+        // 停止失敗は無視（既に inactive のケース含む）
+      }
+    };
     // maxDurationMs が指定されているなら setTimeout で自動停止を仕掛ける
     if (rOptions.maxDurationMs !== undefined) {
-      durationTimer = setTimeout(() => {
-        // recorder.stop を best-effort で呼ぶ（既に停止していれば throw する実装もあるため try）
-        try {
-          recorder.stop();
-        } catch {
-          // 停止失敗は無視（stopRecording 経路で改めて拾われる）
-        }
-      }, rOptions.maxDurationMs);
+      durationTimer = setTimeout(requestAutoStop, rOptions.maxDurationMs);
     }
     // ondataavailable で chunks へ
     recorder.ondataavailable = (event) => {
@@ -605,16 +637,12 @@ export function createWebAdapter(options: WebAdapterOptions = {}): CameraAdapter
         recordingNative.chunks.push(event.data);
         // 累積バイトを更新
         totalBytes += event.data.size;
-        // maxFileSizeBytes 超過なら自動停止
+        // maxFileSizeBytes 超過なら自動停止（autoStopRequested 経由で 1 度だけ）
         if (
           rOptions.maxFileSizeBytes !== undefined &&
           totalBytes >= rOptions.maxFileSizeBytes
         ) {
-          try {
-            recorder.stop();
-          } catch {
-            // 停止失敗は無視
-          }
+          requestAutoStop();
         }
       }
     };
@@ -642,13 +670,19 @@ export function createWebAdapter(options: WebAdapterOptions = {}): CameraAdapter
         recordingNative.pendingResult = result;
       }
     };
-    // onerror で reject（stop 前に onerror が発火するケースは実環境では極稀だが防御的に許容）
+    // onerror で reject（stop 前 / 後どちらでも対応：stopReject があれば即 reject、無ければ pendingError）
     recorder.onerror = (event) => {
-      /* v8 ignore next */
+      // RECORDER_ERROR にラップした例外を生成（cause を保持）
+      const err = new RecordingError("RECORDER_ERROR", {
+        cause: event,
+        message: "MediaRecorder error",
+      });
       if (recordingNative.stopReject !== null) {
-        recordingNative.stopReject(
-          new RecordingError("RECORDER_ERROR", { cause: event, message: "MediaRecorder error" }),
-        );
+        // 待機中なら即時 reject
+        recordingNative.stopReject(err);
+      } else {
+        // stopRecording 前ならば後の stopRecording 経路で消費されるよう pendingError に積む
+        recordingNative.pendingError = err;
       }
     };
     // maxFileSizeBytes / maxDurationMs を監視する場合は chunked 配信のため timeslice を指定
@@ -678,16 +712,28 @@ export function createWebAdapter(options: WebAdapterOptions = {}): CameraAdapter
     const native = state.recording.native;
     // 取り出して state クリア（onstop が後発でも参照は持たせる）
     state.recording = undefined;
+    // pendingError（onerror が stop 前に発火）があれば消費して throw
+    if (native.pendingError !== undefined) {
+      const pendingErr = native.pendingError;
+      native.pendingError = undefined;
+      throw pendingErr;
+    }
     // 自動停止で pendingResult が既に積まれていれば即時返却する
     if (native.pendingResult !== undefined) {
       const pending = native.pendingResult;
       native.pendingResult = undefined;
       return { ...pending, id: recording.id };
     }
-    // Promise を仕込んでから stop を呼ぶ
+    // Promise を仕込んでから stop を呼ぶ（recorder.state==='inactive' なら stop はスキップ）
     const result = await new Promise<RecordingResult>((resolve, reject) => {
       native.stopResolve = resolve;
       native.stopReject = reject;
+      // 既に inactive ならば何もしない（onstop は後発で発火する前提、無ければ別経路）
+      if (native.recorder.state === "inactive") {
+        // 直前で autoStop が走り onstop が microtask キューに積まれているケース
+        // ここでは何もせず、onstop の到達を待つ
+        return;
+      }
       // stop を呼ぶ
       try {
         native.recorder.stop();

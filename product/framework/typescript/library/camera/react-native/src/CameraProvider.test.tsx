@@ -114,6 +114,21 @@ describe("CameraProvider (react-native)", () => {
     }).toThrow(/must be called inside/);
   });
 
+  it("adapter / manager 両方 undefined の defensive fallback でも internalManager は null（useCamera は throw）", () => {
+    // 型上は到達しない不正 props を unsafe cast で踏ませる（defensive 分岐のカバレッジ用）
+    type ForceInvalid = unknown;
+    expect(() => {
+      act(() => {
+        TestRenderer.create(
+          // 型を欺いて adapter なし / manager なしを渡す
+          (<CameraProvider {...({} as ForceInvalid as { adapter: CameraAdapter; children: ReactNode })}>
+            <Probe onValue={() => {}} />
+          </CameraProvider>) as unknown as JSX.Element,
+        );
+      });
+    }).toThrow(/must be called inside/);
+  });
+
   it("mount → unmount → 再 mount で毎回有効な manager を返す（strict mode 相当）", async () => {
     const adapter1 = makeAdapter();
     const adapter2 = makeAdapter();

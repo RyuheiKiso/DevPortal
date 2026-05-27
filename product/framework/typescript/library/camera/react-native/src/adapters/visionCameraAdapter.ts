@@ -156,6 +156,10 @@ export function createVisionCameraAdapter(options: VisionCameraAdapterOptions): 
   // 先行発火した場合の結果 / エラーを保留する pending 変数
   let pendingRecordingResult: { path: string; duration: number } | undefined;
   let pendingRecordingError: unknown | undefined;
+  // 現在の録画セッションを識別するトークン（startRecording 毎に更新、dispose で undefined）
+  // 旧セッションの onRecordingFinished / onRecordingError closure が遅延発火しても
+  // トークン不一致で silent drop される
+  let currentRecordingSessionId: string | undefined;
 
   // CameraRef を取得（無ければ throw）
   function requireRef(): VisionCameraRef {
@@ -272,10 +276,18 @@ export function createVisionCameraAdapter(options: VisionCameraAdapterOptions): 
       // 新セッションの stopRecording で誤って返るのを防ぐ）
       pendingRecordingResult = undefined;
       pendingRecordingError = undefined;
+      // 新セッションのトークンを発行し currentRecordingSessionId に登録
+      // 旧セッションの closure はこの id を捕捉し、不一致なら silent drop
+      const sessionId = id;
+      currentRecordingSessionId = sessionId;
       recordingStartedAt = now();
       // vision-camera の startRecording を呼び出し（コールバック方式）
       ref.startRecording({
         onRecordingFinished: (video) => {
+          // 旧セッションの遅延 callback は無視（cross-session pollution 防止）
+          if (sessionId !== currentRecordingSessionId) {
+            return;
+          }
           // 既に stopRecording が resolve を待っているなら即解決、無ければ pending に保留する
           if (recordingResolve !== null) {
             recordingResolve(video);
@@ -287,14 +299,21 @@ export function createVisionCameraAdapter(options: VisionCameraAdapterOptions): 
           }
         },
         onRecordingError: (err) => {
+          // 旧セッションの遅延 callback は無視
+          if (sessionId !== currentRecordingSessionId) {
+            return;
+          }
+          // native の素エラーを RecordingError("RECORDER_ERROR") にラップ
+          // webAdapter / runAdapter / event 化と整合させる
+          const wrapped = new RecordingError("RECORDER_ERROR", { cause: err });
           // 既に stopRecording が reject を待っているなら即拒否、無ければ pending に保留
           if (recordingReject !== null) {
-            recordingReject(err);
+            recordingReject(wrapped);
             recordingResolve = null;
             recordingReject = null;
           } else {
             // stopRecording 呼出前に error が来たケース
-            pendingRecordingError = err;
+            pendingRecordingError = wrapped;
           }
         },
         fileType: opts?.mimeType,
@@ -472,6 +491,8 @@ export function createVisionCameraAdapter(options: VisionCameraAdapterOptions): 
       // pending も明示的にクリアしてメモリを開放
       pendingRecordingResult = undefined;
       pendingRecordingError = undefined;
+      // セッショントークンを undefined にすることで、dispose 後の callback も silent drop
+      currentRecordingSessionId = undefined;
     },
   };
 }

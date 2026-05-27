@@ -58,11 +58,16 @@ export function useZoom(): UseZoomResult {
   const supported = range !== undefined;
 
   // 直近の preview ハンドル ID（ハンドルが入れ替わったときだけ userSetRef をリセットする判定用）
+  // useEffect 内で manager 切替時にリセットされるよう、effect 冒頭で初期化する
   const lastPreviewIdRef = useRef<string | undefined>(undefined);
 
   // preview-start のハンドル ID が前回と異なる場合だけ userSetRef をリセットする
   // 同一 preview の能力情報再取得などで preview-start が複数回飛んでも、ユーザの zoom 操作を温存する
+  // manager 切替時には lastPreviewIdRef も合わせてリセットし、新 manager の最初の preview-start で
+  // 不要なリセットが走らないようにする
   useEffect(() => {
+    // manager が変わったタイミングで直近 ID をクリア（前 manager の状態を引き継がない）
+    lastPreviewIdRef.current = undefined;
     // manager のイベント購読
     const unsub = manager.subscribe((event) => {
       // preview-start 以外は無視
@@ -72,22 +77,27 @@ export function useZoom(): UseZoomResult {
       // 初回 preview-start は ID を記録するだけ（reset しない）
       const prevId = lastPreviewIdRef.current;
       lastPreviewIdRef.current = event.handle.id;
-      // 別 preview に切り替わったタイミングでのみリセット
+      // 別 preview に切り替わったタイミングのみリセット。range の新値が分かっていれば
+      // 直接 range.min に同期し、未取得なら 1 を fallback とする
       if (prevId !== undefined && prevId !== event.handle.id) {
         userSetRef.current = false;
-        setZoomState(1);
+        // 新 preview の range が既知なら min、未取得なら 1 にフォールバック（nullish なら 1）
+        setZoomState(range?.min ?? 1);
       }
     });
     return unsub;
+    // range を deps に入れると毎回 subscribe をやり直すため、最新値は closure で読む
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manager]);
 
   // capabilities が更新されたら、ユーザが未操作なら zoom を range.min に同期する
   // ユーザ set 後は userSetRef が true のため何もしない（意志優先）
+  // dep は range.min（primitive）に絞り、参照同一性の差異で再実行しないようにする
   useEffect(() => {
     if (range !== undefined && !userSetRef.current) {
       setZoomState(range.min);
     }
-  }, [range]);
+  }, [range?.min]);
 
   return { zoom, set, range, supported, error };
 }
