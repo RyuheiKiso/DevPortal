@@ -121,9 +121,13 @@ const valid = validateLoggerConfig({
 - **`logger.flush()` と `logger.dispose()` は root logger でのみ有効**。`logger.child(...)` 経由で得られた派生 logger の `flush()` / `dispose()` は no-op（型は維持、内部で `isRoot` 判定）。共有 transports を子から不意に停止させないため。
 - **`flush()` / `dispose()` は失敗を伝える**。transport のいずれかが reject すると `AggregateError`（`errors` プロパティに個別エラー）として例外を投げます。`onTransportError` も並行して呼ばれます。
 - **`flush()` は進行中の非同期 write の完了を待ちます**。`logger.info(...); await logger.flush();` の順で書けば、storage 等の async transport の `write` が完走したことを保証します。
-- **`createStorageTransport` は内部キューで write を直列化**。並行 `logger.info(...)` で entry を取りこぼしません。`flush()` / `dispose()` は末尾までの完了を保証します。
-- **`createRemoteTransport`** は dispose 中に進行中の HTTP 送信を待ち、リトライバックオフ待機は即時中断します（初回送信は完了させ、リトライは打ち切り）。
-- **`createBatcher`** は `onFlush` が reject した場合、対象 items を buffer 先頭に戻して保持します（次回 flush でリトライ可能）。
+- **`entry.tags` と `entry.context` は『undefined または非空』に正規化される**（R8）。`createLogger({ tags: [] })` のように空配列で初期化しても、最終 entry では `tags: undefined` として transport に流れます（JSON 化時にフィールドが消える）。下流の serializer / schema 検証で「空配列」と「未設定」を分けたい場合は注意してください。
+- **`logger.child({ context: { key: undefined } })` で親の同名キーは消えません**（R9）。`undefined` 値は浅マージ時にフィルタされます。明示的な unset が必要なら別 API を検討してください。
+- **`createStorageTransport` は内部キューで write を直列化**。並行 `logger.info(...)` で entry を取りこぼしません。`flush()` / `dispose()` は末尾までの完了を保証し、直近の write エラーは `flush()` / `dispose()` から再 throw されます（R3）。
+- **`createStorageTransport` で配列でない既存値が見つかった場合**、既定では write を reject して既存値を温存します（旧スキーマ / 他ライブラリと衝突した値を破壊しない）。自動回復したい場合は `onCorruptedValue: "overwrite"` を指定してください（R4）。
+- **`createRemoteTransport`** は dispose 中に進行中の HTTP 送信を待ち、リトライバックオフ待機は即時中断します（初回送信は完了させ、リトライは打ち切り）。dispose 中に発生した一時失敗は `onDisposedDrop` で通知できます（R6、未指定なら静かに drop）。
+- **`onPermanentFailure` は `shouldRetry=false` 由来の永続失敗（4xx 等）のみを通知します**。dispose 中断由来の一時失敗は `onDisposedDrop` に分離されています（契約上の区別が必要な dead-letter 実装向け）。
+- **`createBatcher`** は `onFlush` が reject した場合、対象 items を buffer 先頭に戻し、`flushIntervalMs` 設定時は指数バックオフでタイマーを再起動します（R7、上限は `maxFlushIntervalMs`、既定は `flushIntervalMs * 32`）。dispose 後は `push` / `startTimer` が no-op になります（R2）。
 
 ## ビルド
 

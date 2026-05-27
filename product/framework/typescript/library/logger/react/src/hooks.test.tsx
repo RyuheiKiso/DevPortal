@@ -545,17 +545,13 @@ describe("useScopedLogger", () => {
   });
 
   // StrictMode 下で 2 回 render されても、child は 1 回しか呼ばれない（useRef ベースの memoize が機能している）
-  // (StrictMode は同一 commit 内で 2 回コンポーネント関数を呼ぶため、render 中の useRef mutation が壊れる典型ケース)
+  // (注意: react-test-renderer は ReactDOM の dev-mode StrictMode 二重描画を再現しないため、
+  //  このテスト単体では「memoize を完全に外した実装」でも合格しうる。下の R10 テストで明示的な再 render を扱う)
   it("StrictMode 配下でも child は 1 回だけ呼ばれる", async () => {
-    // ベース logger
     const logger = makeLogger();
-    // 戻り値の入れ物
     const ref: { current: Logger | undefined } = { current: undefined };
-    // 文字列 scope の Probe
     const Probe = makeProbe(ref, () => useScopedLogger("strict"));
-    // 描画（StrictMode で囲む）
     await act(async () => {
-      // 標準的な StrictMode 構造で hook を 2 回呼ばせる
       create(
         <React.StrictMode>
           <LoggerProvider logger={logger}>
@@ -564,7 +560,33 @@ describe("useScopedLogger", () => {
         </React.StrictMode>,
       );
     });
-    // StrictMode で 2 回 render されても child は 1 回しか呼ばれていない（memoize が効いている）
+    expect((logger.child as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+  });
+
+  // [R10] 明示的な update() による再 render で、bindings の参照が変わっても child が 1 回しか呼ばれないことを検証
+  // (StrictMode の偽陽性を補強し、内容比較 memoize の実装回帰を捕える)
+  it("renderer.update() で再 render しても content 比較 memoize で child は 1 回のみ", async () => {
+    const logger = makeLogger();
+    const ref: { current: Logger | undefined } = { current: undefined };
+    // 毎レンダで新規 bindings オブジェクト（内容は同一）を渡す Probe
+    const Probe = makeProbe(ref, () => useScopedLogger({ tags: ["stable"], context: { k: 1 } }));
+    let renderer: ReturnType<typeof create> | undefined;
+    await act(async () => {
+      renderer = create(
+        <LoggerProvider logger={logger}>
+          <Probe />
+        </LoggerProvider>,
+      );
+    });
+    // 強制的に再 render（呼び出し側は毎回新規 bindings を渡すが、内容は同じ）
+    await act(async () => {
+      renderer?.update(
+        <LoggerProvider logger={logger}>
+          <Probe />
+        </LoggerProvider>,
+      );
+    });
+    // 内容比較が効いていれば child は 1 回のみ
     expect((logger.child as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
   });
 

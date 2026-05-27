@@ -206,6 +206,62 @@ describe("createStorageTransport", () => {
     expect(parsed.map((e: LogEntry) => e.message)).toEqual(["a"]);
   });
 
+  // [R3] write が reject した後の flush() は同じエラーで reject する
+  it("write が reject すると後続の flush() で同じエラーが伝播する", async () => {
+    // 1 回目だけ失敗、後続は成功する adapter
+    let calls = 0;
+    const store: Record<string, string> = {};
+    const adapter: StorageAdapter = {
+      getItem: (k) => Promise.resolve(store[k] ?? null),
+      setItem: (k, v) =>
+        new Promise<void>((resolve, reject) => {
+          calls += 1;
+          if (calls === 1) {
+            reject(new Error("transient-io"));
+            return;
+          }
+          store[k] = v;
+          resolve();
+        }),
+      removeItem: () => Promise.resolve(),
+    };
+    const t = createStorageTransport({ storage: adapter });
+    // write の Promise は reject するが、await せずに次に進む（呼出側 safeWrite 経路を模倣）
+    const writePromise = t.write(entry("first"));
+    // write 自体は reject
+    await expect(writePromise).rejects.toThrow("transient-io");
+    // flush() を呼ぶと lastWriteError が再 throw される (R3)
+    await expect(t.flush()).rejects.toThrow("transient-io");
+    // 再度 flush しても今度は resolve する（lastWriteError はリセット済み）
+    await expect(t.flush()).resolves.toBeUndefined();
+  });
+
+  // [R3] write 失敗後の dispose() も同じエラーで reject する
+  it("write が reject すると後続の dispose() で同じエラーが伝播する", async () => {
+    const adapter: StorageAdapter = {
+      getItem: () => Promise.resolve(null),
+      setItem: () => Promise.reject(new Error("io-fail")),
+      removeItem: () => Promise.resolve(),
+    };
+    const t = createStorageTransport({ storage: adapter });
+    const writePromise = t.write(entry("x"));
+    await expect(writePromise).rejects.toThrow("io-fail");
+    await expect(t.dispose()).rejects.toThrow("io-fail");
+  });
+
+  // [R4] onCorruptedValue: "overwrite" 指定で配列でない既存値が新規 entry で上書きされる
+  it("onCorruptedValue: 'overwrite' で配列でない既存値が新規 entry に置き換えられる", async () => {
+    // 配列でない既存値を仕込む
+    const s = makeSyncStorage({ "k1s0-ts-logger:entries": "{}" });
+    const t = createStorageTransport({ storage: s, onCorruptedValue: "overwrite" });
+    // write は reject せず resolve する (overwrite モード)
+    await expect(t.write(entry("recovered"))).resolves.toBeUndefined();
+    // 既存値が [{message:"recovered",...}] で上書きされている
+    const parsed = JSON.parse(s.dump()["k1s0-ts-logger:entries"]!);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].message).toBe("recovered");
+  });
+
   // write が失敗しても後続の write は走る
   it("write が失敗しても後続の write は実行される", async () => {
     // 1 回目の setItem で失敗、それ以降は成功する adapter

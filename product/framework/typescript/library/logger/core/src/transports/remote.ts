@@ -31,6 +31,11 @@ export interface RemoteTransportOptions {
   // 旧実装は永続失敗時も items を batcher にリバッファし、4xx 等で「同じバッチを無限再送 → 全件失敗」
   // のループが起きていた。本オプションで観測可能性を担保しつつ、items はそのまま破棄する。
   onPermanentFailure?: (error: unknown, items: readonly LogEntry[]) => void;
+  // dispose 中の retryable 失敗 (リトライ wait の中断で sendBatch が lastError を投げたケース) で
+  // items を破棄する直前に通知する (R6)。
+  // onPermanentFailure は「shouldRetry=false 由来 (= 4xx 系の永続失敗)」のみを通知する契約を守るため、
+  // dispose 由来の drop は本コールバックで分離する。未設定なら静かに drop。
+  onDisposedDrop?: (error: unknown, items: readonly LogEntry[]) => void;
 }
 
 // 既定ヘッダ（Content-Type を明示）
@@ -213,6 +218,8 @@ export function createRemoteTransport(opts: RemoteTransportOptions): Transport {
 
   // 永続失敗通知コールバック (任意)
   const onPermanentFailure = opts.onPermanentFailure;
+  // dispose 由来 drop の通知コールバック (R6、任意)
+  const onDisposedDrop = opts.onDisposedDrop;
 
   // バッチ機構（onFlush で実際に送信する）
   const batcher = createBatcher<LogEntry>({
@@ -223,8 +230,14 @@ export function createRemoteTransport(opts: RemoteTransportOptions): Transport {
     // バッファが満ちる or インターバル発火で呼ばれる
     onFlush: async (items) => {
       // sending が残っている間は while で再評価しつつ待機（3+ 並列でも直列化を保証）
+      // 先行 sendBatch の reject は既に onFlush 自身の catch で処理済み (RemotePermanentFailure / disposed 分岐)。
+      // ここで catch せずに伝播させると、別 onFlush 経路に先行送信の例外が漏れて batcher.flushInternal を二重に reject させてしまう。
       while (sending !== null) {
-        await sending;
+        try {
+          await sending;
+        } catch {
+          // 先行 sending の失敗は別 onFlush の例外に巻き込まない（既に処理済み or 永続失敗）
+        }
       }
       // 送信 Promise を確定し、共有変数に保持（finally で sending=null に戻す）
       const promise = sendBatch(items);
@@ -253,12 +266,13 @@ export function createRemoteTransport(opts: RemoteTransportOptions): Transport {
         }
         // dispose 中の一時失敗 (リトライ wait の中断で sendBatch が lastError を投げたケース) は
         // batcher にリバッファしても dispose 完了でロスするだけなので、
-        // ここで onPermanentFailure に通知して観測可能にしてから破棄する
+        // ここで onDisposedDrop に通知して観測可能にしてから破棄する (R6)。
+        // onPermanentFailure とは契約を分離する ("shouldRetry=false 由来" のみが onPermanentFailure に来る)。
         if (disposed) {
-          // 観測コールバックがあれば通知 (callbackの中で例外が出ても無視)
-          if (onPermanentFailure !== undefined) {
+          // dispose 由来 drop の観測コールバックがあれば通知 (callback の中で例外が出ても無視)
+          if (onDisposedDrop !== undefined) {
             try {
-              onPermanentFailure(err, items);
+              onDisposedDrop(err, items);
             } catch {
               // 観測コールバックの例外は呼出側に影響させない
             }
@@ -284,10 +298,15 @@ export function createRemoteTransport(opts: RemoteTransportOptions): Transport {
     async flush() {
       // batcher の残バッファをまず flush（チェイン経由で新規の sendBatch が走る可能性あり）
       await batcher.flush();
-      // batcher.flush 後に進行中の sending があれば最後まで待つ
+      // batcher.flush 後に進行中の sending があれば最後まで待つ。
+      // sending の reject は onFlush 内で既に処理済み (RemotePermanentFailure → onPermanentFailure / disposed → onDisposedDrop)。
+      // ここで再観測すると、握りつぶしたはずの永続失敗が flush() の呼出側に伝播してしまうため try/catch する。
       while (sending !== null) {
-        // 失敗時の例外をここで再投げするのが目的のため try/catch せず await
-        await sending;
+        try {
+          await sending;
+        } catch {
+          // 先行 sending の失敗は flush() の呼出側に伝播させない
+        }
       }
     },
     // タイマー停止 + バックオフ中断 + 残バッファ送信

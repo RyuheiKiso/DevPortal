@@ -530,17 +530,13 @@ describe("useScopedLogger (react-native)", () => {
   });
 
   // StrictMode 下で 2 回 render されても、child は 1 回しか呼ばれない（useRef ベースの memoize が機能している）
-  // (StrictMode は同一 commit 内で 2 回コンポーネント関数を呼ぶため、render 中の useRef mutation が壊れる典型ケース)
+  // (注意: react-test-renderer は ReactDOM の dev-mode StrictMode 二重描画を再現しない。
+  //  実 memoize の動作検証は下の R10 テスト「renderer.update() で再 render しても...」を参照)
   it("StrictMode 配下でも child は 1 回だけ呼ばれる", async () => {
-    // ベース logger
     const logger = makeLogger();
-    // 戻り値の入れ物
     const ref: { current: Logger | undefined } = { current: undefined };
-    // 文字列 scope の Probe
     const Probe = makeProbe(ref, () => useScopedLogger("strict"));
-    // 描画（StrictMode で囲む）
     await act(async () => {
-      // StrictMode 配下で hook を 2 回呼ばせる
       create(
         <React.StrictMode>
           <LoggerProvider logger={logger}>
@@ -549,7 +545,30 @@ describe("useScopedLogger (react-native)", () => {
         </React.StrictMode>,
       );
     });
-    // StrictMode で 2 回 render されても child は 1 回しか呼ばれていない
+    expect((logger.child as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+  });
+
+  // [R10] 明示的な update() による再 render で、bindings の参照が変わっても child が 1 回のみ
+  it("renderer.update() で再 render しても content 比較 memoize で child は 1 回のみ", async () => {
+    const logger = makeLogger();
+    const ref: { current: Logger | undefined } = { current: undefined };
+    // 毎レンダで新規 bindings オブジェクト（内容は同一）を渡す Probe
+    const Probe = makeProbe(ref, () => useScopedLogger({ tags: ["stable"], context: { k: 1 } }));
+    let renderer: ReturnType<typeof create> | undefined;
+    await act(async () => {
+      renderer = create(
+        <LoggerProvider logger={logger}>
+          <Probe />
+        </LoggerProvider>,
+      );
+    });
+    await act(async () => {
+      renderer?.update(
+        <LoggerProvider logger={logger}>
+          <Probe />
+        </LoggerProvider>,
+      );
+    });
     expect((logger.child as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
   });
 

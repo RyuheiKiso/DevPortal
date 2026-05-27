@@ -390,53 +390,66 @@ describe("createLogger", () => {
     expect(t.entries[0]?.tags).toEqual(["a", "b", "c"]);
   });
 
-  // 親が空配列 tags を持ち、子が tags 未指定でも、entry.tags が空配列のまま維持される
-  // (旧実装は `parent.tags || child.tags` で `[]` が falsy 扱いされ undefined になっていた)
-  it("親 tags=[] / 子 tags 未指定でも entry.tags は空配列を維持する", () => {
-    // 記録 transport
+  // [R8] 親が空配列 tags を持ち、子が tags 未指定のとき、entry.tags は undefined に正規化される
+  // (mergeBindings 自体は空配列を保持するが、emit() 時に「undefined または非空」に倒すことで
+  //  下流の serializer (JSON.stringify, 旧版との互換性) を安定させる)
+  it("親 tags=[] / 子 tags 未指定の最終 entry.tags は undefined に正規化される (R8)", () => {
     const t = recordingTransport();
-    // 親で空配列 tags を明示的に指定
     const logger = createLogger({
-      // 環境
       env: "dev",
-      // 全レベル通す
       defaultMinLevel: "trace",
-      // 親は空配列 tags を持つ
       tags: [],
-      // transports
       transports: [t],
     });
-    // 子は tags を指定しない
     const child = logger.child({});
-    // ログ発行
     child.info("x");
-    // entry.tags が空配列のまま（undefined に倒れていない）であることを assert
-    expect(t.entries[0]?.tags).toEqual([]);
+    // 空配列は undefined に倒される
+    expect(t.entries[0]?.tags).toBeUndefined();
   });
 
-  // 親が空オブジェクト context を持ち、子が context 未指定でも、entry.context が空オブジェクトのまま維持される
-  // (旧実装は `parent.context || child.context` で `{}` が truthy なので問題なかったが、
-  //  上記 tags と挙動を揃えるため undefined チェックに統一されたことを確認)
-  it("親 context={} / 子 context 未指定でも entry.context は空オブジェクトを維持する", () => {
-    // 記録 transport
+  // [R8] 親が空オブジェクト context を持ち、子が context 未指定のとき、entry.context は undefined に正規化される
+  it("親 context={} / 子 context 未指定の最終 entry.context は undefined に正規化される (R8)", () => {
     const t = recordingTransport();
-    // 親で空 context を明示
     const logger = createLogger({
-      // 環境
       env: "dev",
-      // 全レベル通す
       defaultMinLevel: "trace",
-      // 親は空 context を持つ
       context: {},
-      // transports
       transports: [t],
     });
-    // 子は context を指定しない
     const child = logger.child({});
-    // ログ発行
     child.info("x");
-    // entry.context が空オブジェクトのまま（undefined に倒れていない）であることを assert
-    expect(t.entries[0]?.context).toEqual({});
+    expect(t.entries[0]?.context).toBeUndefined();
+  });
+
+  // [R9] child で `{ traceId: undefined }` を渡しても親の traceId が消えない
+  // (mergeBindings の浅マージで child の undefined キーが parent を上書きしないようフィルタしている)
+  it("child の context に undefined キーを渡しても parent.context の同名値は保持される (R9)", () => {
+    const t = recordingTransport();
+    const logger = createLogger({
+      env: "dev",
+      defaultMinLevel: "trace",
+      context: { traceId: "abc", userId: "u1" },
+      transports: [t],
+    });
+    // child で「traceId だけ unset しよう」とした意図的なケース（実際は unset されない仕様にする）
+    const child = logger.child({ context: { traceId: undefined } });
+    child.info("x");
+    // traceId は親の値が保持される
+    expect(t.entries[0]?.context).toEqual({ traceId: "abc", userId: "u1" });
+  });
+
+  // [R9] child の context に通常の値を渡せば parent の同名キーが上書きされる
+  it("child の context に通常値を渡すと parent の同名キーが上書きされる", () => {
+    const t = recordingTransport();
+    const logger = createLogger({
+      env: "dev",
+      defaultMinLevel: "trace",
+      context: { reqId: "r1" },
+      transports: [t],
+    });
+    const child = logger.child({ context: { reqId: "r2", extra: 1 } });
+    child.info("x");
+    expect(t.entries[0]?.context).toEqual({ reqId: "r2", extra: 1 });
   });
 
   // normalizeError: null と undefined

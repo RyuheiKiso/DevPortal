@@ -10,25 +10,37 @@ export interface GlobalHandlersOptions {
 // アクティブハンドル管理（HMR / 重複呼び出しでの listener 増殖を防ぐ）
 // 旧実装はモジュールスコープの WeakMap を使っていたが、HMR でモジュールが再評価されると
 // WeakMap も新規になって前回の uninstall を引けず、結果として window 上にリスナが二重登録されていた。
-// 対策として、HMR を跨いでも保持される window スコープに固定キー（Symbol.for で grobal Symbol registry を経由）で WeakMap を保管する。
+// 対策として、HMR を跨いでも保持される window スコープに固定キー（Symbol.for で global Symbol registry を経由）で WeakMap を保管する。
 const ACTIVE_UNINSTALL_KEY = Symbol.for("@k1s0-ts-logger/react:activeUninstalls");
 // アクティブ解除関数を保持する WeakMap の型
 type ActiveUninstallMap = WeakMap<Logger, () => void>;
+// window への代入失敗時に使うモジュールスコープのフォールバック (R5)
+// Object.freeze(window) / SES Lockdown など window への書き込みが拒否される環境向けの安全網。
+let moduleFallbackMap: ActiveUninstallMap | null = null;
 // window 上の固定 Symbol キーから WeakMap を取り出し、無ければ生成して保管する
 function getActiveUninstallMap(): ActiveUninstallMap {
-  // 動的アクセスのため Record 型でキャスト
-  const target = window as unknown as Record<symbol, ActiveUninstallMap | undefined>;
-  // 既存があれば返す
-  const existing = target[ACTIVE_UNINSTALL_KEY];
-  // 既にあるならそれを返す
-  if (existing !== undefined) {
-    return existing;
+  try {
+    // 動的アクセスのため Record 型でキャスト
+    const target = window as unknown as Record<symbol, unknown>;
+    // 既存値を取得
+    const existing = target[ACTIVE_UNINSTALL_KEY];
+    // WeakMap でなければ第三者が同キーを誤用している可能性 → 上書きせず fallback に倒す (S6)
+    if (existing instanceof WeakMap) {
+      return existing as ActiveUninstallMap;
+    }
+    // 無ければ生成して保管
+    const created: ActiveUninstallMap = new WeakMap();
+    target[ACTIVE_UNINSTALL_KEY] = created;
+    // 生成したものを返す
+    return created;
+  } catch {
+    // frozen window / SES Lockdown 等で代入が TypeError になる環境では、
+    // モジュールスコープにフォールバックして install 自体を成功させる
+    if (moduleFallbackMap === null) {
+      moduleFallbackMap = new WeakMap();
+    }
+    return moduleFallbackMap;
   }
-  // 無ければ生成して保管
-  const created: ActiveUninstallMap = new WeakMap();
-  target[ACTIVE_UNINSTALL_KEY] = created;
-  // 生成したものを返す
-  return created;
 }
 
 // window.onerror / unhandledrejection を Logger に流すユーティリティ

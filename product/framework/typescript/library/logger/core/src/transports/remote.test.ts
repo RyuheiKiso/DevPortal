@@ -269,7 +269,7 @@ describe("createRemoteTransport", () => {
   // リトライ上限到達で reject
   it("maxRetries 到達後に flush が reject する", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => ({ ok: false, status: 500 } as unknown as Response));
-    // タイマーは即時発火
+    // タイマーは即時発火（fake timer）
     const { timer, runAll } = makeFakeTimer();
     const t = createRemoteTransport({
       endpoint: "http://x",
@@ -283,11 +283,13 @@ describe("createRemoteTransport", () => {
     t.write(entry("a"));
     // 明示 flush を発火させる
     const flushed = t.flush();
-    // 各 fetch 呼び出しと待機を順に進める
-    for (let i = 0; i < 5; i++) {
-      await flushMicrotasks();
-      runAll();
-    }
+    // 初回 fetch を解決 → wait → 2 回目 fetch を解決 → wait → 3 回目 fetch を解決 (maxRetries 到達で throw)
+    // R7 でバックオフタイマーが catch 後に立つが、ここでは明示的に runAll せず発火させない（fetch 回数の安定確認のため）
+    await flushMicrotasks();
+    runAll();
+    await flushMicrotasks();
+    runAll();
+    await flushMicrotasks();
     await expect(flushed).rejects.toBeDefined();
     // 1 回目 + 2 回のリトライ = 計 3 回
     expect(fetchImpl).toHaveBeenCalledTimes(3);
@@ -531,98 +533,161 @@ describe("createRemoteTransport", () => {
   });
 
   // dispose 中にバックオフ wait が abort されて sendBatch が lastError を投げるケースで、
-  // items が onPermanentFailure に通知されてサイレントロスを回避できる
-  // (修正前は batcher が items をリバッファするだけで dispose 完了とともに破棄、利用者は観測不能だった)
-  it("dispose 中の一時失敗で items が onPermanentFailure に通知される", async () => {
+  // items が onDisposedDrop に通知されてサイレントロスを回避できる (R6)
+  // (旧実装は items をサイレントに破棄、または onPermanentFailure に流していたが、
+  //  shouldRetry=false 由来の永続失敗とは契約を分離するため、専用の onDisposedDrop を使う)
+  it("dispose 中の一時失敗で items が onDisposedDrop に通知される", async () => {
     // 常にネットワークエラーを投げる fetch（retryable 扱いで wait に入る）
     const fetchImpl = vi.fn<typeof fetch>(async () => {
-      // ネットワーク失敗を擬似的に発生させる
       throw new Error("net-down");
     });
-    // 永続失敗通知を観測する箱
-    const permanentFailures: Array<{ error: unknown; items: readonly unknown[] }> = [];
+    // dispose 由来 drop の通知を観測する箱
+    const disposedDrops: Array<{ error: unknown; items: readonly unknown[] }> = [];
     // バックオフが長くなるようにして、dispose で wait が中断されることを確実に再現する
     const t = createRemoteTransport({
-      // 送信先 URL
       endpoint: "http://x",
-      // モック fetch を注入
       fetchImpl,
-      // 1 件で即送信
       flushSize: 1,
-      // リトライ回数は多めに（dispose で打ち切られる側を踏む）
+      // リトライ回数は多めに (dispose で打ち切られる側を踏む)
       maxRetries: 5,
-      // バックオフ初期遅延は長め（タイマーは実時間 setTimeout を使うため）
+      // バックオフ初期遅延は長め (タイマーは実時間 setTimeout を使う前提)
       backoffBaseMs: 10000,
-      // ジッタを 0 に固定
       random: () => 0,
-      // 永続失敗の通知を受け取る
-      onPermanentFailure: (error, items) => {
-        // 通知を箱に積む
-        permanentFailures.push({ error, items });
+      // dispose 由来 drop の通知を受け取る
+      onDisposedDrop: (error, items) => {
+        disposedDrops.push({ error, items });
       },
     });
-    // 1 件 push → sendBatch が走り、1 回目の fetch reject → リトライ wait に入る
     t.write(entry("lost-on-dispose"));
     // 1 回目の fetch が呼ばれる猶予を与える
     await flushMicrotasks();
-    // この時点で fetch は 1 回呼ばれ、バックオフ wait に入っているはず
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    // dispose を起動 → 内部で disposed=true、wait abort、sendBatch が lastError throw、
-    // onFlush の catch で disposed 分岐に入って onPermanentFailure を呼ぶ
+    // dispose を起動 → wait abort → sendBatch が lastError throw → onFlush の disposed 分岐 → onDisposedDrop
     await expect(t.dispose()).resolves.toBeUndefined();
-    // 永続失敗通知が 1 件届いていること（items は失われずに利用者へ伝わる）
-    expect(permanentFailures).toHaveLength(1);
-    // 通知に含まれる items が 1 件（push した分）であること
-    expect(permanentFailures[0]?.items).toHaveLength(1);
-    // items の中身が push したエントリそのものであること
-    expect((permanentFailures[0]?.items[0] as LogEntry).message).toBe("lost-on-dispose");
+    expect(disposedDrops).toHaveLength(1);
+    expect(disposedDrops[0]?.items).toHaveLength(1);
+    expect((disposedDrops[0]?.items[0] as LogEntry).message).toBe("lost-on-dispose");
   });
 
-  // dispose 中の onPermanentFailure コールバックが throw しても dispose は正常終了する
-  // (catch でコールバック例外を握りつぶす分岐のカバレッジを担保)
-  it("dispose 中の onPermanentFailure コールバックが throw しても dispose は正常終了する", async () => {
-    // 常にネットワークエラーを返す fetch
+  // dispose 中の onDisposedDrop コールバックが throw しても dispose は正常終了する
+  it("dispose 中の onDisposedDrop コールバックが throw しても dispose は正常終了する", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => {
-      // 失敗を再現
       throw new Error("net-down");
     });
-    // 観測コールバックが例外を投げる構成
     const t = createRemoteTransport({
-      // 送信先 URL
       endpoint: "http://x",
-      // モック fetch を注入
       fetchImpl,
-      // 1 件で即送信
       flushSize: 1,
-      // リトライ余地を残す
       maxRetries: 5,
-      // バックオフは長め
       backoffBaseMs: 10000,
-      // ジッタを 0 に固定
       random: () => 0,
-      // 観測コールバックが throw する（修正後はこの catch がカバーされる必要がある）
-      onPermanentFailure: () => {
-        // 任意の例外を投げる
+      // 観測コールバックが throw する
+      onDisposedDrop: () => {
         throw new Error("callback exploded");
       },
     });
-    // 1 件 push
     t.write(entry("a"));
-    // 1 回目 fetch が走る猶予を与える
     await flushMicrotasks();
-    // dispose は正常終了する（コールバック例外が握りつぶされる）
+    // dispose は正常終了する (コールバック例外は飲み込まれる)
     await expect(t.dispose()).resolves.toBeUndefined();
   });
 
-  // dispose 中の一時失敗で onPermanentFailure が未設定でも dispose は正常終了する
-  // (通知先が無い場合は items を破棄して終わる)
-  it("dispose 中の一時失敗で onPermanentFailure 未設定でも dispose は正常終了する", async () => {
-    // 常にネットワークエラーを返す fetch
+  // dispose 中の一時失敗で onDisposedDrop が未設定でも dispose は正常終了する
+  it("dispose 中の一時失敗で onDisposedDrop 未設定でも dispose は正常終了する", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => {
-      // 失敗を再現
       throw new Error("net-down");
     });
-    // onPermanentFailure を渡さない構成
+    const t = createRemoteTransport({
+      endpoint: "http://x",
+      fetchImpl,
+      flushSize: 1,
+      maxRetries: 5,
+      backoffBaseMs: 10000,
+      random: () => 0,
+    });
+    t.write(entry("silent-drop"));
+    await flushMicrotasks();
+    // dispose は正常終了する (通知先無しでも throw しない)
+    await expect(t.dispose()).resolves.toBeUndefined();
+  });
+
+  // [R1] 先行 sendBatch が 4xx 永続失敗で reject 中に、続く flush() が呼ばれても resolve する
+  // (旧実装は while (sending !== null) await sending が try/catch なしで、onFlush で握りつぶされた永続失敗が flush() に再伝播していた)
+  it("先行 sendBatch が永続失敗で reject 中に flush() が呼ばれても resolve する", async () => {
+    // 4xx を返す fetch
+    const fetchImpl = vi.fn<typeof fetch>(async () => ({ ok: false, status: 400 } as unknown as Response));
+    // 永続失敗を観測
+    const permanentFailures: Array<{ error: unknown; items: readonly unknown[] }> = [];
+    const t = createRemoteTransport({
+      // 送信先
+      endpoint: "http://x",
+      // モック fetch
+      fetchImpl,
+      // 1 件で即送信
+      flushSize: 1,
+      // リトライ余地あり (どうせ 4xx で永続失敗扱い)
+      maxRetries: 3,
+      // ジッタ固定
+      random: () => 0,
+      // 永続失敗を観測する
+      onPermanentFailure: (error, items) => {
+        permanentFailures.push({ error, items });
+      },
+    });
+    // 1 件 push → sendBatch が動き、即 4xx 永続失敗で onFlush 内 return される
+    t.write(entry("permanent"));
+    // sending が立ち上がるまで待つ
+    await flushMicrotasks();
+    // flush() を呼ぶ → 旧実装は while (sending !== null) await sending で RemotePermanentFailure が再 throw
+    // 新実装は try/catch で握りつぶして resolve する
+    await expect(t.flush()).resolves.toBeUndefined();
+    // 永続失敗は 1 回観測される
+    expect(permanentFailures).toHaveLength(1);
+  });
+
+  // [R1] flush() の `while (sending !== null) await sending` で先行 sending が reject しても resolve する
+  // (L301 の catch ブロックのカバレッジを担保)
+  it("flush() 中に先行 sending が reject しても resolve する (retryable 上限到達経路)", async () => {
+    // 1 回目の fetch を pending のまま保持し、後から reject させる
+    let rejectFirst!: (e: unknown) => void;
+    const firstPromise = new Promise<Response>((_resolve, reject) => {
+      rejectFirst = reject;
+    });
+    const fetchImpl = vi.fn<typeof fetch>().mockReturnValueOnce(firstPromise);
+    const t = createRemoteTransport({
+      // 送信先
+      endpoint: "http://x",
+      // モック fetch
+      fetchImpl,
+      // 1 件で即送信
+      flushSize: 1,
+      // リトライ無し → 1 回失敗で即 throw (retryable 上限到達経路)
+      maxRetries: 0,
+    });
+    // 1 件 push → sendBatch が走り fetch が pending
+    t.write(entry("a"));
+    // sending が立ち上がるまで待つ
+    await flushMicrotasks();
+    // flush() を起動。batcher.flush は空 buffer で即 resolve、続く while で sending を await する
+    const flushPromise = t.flush();
+    // sending を reject させる (maxRetries=0 で 1 回失敗 → throw lastError)
+    rejectFirst(new Error("network"));
+    // flush() は L301 の catch で握りつぶされて resolve する
+    await expect(flushPromise).resolves.toBeUndefined();
+  });
+
+  // [R1] 並行 onFlush で先行 sendBatch が permanent 失敗しても、続く onFlush は throw しない
+  // (旧実装は while await sending で先行の reject が後続 onFlush に漏れ batcher.flushInternal を二重失敗にしていた)
+  it("並行 onFlush で先行 sendBatch が永続失敗しても続く onFlush は throw しない", async () => {
+    // 1 回目だけ 4xx、それ以降は 200 を返す fetch
+    let calls = 0;
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
+      calls += 1;
+      if (calls === 1) {
+        return { ok: false, status: 400 } as unknown as Response;
+      }
+      return { ok: true, status: 200 } as unknown as Response;
+    });
     const t = createRemoteTransport({
       // 送信先
       endpoint: "http://x",
@@ -631,17 +696,19 @@ describe("createRemoteTransport", () => {
       // 1 件で即送信
       flushSize: 1,
       // リトライ余地あり
-      maxRetries: 5,
-      // バックオフ長め
-      backoffBaseMs: 10000,
-      // ジッタ固定
-      random: () => 0,
+      maxRetries: 0,
+      // 永続失敗の通知は無視
+      onPermanentFailure: () => {},
     });
-    // 1 件 push
-    t.write(entry("silent-drop"));
-    // 1 回目 fetch が走る猶予
-    await flushMicrotasks();
-    // dispose は正常終了する（onPermanentFailure が無くても throw しない）
+    // 1 件目 push → 永続失敗
+    t.write(entry("first"));
+    // 2 件目 push → 別 onFlush で先行 sending を await する
+    t.write(entry("second"));
+    // 全部完了するまで microtask を進める
+    await flushMicrotasks(20);
+    // 2 回目の fetch (200) が走ったこと
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    // dispose() も throw しない (回帰確認)
     await expect(t.dispose()).resolves.toBeUndefined();
   });
 

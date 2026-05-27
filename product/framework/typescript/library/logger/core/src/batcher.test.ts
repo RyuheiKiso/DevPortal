@@ -207,6 +207,148 @@ describe("createBatcher", () => {
     expect(onFlush).toHaveBeenLastCalledWith([1, 2, 3]);
   });
 
+  // [R2] dispose 後の push は no-op
+  it("dispose 後の push は buffer に積まれない", async () => {
+    const onFlush = vi.fn();
+    const b = createBatcher<number>({ flushSize: 100, onFlush });
+    await b.dispose();
+    // dispose 後の push は無視される
+    b.push(1);
+    b.push(2);
+    expect(b.size()).toBe(0);
+    // onFlush も呼ばれない
+    expect(onFlush).not.toHaveBeenCalled();
+  });
+
+  // [R2] dispose 後は catch 内 startTimer が呼ばれず、タイマーリークしない
+  it("dispose 中の flushInternal 失敗でも startTimer は無効化されタイマーリークしない", async () => {
+    const fake = createFakeTimer();
+    // 失敗し続ける onFlush
+    const onFlush = vi.fn(async (_items: readonly number[]) => {
+      throw new Error("transient");
+    });
+    const b = createBatcher<number>({
+      flushSize: 100,
+      flushIntervalMs: 50,
+      onFlush,
+      timer: fake.timer,
+    });
+    b.push(1);
+    expect(fake.pending()).toBe(1);
+    // dispose() を呼ぶと clearTimer + flushInternal が走り、onFlush 失敗で reject される。
+    // catch 内 startTimer は disposed フラグで no-op となるためタイマーは残らない。
+    await expect(b.dispose()).rejects.toThrow("transient");
+    // タイマー残留無し（バックオフ timer も立たない）
+    expect(fake.pending()).toBe(0);
+  });
+
+  // [R7] 連続失敗で flushIntervalMs が指数バックオフされる
+  it("連続失敗で次回 timer 起動間隔が倍々に伸び、成功でリセットされる", async () => {
+    // 登録された interval を記録する fake timer
+    const intervals: number[] = [];
+    const callbacks: Array<{ id: number; cb: () => void }> = [];
+    let nextId = 1;
+    const timer: BatcherTimer = {
+      set: (cb, ms) => {
+        intervals.push(ms);
+        const id = nextId++;
+        callbacks.push({ id, cb });
+        return id;
+      },
+      clear: (handle) => {
+        const idx = callbacks.findIndex((c) => c.id === handle);
+        if (idx >= 0) callbacks.splice(idx, 1);
+      },
+    };
+    let failTimes = 3;
+    const onFlush = vi.fn(async (_items: readonly number[]) => {
+      if (failTimes > 0) {
+        failTimes -= 1;
+        throw new Error("transient");
+      }
+    });
+    const b = createBatcher<number>({
+      flushSize: 100,
+      flushIntervalMs: 100,
+      onFlush,
+      timer,
+    });
+    b.push(1);
+    // 初回 timer 登録: interval=100
+    expect(intervals).toEqual([100]);
+    // 発火 → 失敗 → 次の timer: 100*2^0=100
+    callbacks.splice(0, callbacks.length).forEach((c) => c.cb());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(intervals).toEqual([100, 100]);
+    // 発火 → 失敗 → 次の timer: 100*2^1=200
+    callbacks.splice(0, callbacks.length).forEach((c) => c.cb());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(intervals).toEqual([100, 100, 200]);
+    // 発火 → 失敗 → 次の timer: 100*2^2=400
+    callbacks.splice(0, callbacks.length).forEach((c) => c.cb());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(intervals).toEqual([100, 100, 200, 400]);
+    // 発火 → 成功 → consecutiveFailures=0 にリセット、buffer 空なので次の timer は無し
+    callbacks.splice(0, callbacks.length).forEach((c) => c.cb());
+    await Promise.resolve();
+    await Promise.resolve();
+    // buffer 空なので新規 timer 登録なし
+    expect(intervals).toEqual([100, 100, 200, 400]);
+    // 次の push で再起動。interval は cancel された分は再登録される
+    b.push(2);
+    expect(intervals.slice(-1)).toEqual([100]);
+  });
+
+  // [R7] maxFlushIntervalMs でバックオフ上限を設定できる
+  it("maxFlushIntervalMs でバックオフ上限を設定できる", async () => {
+    const intervals: number[] = [];
+    const callbacks: Array<{ id: number; cb: () => void }> = [];
+    let nextId = 1;
+    const timer: BatcherTimer = {
+      set: (cb, ms) => {
+        intervals.push(ms);
+        const id = nextId++;
+        callbacks.push({ id, cb });
+        return id;
+      },
+      clear: (handle) => {
+        const idx = callbacks.findIndex((c) => c.id === handle);
+        if (idx >= 0) callbacks.splice(idx, 1);
+      },
+    };
+    const onFlush = vi.fn(async () => {
+      throw new Error("persistent");
+    });
+    const b = createBatcher<number>({
+      flushSize: 100,
+      flushIntervalMs: 100,
+      // バックオフ上限を 150 ms に設定
+      maxFlushIntervalMs: 150,
+      onFlush,
+      timer,
+    });
+    b.push(1);
+    // 初回 timer
+    expect(intervals[0]).toBe(100);
+    // 発火 → 失敗 → 次の timer は 100*2^0=100 (上限 150 内)
+    callbacks.splice(0, callbacks.length).forEach((c) => c.cb());
+    await Promise.resolve();
+    await Promise.resolve();
+    // 発火 → 失敗 → 次の timer は 100*2^1=200 だが上限 150 でクランプ
+    callbacks.splice(0, callbacks.length).forEach((c) => c.cb());
+    await Promise.resolve();
+    await Promise.resolve();
+    // 発火 → 失敗 → 次の timer も 150 (上限固定)
+    callbacks.splice(0, callbacks.length).forEach((c) => c.cb());
+    await Promise.resolve();
+    await Promise.resolve();
+    // 上限以降は 150 で固定
+    expect(intervals.slice(-1)[0]).toBe(150);
+  });
+
   // インターバル駆動 flush が失敗してもタイマーが再起動して、次回発火で再送される
   // (旧実装は catch 内で startTimer を呼ばず、追加 push がない限り items が滞留していた)
   it("flushIntervalMs 設定下で onFlush が失敗してもタイマーが再起動し、次の発火で再送される", async () => {

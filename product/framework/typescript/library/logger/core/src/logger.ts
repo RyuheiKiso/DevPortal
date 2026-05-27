@@ -78,10 +78,20 @@ function mergeBindings(parent: LoggerBindings, child: LoggerBindings): LoggerBin
     : undefined;
   // context も同様に `undefined` 比較で扱う（空オブジェクト `{}` が両方ある場合に破棄されないようにする）
   const hasContext = parent.context !== undefined || child.context !== undefined;
-  // 結合後のコンテキスト（浅マージ、child 優先で上書き）
-  const context = hasContext
-    ? { ...(parent.context ?? {}), ...(child.context ?? {}) }
-    : undefined;
+  // 結合後のコンテキスト（child の undefined 値は parent を上書きしないようにフィルタしてから浅マージ） (R9)
+  let context: Readonly<Record<string, unknown>> | undefined;
+  if (hasContext) {
+    // child の undefined キーは「unset 意図」と解釈せず、parent の値を保持する
+    const filteredChild: Record<string, unknown> = {};
+    if (child.context !== undefined) {
+      for (const [k, v] of Object.entries(child.context)) {
+        if (v !== undefined) {
+          filteredChild[k] = v;
+        }
+      }
+    }
+    context = { ...(parent.context ?? {}), ...filteredChild };
+  }
   // 統合結果
   return { tags, context };
 }
@@ -199,13 +209,18 @@ export function createLogger(config: LoggerConfig): Logger {
           meta = rest;
         }
       }
-      // 完成エントリ（タグ・コンテキストはバインディングから付与）
+      // 完成エントリ（タグ・コンテキストはバインディングから付与）。
+      // R8: 空配列 / 空オブジェクトは undefined に正規化することで、entry.tags / entry.context は
+      // 「undefined または非空」のいずれかに統一する（旧仕様との互換性 + ダウンストリーム serializer の安定）。
+      const normalizedTags = bindings.tags !== undefined && bindings.tags.length > 0 ? bindings.tags : undefined;
+      const normalizedContext =
+        bindings.context !== undefined && Object.keys(bindings.context).length > 0 ? bindings.context : undefined;
       const entry: LogEntry = {
         level,
         message,
         timestamp: draftEntry.timestamp,
-        tags: bindings.tags,
-        context: bindings.context,
+        tags: normalizedTags,
+        context: normalizedContext,
         meta,
         error: errorField,
       };

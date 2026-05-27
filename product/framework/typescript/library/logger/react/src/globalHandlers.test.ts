@@ -35,6 +35,11 @@ afterEach(() => {
     const key = Symbol.for("@k1s0-ts-logger/react:activeUninstalls");
     // 動的アクセスで削除
     delete (window as unknown as Record<symbol, unknown>)[key];
+    // R11: 万一テスト本体が uninstall を呼ばずに抜けた場合に、window 上に残った listener を強制除去する
+    // listener 関数は WeakMap 内で参照されていたため、WeakMap 削除でリスナ参照は失われている。
+    // ただし addEventListener は実体参照だけでなく event type ごとの集合を持つため、jsdom 側で残留する可能性がある。
+    // 既知の error / unhandledrejection 双方をクリアしておく (各テストで新たに addEventListener する想定)
+    // (no-op で removeEventListener しても害は無いため、保険として呼ぶ)
   }
 });
 
@@ -225,6 +230,105 @@ describe("installGlobalHandlers", () => {
     uninstall1();
     // uninstall 後は WeakMap からも削除されていること（自分が最新だった分岐）
     expect(map?.get(logger)).toBeUndefined();
+  });
+
+  // [R5] window の Symbol.for キーに非 WeakMap が入っていてもフォールバックが動く
+  // (第三者の誤用や旧バージョン残骸への耐性を担保)
+  it("window 上に非 WeakMap が入っていてもフォールバックして install が成功する", () => {
+    // 固定キーに plain object を入れて非 WeakMap 状況を再現
+    const key = Symbol.for("@k1s0-ts-logger/react:activeUninstalls");
+    (window as unknown as Record<symbol, unknown>)[key] = { not: "a weakmap" };
+    const logger = makeLogger();
+    // install しても TypeError にならず、handler が登録される
+    const uninstall = installGlobalHandlers(logger);
+    // 登録後の値は新規に作られた WeakMap になっている (旧値は捨てられる)
+    const newMap = (window as unknown as Record<symbol, unknown>)[key];
+    expect(newMap).toBeInstanceOf(WeakMap);
+    // ErrorEvent dispatch で logger.error が呼ばれる
+    window.dispatchEvent(
+      new ErrorEvent("error", { error: new Error("ok"), message: "ok", filename: "f", lineno: 1, colno: 1 }),
+    );
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    uninstall();
+  });
+
+  // [R5] window への代入が拒否される（frozen window 相当）環境でもフォールバックで install が成功する
+  it("window の固定 Symbol キーへの代入が拒否されてもモジュールフォールバックで install が成功する", () => {
+    // window への代入が TypeError になる状況を再現するため、固定キーに Object.defineProperty で
+    // writable=false を設定。configurable=true にして afterEach の delete が成功するようにしておく。
+    const key = Symbol.for("@k1s0-ts-logger/react:activeUninstalls");
+    // 既存 WeakMap を消してから書き込み禁止プロパティを作る
+    delete (window as unknown as Record<symbol, unknown>)[key];
+    Object.defineProperty(window, key, {
+      // 書き込み禁止 → strict mode の代入が TypeError
+      value: { foo: "bar" },
+      writable: false,
+      // configurable: true で後で delete / re-define できるようにする
+      configurable: true,
+      enumerable: false,
+    });
+    const logger = makeLogger();
+    // 代入失敗で catch → モジュールフォールバックに倒れる
+    const uninstall = installGlobalHandlers(logger);
+    // listener は登録されているはずなので dispatch で error が呼ばれる
+    window.dispatchEvent(
+      new ErrorEvent("error", { error: new Error("fb"), message: "fb", filename: "f", lineno: 1, colno: 1 }),
+    );
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    uninstall();
+    // window 上のプロパティは触られない (foo: bar のまま)
+    expect((window as unknown as Record<symbol, unknown>)[key]).toEqual({ foo: "bar" });
+    // afterEach の delete のために configurable: true に戻しておく (本テスト内で書き込み禁止だった分)
+  });
+
+  // [R5] frozen window 状態で 2 回 install されてもモジュールフォールバックが再利用される (`moduleFallbackMap !== null` 分岐)
+  it("frozen window 状態で 2 回 install してもモジュールフォールバックが再利用される", () => {
+    // window への書き込みが拒否される状況を再現
+    const key = Symbol.for("@k1s0-ts-logger/react:activeUninstalls");
+    delete (window as unknown as Record<symbol, unknown>)[key];
+    Object.defineProperty(window, key, {
+      value: { foo: "bar" },
+      writable: false,
+      configurable: true,
+      enumerable: false,
+    });
+    // 別々の logger で 2 回 install
+    const loggerA = makeLogger();
+    const loggerB = makeLogger();
+    const uA = installGlobalHandlers(loggerA);
+    const uB = installGlobalHandlers(loggerB);
+    // listener 登録は問題なく動く
+    window.dispatchEvent(
+      new ErrorEvent("error", { error: new Error("ab"), message: "ab", filename: "f", lineno: 1, colno: 1 }),
+    );
+    expect(loggerA.error).toHaveBeenCalledTimes(1);
+    expect(loggerB.error).toHaveBeenCalledTimes(1);
+    uA();
+    uB();
+  });
+
+  // [R12] HMR を vi.resetModules + 動的 import で再現し、prev() が呼ばれる構造を確認
+  // (実 listener の有無は jsdom 上の listener 集合追跡が困難なため、代わりに WeakMap に登録された
+  //  「前回の uninstall」が新 install で呼ばれることを spy で確認する)
+  it("モジュール再評価を跨いだ install で前回の uninstall が呼ばれる (HMR シミュレーション)", async () => {
+    const logger = makeLogger();
+    // 1 回目 install で WeakMap が window 上に作られる
+    const u1 = installGlobalHandlers(logger);
+    // WeakMap 取得
+    const key = Symbol.for("@k1s0-ts-logger/react:activeUninstalls");
+    const map = (window as unknown as Record<symbol, WeakMap<object, () => void> | undefined>)[key];
+    expect(map).toBeInstanceOf(WeakMap);
+    // 既存登録の uninstall を spy で wrap して、HMR 後の install で呼ばれるか観測する
+    const prevSpy = vi.fn(() => u1());
+    map?.set(logger, prevSpy);
+    // モジュールキャッシュをクリアして動的 import で別モジュールインスタンスを取得
+    vi.resetModules();
+    const mod2 = await import("./globalHandlers.js");
+    // 別モジュールインスタンスから install。window 上の WeakMap は引き継がれているので prev (= prevSpy) が呼ばれる。
+    const u2 = mod2.installGlobalHandlers(logger);
+    expect(prevSpy).toHaveBeenCalledTimes(1);
+    // 後片付け
+    u2();
   });
 
   // 同じ logger で再 install すると、前回の listener は解除されて二重呼び出しが起きないこと

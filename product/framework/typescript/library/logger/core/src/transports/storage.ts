@@ -13,6 +13,10 @@ export interface StorageTransportOptions {
   maxEntries?: number;
   // JSON.stringify の replacer（既定: Error を自動シリアライズする実装）
   replacer?: (key: string, value: unknown) => unknown;
+  // 配列でない既存値（旧スキーマ / 他ライブラリと衝突）の扱い（R4）
+  // - "throw" (既定): write を reject して既存値を温存。利用者は手動でキーをクリアする必要あり
+  // - "overwrite": 既存値を空配列で上書きしてから新規エントリを書き込む（外部値を破壊する代わりに自動回復）
+  onCorruptedValue?: "throw" | "overwrite";
 }
 
 // 保存キーの既定値
@@ -37,6 +41,12 @@ export function createStorageTransport(opts: StorageTransportOptions): Transport
 
   // 直列化キュー（read-modify-write の競合を防ぐため、書き込みを Promise チェインで順序保証）
   let chain: Promise<void> = Promise.resolve();
+  // 最新の write 失敗を保持。flush() で観測できるようにする (R3)
+  // 旧実装は chain.catch で握りつぶした後、flush() は常に成功 resolve していたため、
+  // 利用者が「flush 成功 = 永続化済み」と誤認するリスクがあった。
+  let lastWriteError: unknown = null;
+  // 配列でない既存値の扱い (R4)。既定は "throw"（既存値を温存して onTransportError に通知）
+  const onCorruptedValue = opts.onCorruptedValue ?? "throw";
 
   // 実際の read-modify-write 処理（単一の write 呼び出しに対する純粋な作業）
   const performWrite = async (entry: LogEntry): Promise<void> => {
@@ -51,9 +61,14 @@ export function createStorageTransport(opts: StorageTransportOptions): Transport
     // null/undefined（未保存状態）はそのまま空配列扱いで OK だが、
     // それ以外で「配列でない値」が入っているのは他ライブラリと衝突か旧スキーマ。
     // 旧実装は空配列フォールバックで store.set すると既存値が上書きされ、無関係なログを破壊していた。
-    // ここで throw して onTransportError 経路で観測可能にし、既存値を温存する。
+    // 既定では throw して onTransportError 経路で観測可能にし、既存値を温存する (R4)。
     if (decoded !== null && decoded !== undefined && !Array.isArray(decoded)) {
-      // 警告用メッセージ（key と decoded の型情報を含める）
+      if (onCorruptedValue === "overwrite") {
+        // 自動回復モード: 既存値を捨てて新規エントリだけで保存する
+        await store.set(key, [entry]);
+        return;
+      }
+      // 既定 (throw) モード: write を失敗させて既存値を温存
       throw new Error(
         `storage transport: existing value at "${key}" is not an array; refusing to overwrite`,
       );
@@ -77,21 +92,36 @@ export function createStorageTransport(opts: StorageTransportOptions): Transport
       // 直前の chain に続けて自身の write を繋ぐ
       const next = chain.then(() => performWrite(entry));
       // 次回 write のために、エラーを伝播させない形で chain を更新
-      chain = next.catch(() => {
-        // 失敗しても後続を止めないため握りつぶす（logger.ts 側で onTransportError に流れる）
+      // ただし、最新エラーを lastWriteError に保持して flush() で再 throw できるようにする (R3)
+      chain = next.catch((err) => {
+        // 失敗しても後続を止めないため握りつぶすが、flush で観測するため保存する
+        lastWriteError = err;
       });
       // 呼出側（logger.ts safeWrite）が await できるよう、エラー込みの Promise を返す
       return next;
     },
-    // 末尾まで書き込み完了を保証
+    // 末尾まで書き込み完了を保証。最後に失敗した write のエラーは flush で再 throw する (R3)
     async flush() {
       // chain の末尾まで待機（chain は catch 済みなので reject にならない）
       await chain;
+      // 直近の write で失敗があれば flush として伝播し、観測可能にする
+      if (lastWriteError !== null) {
+        const err = lastWriteError;
+        // 同じエラーを連続で投げないようリセット
+        lastWriteError = null;
+        throw err;
+      }
     },
-    // dispose は flush と同等（明示的なリソースは持たない）
+    // dispose は flush と同等（明示的なリソースは持たない）。lastWriteError も同様に伝播
     async dispose() {
       // 末尾まで処理が終わるのを待つ
       await chain;
+      // flush と同じく、未観測の write エラーがあれば dispose に伝播
+      if (lastWriteError !== null) {
+        const err = lastWriteError;
+        lastWriteError = null;
+        throw err;
+      }
     },
   };
 }

@@ -77,6 +77,13 @@ SSR 環境（`window` が存在しない）では何もせず no-op の解除関
 
 同じ `logger` インスタンスで `installGlobalHandlers` を再呼び出しすると、内部で前回登録を自動解除してから新規登録します（HMR や React StrictMode の二重マウントで listener が増殖するのを防ぎます）。
 
+#### 内部アクティブハンドル管理（HMR / 多重バージョン共存に関する注意）
+
+- アクティブハンドル管理は `Symbol.for("@k1s0-ts-logger/react:activeUninstalls")` を使い `window` 上の共有 `WeakMap` に保持します。HMR でモジュールが再評価されても、同じ logger インスタンスへの再 install 時に前回の listener を自動解除できます（R5/R12）。
+- **同一バージョン推奨**: 同じアプリ内に複数バージョンの `@k1s0-ts-logger/react` がロードされる（npm hoisting の事故 / 異なる micro-frontend）と、それぞれが同じ Symbol キーを共有しつつも `Logger` インスタンス参照が別になるため、相互の listener 解除が効かないことがあります。**バージョンは単一に統一**してください（D5）。
+- **旧バージョン → 新バージョンの HMR 初回切替**: 旧版（Symbol.for 未対応）でビルドされた状態に新版を流し込む初回 HMR では、旧版の listener が一度だけ二重登録される可能性があります。事前に明示的に旧版の `uninstall()` を呼んでから新版で再 install することを推奨します（D6）。
+- **frozen window / SES Lockdown 環境**: `window` の固定 Symbol キーへの代入が拒否される環境では、モジュールスコープのフォールバック `WeakMap` を自動で使います（R5）。install 自体が throw することはありません。
+
 `useScopedLogger` は内部で `useRef` ベースの構造比較（`tags` と `context` のキー / 値を `Object.is` で比較）を行います。BigInt / 循環参照 / 関数 を含む context を渡しても、render 中に `JSON.stringify` が throw することはありません。
 
 ## ビルド
