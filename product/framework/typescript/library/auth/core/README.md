@@ -106,6 +106,18 @@ const headers = await manager.getAuthHeaders();
 - `status="anonymous"` の入力に付随する `tokens` / `claims` は **破棄** されます。「匿名だがトークンを保持」したい用途 (例: guest token を別途利用するなど) は本ライブラリの設計範囲外で、別途アプリ側で管理してください。
 - `tokens` / `claims` / `attributes` は **shallow copy** で保護されます。第一層キーの追加・削除やプリミティブ値の差し替えは遮断されますが、**ネストしたオブジェクト・配列の内部 mutation までは防げません**。深い不変が必要な場合は利用側で `structuredClone` 等を行ってから渡してください。
 
+## tokenStore の外部書き換えはサポートしません
+
+`AuthManager` の `getAccessToken()` / `getAuthHeaders()` は `current` セッションの `tokens.accessToken` を権威ソースとし、未定義の場合のみ `tokenStore` にフォールバックします。これは並行 `signIn` / `signOut` 進行中に古い store 値が漏洩することを防ぐためです。
+
+そのため、`manager` の外から直接 `tokenStore.set(...)` で書き換えても `getAccessToken()` などには反映されません。トークンを更新したい場合は必ず以下を使ってください:
+
+- `manager.setSession({ status: "authenticated", user, tokens: { ... } })`
+- `manager.refresh()` (adapter.refresh 経由で更新)
+- `manager.signIn()` (adapter.signIn 経由でログインし直す)
+
+`tokenStore` は本質的に永続化のためのバックエンドストレージであり、外部から直接 mutate する API として設計されていません。
+
 ## 注意点
 
 フロントエンドの権限判定は UX 用の表示制御に過ぎません。API アクセスの最終的な認可判定は必ずバックエンドで実施してください。`@k1s0-ts-auth/*` の `canAccess` / `hasRole` / `hasPermission` で「描画しない／無効化する」ことはできますが、API リクエスト自体は別途バックエンド側で再検証する設計を前提にしています。

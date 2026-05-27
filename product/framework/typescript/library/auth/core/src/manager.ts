@@ -46,16 +46,62 @@ export function createAuthManager(
 ): AuthManager {
   // 現在のセッションスナップショットを保持する
   let current = normalizeSession(options.initialSession);
+  // getSnapshot がキャッシュとして返す参照 (#S3) — current と同じ参照で初期化し、applySession で更新する
+  // 同一セッション中は同じ参照を返すことで useSyncExternalStore 等の Object.is 比較が安定する
+  let cachedSnapshot: AuthSession = current;
   // adapter.getSession 済みかどうかを保持する
-  let loaded = options.initialSession !== undefined;
+  // initialSession が整合している (authenticated × user!=null、または anonymous) ときのみ loaded=true (#S2)
+  // 不整合な初期入力 (例: authenticated × user=null) は normalizeSession で anonymous に倒されるが、
+  // loaded=true のままだと getSession() が adapter を呼ばず anonymous を返し続けてしまうため、loaded=false にして再取得させる
+  let loaded = false;
+  if (options.initialSession !== undefined) {
+    // 入力側の整合性を判定する (normalize 後では情報が失われるので raw input を見る)
+    const input = options.initialSession;
+    // 認証済みかつ user が存在するなら整合
+    const isConsistentAuth = input.status === "authenticated" && input.user !== null;
+    // 匿名なら user の状態に関わらず整合 (normalizeSession で user=null へ倒される設計と一致)
+    const isConsistentAnon = input.status === "anonymous";
+    if (isConsistentAuth || isConsistentAnon) {
+      // 整合入力 → ロード済みとして扱う
+      loaded = true;
+    } else {
+      // 不整合 (例: status=authenticated × user=null) → 警告を出して loaded=false で adapter から再取得させる
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[@k1s0-ts-auth/core] initialSession is inconsistent (status/user mismatch); ignoring and falling back to adapter.getSession()",
+      );
+    }
+  }
   // 購読リスナーを保持する
   const listeners = new Set<AuthListener>();
   // トークン保存先を決定する
+  // 内部メモリ store は createMemoryTokenStore(current.tokens) で initialSession.tokens を seed 済み
   const tokenStore = options.tokenStore ?? createMemoryTokenStore(current.tokens);
   // セッション差し替え (applySession) を直列化するミューテックス
   // 旧実装は tokenStore.set/clear と current 代入の間に await があり、並行
   // signIn/signOut/refresh で「メモリは A、storage は B」のズレが発生していた
   const sessionMutex = createMutex();
+  // 外部 tokenStore が指定されていて initialSession.tokens があるなら、外部 store にも seed する (#S5)
+  // sessionMutex を経由させることで後続 applySession と FIFO 順序を保ち、競合させない
+  // 失敗時は警告にとどめ初期化自体は失敗させない (initialSession ベースで current は既に有効、後続フローでリカバリ可能)
+  if (options.tokenStore !== undefined && current.tokens !== undefined) {
+    // クロージャに固定するためローカル束縛
+    const initialTokens = current.tokens;
+    // fire-and-forget で seed (createAuthManager の同期 return は維持)
+    void sessionMutex(async () => {
+      try {
+        // 外部 store に初期トークンを書き込む
+        await options.tokenStore!.set(initialTokens);
+      } catch (err) {
+        // 失敗は警告のみ
+        // eslint-disable-next-line no-console
+        console.warn(
+          "[@k1s0-ts-auth/core] failed to seed external tokenStore with initialSession.tokens",
+          err,
+        );
+      }
+    });
+  }
   // refresh の singleflight 共有 Promise
   // 並行 refresh 呼び出しで adapter.refresh が多重実行されると、refresh_token を一発で
   // 消費する IdP では 2 回目以降が 401 になり、全並行リクエストが落ちる
@@ -65,44 +111,82 @@ export function createAuthManager(
   // 1 つのリスナーが throw しても他のリスナーへの通知が止まらないよう、各呼び出しを try/catch で隔離する
   // 例外は options.onListenerError があれば委譲し、無ければ console.error にフォールバックする (完全サイレントは運用事故検出が困難なため避ける)
   function emit(event: AuthEvent): void {
+    // 反復前に listeners をスナップショット化 (#C8): mid-emit で subscribe された listener は次回 emit から呼ばれる
+    // (Set の for...of は反復中に追加された要素も visit する仕様のため、スナップショット化で防ぐ)
+    const snapshotListeners = [...listeners];
     // 現在の購読者へ順に通知する
-    for (const listener of listeners) {
+    for (const listener of snapshotListeners) {
+      // リスナーごとに独立した正規化コピーを渡す (#C5): 利用者が session を mutate しても内部 cachedSnapshot / 他 listener には影響しない
+      const sessionForListener = normalizeSession(current);
       // 隔離して呼ぶ
       try {
-        // 各リスナーに現在セッションとイベント名を渡す
-        listener(current, event);
-      } catch (error) {
-        // 利用者提供フックがあれば委譲する (フック自体の throw はここでは catch しない: 二重 throw は呼び出し側のバグとして外に漏らす)
-        if (options.onListenerError !== undefined) {
-          // observability コールバックへエラー情報を渡す
-          options.onListenerError(error, event);
-        } else {
-          // フック未指定時は console.error でサイレント握り潰しを避ける
-          // eslint-disable-next-line no-console
-          console.error("[@k1s0-ts-auth/core] auth listener threw", error);
+        // 各リスナーに正規化コピーとイベント名を渡し、戻り値も観察する (async listener の rejection を捕捉するため)
+        // AuthListener の戻り値型は void だが、async function を渡された場合は実際には Promise<void> が返ってくるため unknown で受ける
+        const result: unknown = listener(sessionForListener, event);
+        // async listener (Promise を返す) なら rejection も捕捉する (#C7)
+        if (result instanceof Promise) {
+          // 同期 catch と統合された handleListenerError ヘルパに委譲
+          result.catch((asyncError: unknown) => handleListenerError(asyncError, event));
         }
+      } catch (error) {
+        // 同期 throw のときも統合ヘルパに委譲
+        handleListenerError(error, event);
       }
     }
   }
 
+  // listener 例外の通知先を確定するヘルパ (#C4: hook 自身の throw も隔離する)
+  function handleListenerError(error: unknown, event: AuthEvent): void {
+    // ホスト関数全体を try でラップして hook 自身の throw も飲み込む
+    try {
+      // 利用者提供フックがあれば委譲する
+      if (options.onListenerError !== undefined) {
+        // observability コールバックへエラー情報を渡す
+        options.onListenerError(error, event);
+      } else {
+        // フック未指定時は console.error でサイレント握り潰しを避ける
+        // eslint-disable-next-line no-console
+        console.error("[@k1s0-ts-auth/core] auth listener threw", error);
+      }
+    } catch (hookError) {
+      // hook 自身が throw した場合は二重 throw を防ぐためここで隔離 (#C4)
+      // 原因エラーも一緒にログして調査の手がかりを残す
+      // eslint-disable-next-line no-console
+      console.error(
+        "[@k1s0-ts-auth/core] onListenerError hook itself threw",
+        hookError,
+        "(original error:",
+        error,
+        ")",
+      );
+    }
+  }
+
   // セッションを内部状態と TokenStore に反映する
-  // mutex 越しに直列化することで、tokens の write と current の差し替えが
-  // 並行呼び出し間でインターリーブされないことを保証する
+  // mutex 越しに直列化することで並行呼び出し間でインターリーブされないことを保証する
+  // 順序は `store I/O → current 代入 → emit` とする (#C3)
+  // - store I/O 進行中は current は旧セッションのまま (古いトークン/anonymous) で観測される
+  // - store I/O が reject した場合は current が差し替わらないため、current/store の不整合が起きない (#C9 自動解消)
+  // - emit は store/current の両方が新値で確定した後に呼ばれるので、listener 内で getAccessToken 等を呼んでも整合する
   async function applySession(session: AuthSession, event: AuthEvent): Promise<AuthSession> {
     return sessionMutex(async () => {
-      // セッションを正規化して保持する
-      current = normalizeSession(session);
-      // 認証済みかつトークンありなら TokenStore に保存する
-      if (current.tokens !== undefined) {
+      // セッションを正規化して独立コピーにする (この時点ではまだ current に代入しない)
+      const normalized = normalizeSession(session);
+      // store I/O を先に確定させる (失敗時は current を更新せずに throw する)
+      if (normalized.tokens !== undefined) {
         // トークン集合を保存する
-        await tokenStore.set(current.tokens);
+        await tokenStore.set(normalized.tokens);
       } else {
         // トークンがない場合は保存済み値を削除する
         await tokenStore.clear();
       }
+      // store 確定後に current を新セッションへ差し替える
+      current = normalized;
+      // getSnapshot のキャッシュも同じ参照で更新 (#S3 同一セッション中は安定参照)
+      cachedSnapshot = normalized;
       // getSession 済みとして扱う
       loaded = true;
-      // 購読者へ通知する
+      // 購読者へ通知する (current/store ともに新値で整合した状態で通知)
       emit(event);
       // 正規化済みセッションを返す
       return current;
@@ -110,9 +194,10 @@ export function createAuthManager(
   }
 
   // 現在の同期スナップショットを返す
+  // 同一セッション中は同じ参照を返すため useSyncExternalStore で安全に使える (#S3)
   function getSnapshot(): AuthSession {
-    // 外部 mutation を避けるため正規化コピーを返す
-    return normalizeSession(current);
+    // applySession で生成済みのキャッシュ参照を返す (毎回 normalize しない)
+    return cachedSnapshot;
   }
 
   // セッションを取得する
@@ -190,15 +275,14 @@ export function createAuthManager(
   }
 
   // 現在のアクセストークンを返す
-  // applySession は `current 代入 → await tokenStore.set` の順に直列実行されるため、
-  // mutex 内で current だけ先に更新済み・store はまだ古い窓が必ず存在する
-  // その窓で store を優先すると並行 getAccessToken/getAuthHeaders が古い値を返してしまうため、
-  // current.tokens を権威ソースとし、未定義時のみ store にフォールバックする
-  // (SSR ハイドレーション直前など、まだ adapter からセッションを取得していないケース用)
+  // applySession は `store I/O → current 代入 → emit` の順に直列実行されるため、store I/O 完了後にのみ current が新セッションへ差し替わる
+  // current.tokens を権威ソースとし、accessToken が未定義のときは store にフォールバックする
+  // (SSR ハイドレーション直前、または refreshToken-only セッション直後など、まだ accessToken が確定していないケース用)
   async function getAccessToken(): Promise<string | undefined> {
-    // セッション側に tokens が設定されていれば current を権威ソースとして返す (空文字は無効トークンとしてそのまま返す)
-    if (current.tokens !== undefined) return current.tokens.accessToken;
-    // セッション側に tokens が無い場合のみ TokenStore に問い合わせる
+    // current.tokens.accessToken が定義済みなら current を権威ソースとして返す (空文字 "" もそのまま返す = 利用者が明示した無効トークン)
+    // tokens オブジェクト自体は定義済みだが accessToken が undefined (例: refreshToken のみ) のときは store にフォールバックする
+    if (current.tokens?.accessToken !== undefined) return current.tokens.accessToken;
+    // current.tokens もしくは accessToken が無い場合のみ TokenStore に問い合わせる
     const tokens = await tokenStore.get();
     // store にもなければ undefined
     return tokens?.accessToken;
@@ -207,14 +291,14 @@ export function createAuthManager(
   // HTTP クライアントに渡せる認証ヘッダを返す
   // 上記 getAccessToken と同じ理由でセッション上のトークンを優先する
   async function getAuthHeaders(): Promise<Record<string, string>> {
-    // セッション側に tokens があれば current を優先、無ければ store から取得する (`??` ではなく明示的な if/else で書くことで v8 coverage の分岐検出を確実にする)
+    // current.tokens.accessToken の有無で分岐 (`??` ではなく明示的な if/else で書くことで v8 coverage の分岐検出を確実にする)
     let tokens: AuthTokenSet | undefined;
-    // current.tokens があれば権威ソースとして採用する
-    if (current.tokens !== undefined) {
-      // セッション上のトークンを採用
+    // current 側に有効な accessToken があれば権威ソースとして採用する
+    if (current.tokens?.accessToken !== undefined) {
+      // セッション上のトークンを採用 (createAuthorizationHeader は空文字を無効化するため空文字は空ヘッダになる)
       tokens = current.tokens;
     } else {
-      // current が tokens を持たないときのみ store にフォールバック (SSR ハイドレーション直前など)
+      // current が accessToken を持たないときのみ store にフォールバック (refreshToken-only セッション / SSR ハイドレーション直前など)
       tokens = await tokenStore.get();
     }
     // Authorization ヘッダ値を生成する
