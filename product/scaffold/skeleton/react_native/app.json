@@ -1,4 +1,0 @@
-{
-  "name": "${{ values.name }}",
-  "displayName": "${{ values.name }}"
-}

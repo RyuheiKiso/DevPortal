@@ -1,9 +1,0 @@
-src/
-tsconfig.json
-tsconfig.typecheck.json
-*.tsbuildinfo
-*.tgz
-.gitignore
-*.test.ts
-vitest.config.ts
-coverage/

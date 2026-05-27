@@ -1,4 +1,0 @@
-env: dev
-featureFlags:
-  newUi: true
-   bad indent: oops
