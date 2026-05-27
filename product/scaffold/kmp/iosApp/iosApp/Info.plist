@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ===========================================================================
+     Info.plist
+     iOS アプリのメタ情報 (バンドル名・対応向き・最低 iOS バージョン等)
+     Xcode の「General」タブの設定はここに反映される
+     =========================================================================== -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Xcode ビルド変数置換による開発名 -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+
+    <!-- アプリの内部実行ファイル名 -->
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+
+    <!-- バンドル ID (Xcode の Project Settings で上書き想定) -->
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+
+    <!-- バンドル情報のバージョン -->
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+
+    <!-- ユーザー表示用アプリ名 -->
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+
+    <!-- バンドル種別 (アプリ = APPL) -->
+    <key>CFBundlePackageType</key>
+    <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+
+    <!-- マーケット向けバージョン文字列 (例: 1.0.0) -->
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+
+    <!-- ビルド番号 (整数または x.y 形式) -->
+    <key>CFBundleVersion</key>
+    <string>1</string>
+
+    <!-- 起動時 LaunchScreen の Storyboard 名 (空文字なら SwiftUI 既定の Launch) -->
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
+
+    <!-- iPhone でサポートする画面向き -->
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+
+    <!-- iPad でサポートする画面向き -->
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+
+    <!-- SwiftUI App プロトコルを使用する場合の宣言 -->
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <!-- 複数シーン (Split View) サポート -->
+        <key>UIApplicationSupportsMultipleScenes</key>
+        <false/>
+    </dict>
+</dict>
+</plist>

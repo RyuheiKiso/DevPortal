@@ -1,0 +1,44 @@
+#!/bin/sh
+# ===========================================================================
+# Unix 系 (macOS / Linux) 用 Gradle Wrapper 起動スクリプト
+#  - gradle/wrapper/gradle-wrapper.properties で指定された Gradle を取得・実行する
+#  - 初回実行時に gradle-wrapper.jar が必要なため、未配置の場合は
+#    `gradle wrapper --gradle-version 8.11.1` を一度実行すること
+# ===========================================================================
+
+# エラーで即時終了
+set -e
+
+# このスクリプトのあるディレクトリを APP_HOME とする
+APP_HOME=$( cd "$( dirname "$0" )" && pwd )
+
+# JVM デフォルト引数
+DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
+
+# Java 実行ファイルを決定 (JAVA_HOME 優先、なければ PATH の java)
+if [ -n "$JAVA_HOME" ] ; then
+    # JAVA_HOME 配下の java を使用
+    JAVACMD="$JAVA_HOME/bin/java"
+    # java の存在確認
+    if [ ! -x "$JAVACMD" ] ; then
+        echo "ERROR: JAVA_HOME is set to an invalid directory: $JAVA_HOME" >&2
+        exit 1
+    fi
+else
+    # PATH 上の java を使用
+    JAVACMD="java"
+    # java の存在確認
+    command -v java >/dev/null 2>&1 || {
+        echo "ERROR: JAVA_HOME is not set and 'java' is not in PATH." >&2
+        exit 1
+    }
+fi
+
+# Wrapper JAR の場所
+CLASSPATH="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+
+# Wrapper Main クラスを起動
+exec "$JAVACMD" $DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS \
+    "-Dorg.gradle.appname=$( basename "$0" )" \
+    -classpath "$CLASSPATH" \
+    org.gradle.wrapper.GradleWrapperMain "$@"

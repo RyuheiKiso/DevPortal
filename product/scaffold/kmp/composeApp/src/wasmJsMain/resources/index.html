@@ -1,0 +1,29 @@
+<!doctype html>
+<!-- ===========================================================================
+     index.html (wasmJsMain/resources)
+     Web (wasmJs) ターゲットのエントリ HTML
+     ビルド時に composeApp.js が生成され、本ファイルから読み込まれる
+     =========================================================================== -->
+<html lang="ja">
+<head>
+    <!-- 文字コード宣言 (Compose の文字列を正しく表示するため UTF-8 を必須とする) -->
+    <meta charset="UTF-8">
+    <!-- レスポンシブ表示のためのビューポート設定 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- ブラウザタブのタイトル -->
+    <title>KMP Scaffold</title>
+    <!-- 初期画面のチラつきを抑えるための簡易スタイル -->
+    <style>
+        /* HTML / body を全画面に広げる */
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
+        /* Compose のルートも全画面に */
+        #composeApplication { width: 100%; height: 100%; }
+    </style>
+</head>
+<body>
+    <!-- Compose ツリーがマウントされる DOM 要素 -->
+    <div id="composeApplication"></div>
+    <!-- Kotlin/Wasm が出力する JS ローダー (build.gradle.kts の outputFileName と一致) -->
+    <script src="composeApp.js"></script>
+</body>
+</html>
