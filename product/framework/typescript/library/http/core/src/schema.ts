@@ -13,6 +13,9 @@ export const retryPolicySchema = z.object({
   jitter: z.enum(["full", "none"]).optional(),
   // status コード配列（任意）
   retryableStatuses: z.array(z.number().int()).optional(),
+  // 非冪等メソッドでも retry を許可する明示オプトイン（C-A2、任意）
+  // 型としては RetryPolicy.allowNonIdempotent (types.ts) と対応する
+  allowNonIdempotent: z.boolean().optional(),
 });
 
 // TimeoutPolicy のスキーマ
@@ -44,12 +47,22 @@ export function validateHttpClientConfig(
   return httpClientConfigSchema.parse(input);
 }
 
+// gRPC では HTTP status は使われないため `retryableStatuses` を除外したサブセットを使う (M2)
+// (型レベルでも GrpcRetryPolicy = Omit<Partial<RetryPolicy>, "retryableStatuses"> で表現済み)
+// strict() を付けることで利用者が誤って `retryableStatuses` を渡した場合に ZodError を出す
+// (silent no-op を防いで設定ミスを early に検知させる)
+const grpcRetryPolicySchema = retryPolicySchema
+  .partial()
+  .omit({ retryableStatuses: true })
+  .strict();
+
 // GrpcClientConfig 検証用スキーマ（関数フィールドは対象外）
 // agent レビュー指摘により追加: createGrpcClient 冒頭で baseUrl を検証して空文字を弾く
+// strict() で未知のキー (例: retryableStatuses を retry 直下ではなく config 直下に置くようなミス) を弾く
 export const grpcClientConfigSchema = z.object({
   baseUrl: z.string().url(),
   timeoutMs: z.number().int().min(0).optional(),
-  retry: retryPolicySchema.partial().optional(),
+  retry: grpcRetryPolicySchema.optional(),
 });
 
 // 検証ヘルパ

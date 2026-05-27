@@ -1502,6 +1502,67 @@ describe("useHttpMutation", () => {
     });
   });
 
+  // M1: reset 後に in-flight mutate が完了しても state を上書きしない
+  it("M1: reset を挟むと進行中の mutate が完了しても state を書き戻さない", async () => {
+    // 後から resolve できる client
+    let releaseFirstM1: (() => void) | undefined;
+    const clientM1 = clientOf(
+      (init) =>
+        new Promise<HttpResponse<unknown>>((resolve) => {
+          // 第 1 弾の resolve を保留する
+          releaseFirstM1 = () =>
+            resolve(rawJsonResponse({ saved: "first" }, "mutation-m1", init));
+        }),
+    );
+    // state
+    let stateM1:
+      | ReturnType<typeof useHttpMutation<string, { saved: string }>>
+      | undefined;
+    let rendererM1: ReactTestRenderer | undefined;
+    // Probe (M1)
+    function ProbeM1(): null {
+      stateM1 = useHttpMutation<string, { saved: string }>({
+        url: "/save",
+        method: "POST",
+      });
+      return null;
+    }
+    // 描画
+    await act(async () => {
+      // Provider 内で hook 実行
+      rendererM1 = create(
+        <HttpClientProvider client={clientM1}>
+          <ProbeM1 />
+        </HttpClientProvider>,
+      );
+    });
+    // 第 1 弾 mutate (resolve 保留)
+    let firstResultM1: Promise<{ saved: string }> | undefined;
+    await act(async () => {
+      firstResultM1 = stateM1
+        ?.mutateAsync("first")
+        .catch(() => ({ saved: "ignored" }));
+    });
+    // reset → latestCallIdRef を進める
+    await act(async () => {
+      stateM1?.reset();
+    });
+    // 第 1 弾を解放 → state は更新されないはず
+    await act(async () => {
+      releaseFirstM1?.();
+      await firstResultM1;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(stateM1?.data).toBeUndefined();
+    expect(stateM1?.error).toBeUndefined();
+    expect(stateM1?.loading).toBe(false);
+    // 後片付け
+    await act(async () => {
+      rendererM1?.unmount();
+    });
+  });
+
   it("keeps only the latest mutation result in state", async () => {
     let releaseFirst: (() => void) | undefined;
     const client = clientOf(

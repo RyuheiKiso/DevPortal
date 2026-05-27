@@ -1498,6 +1498,67 @@ describe("useHttpMutation", () => {
     });
   });
 
+  // M1: reset 後に in-flight mutate が完了しても state を上書きしない
+  it("M1: reset を挟むと進行中の mutate が完了しても state を書き戻さない", async () => {
+    // 後から resolve できる client
+    let releaseFirst: (() => void) | undefined;
+    const client = clientOf(
+      (init) =>
+        new Promise<HttpResponse<unknown>>((resolve) => {
+          // mutate 第 1 弾はテスト側で resolve を制御
+          releaseFirst = () =>
+            resolve(rawJsonResponse({ saved: "first" }, "mutation-m1", init));
+        }),
+    );
+    // state
+    let state:
+      | ReturnType<typeof useHttpMutation<string, { saved: string }>>
+      | undefined;
+    let renderer: ReactTestRenderer | undefined;
+    // Probe
+    function Probe(): null {
+      state = useHttpMutation<string, { saved: string }>({
+        url: "/save",
+        method: "POST",
+      });
+      return null;
+    }
+    // 描画
+    await act(async () => {
+      // Provider 内で hook 実行
+      renderer = create(
+        <HttpClientProvider client={client}>
+          <Probe />
+        </HttpClientProvider>,
+      );
+    });
+    // 第 1 弾の mutate を発火 (resolve は保留)
+    let firstResult: Promise<{ saved: string }> | undefined;
+    await act(async () => {
+      // catch を即座に握って unhandled rejection を防ぐ (mutate がエラーになった場合の保険)
+      firstResult = state?.mutateAsync("first").catch(() => ({ saved: "ignored" }));
+    });
+    // reset を呼ぶ (latestCallIdRef を進める)
+    await act(async () => {
+      state?.reset();
+    });
+    // ここで第 1 弾を完了させる → callId 比較で state は更新されないはず
+    await act(async () => {
+      releaseFirst?.();
+      await firstResult;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // state は reset 時のクリーン状態のまま
+    expect(state?.data).toBeUndefined();
+    expect(state?.error).toBeUndefined();
+    expect(state?.loading).toBe(false);
+    // 後片付け
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
   it("keeps only the latest mutation result in state", async () => {
     let releaseFirst: (() => void) | undefined;
     const client = clientOf(

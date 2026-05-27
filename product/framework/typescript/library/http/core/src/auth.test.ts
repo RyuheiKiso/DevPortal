@@ -33,4 +33,28 @@ describe("createStaticAuth", () => {
     // 参照ではなくコピーであること
     expect(out).not.toBe(src);
   });
+
+  // H3: 初期化後に元オブジェクトを mutate しても getAuthHeaders の結果が変わらない
+  it("H3: 初期化後に元オブジェクトを mutate しても結果に反映されない", async () => {
+    const src: Record<string, string> = { "X-Token": "abc" };
+    const a = createStaticAuth(src);
+    // 初期化後に外部から mutate しても snapshot 側は不変
+    src["X-Token"] = "MUTATED";
+    src["X-New"] = "leak";
+    const out = await a.getAuthHeaders();
+    expect(out).toEqual({ "X-Token": "abc" });
+    expect(out["X-New"]).toBeUndefined();
+  });
+
+  // H3: getAuthHeaders の戻り値を mutate しても次回呼出時の結果に影響しない
+  it("H3: 戻り値の mutate は次回呼出時に伝播しない", async () => {
+    const a = createStaticAuth({ "X-Token": "abc" });
+    const first = await a.getAuthHeaders();
+    // 戻り値を破壊
+    first["X-Token"] = "BROKEN";
+    delete first["X-Token"];
+    // 次回呼出時は元の値が返る
+    const second = await a.getAuthHeaders();
+    expect(second).toEqual({ "X-Token": "abc" });
+  });
 });

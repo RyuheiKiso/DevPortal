@@ -12,6 +12,18 @@ export interface GrpcCallOptions {
   signal?: AbortSignal;
   // 任意の per-call タイムアウト（設定 timeoutMs を一時上書き）
   timeoutMs?: number;
+  /**
+   * この呼び出しが冪等であることを利用者が明示するフラグ（H2 / v0.2 で追加）
+   *
+   * gRPC unary は HTTP の POST と同様に副作用を持ちうる。安全側として、未指定 / false の場合は
+   * retry を無効化する (charge / transfer 系 RPC が UNAVAILABLE で何度も実行される事故を防ぐ)。
+   *
+   * 副作用のない RPC (Get・List・Watch 系) や、サーバ側で冪等性が担保された RPC では
+   * 利用者が明示的に `idempotent: true` を渡すことで `GrpcClientConfig.retry` を有効化できる。
+   *
+   * 全 RPC を一括で許可したい場合は `GrpcClientConfig.retry.allowNonIdempotent: true` を使う。
+   */
+  idempotent?: boolean;
 }
 
 // 呼び出し対象メソッドの記述子（gRPC-web の MethodDescriptor 相当）
@@ -59,14 +71,20 @@ export interface GrpcCallError {
   metadata?: GrpcMetadata;
 }
 
+// gRPC では HTTP status は使われないため `retryableStatuses` は意味を持たない。
+// 型レベルで指定不可にして、利用者が誤って渡しても compile-time に気づけるようにする (M2)
+export type GrpcRetryPolicy = Omit<Partial<RetryPolicy>, "retryableStatuses">;
+
 // createGrpcClient に渡す設定
 export interface GrpcClientConfig {
   // gRPC-web エンドポイント（プロキシ URL のベース）
   baseUrl: string;
   // 認証 metadata 供給（任意）
   auth?: AuthProvider;
-  // リトライポリシー（任意、HTTP と同じ RetryPolicy を流用）
-  retry?: Partial<RetryPolicy>;
+  // リトライポリシー（任意、HTTP と同じ RetryPolicy から retryableStatuses を除いたサブセット、M2）
+  // gRPC では shouldRetry または HttpError.retryable で判定される
+  // 既定では `idempotent` オプトインが必要 (H2)、`allowNonIdempotent: true` で全 RPC 許可
+  retry?: GrpcRetryPolicy;
   // 既定の per-call タイムアウト（任意）
   timeoutMs?: number;
   // 構造一致 Logger（任意）

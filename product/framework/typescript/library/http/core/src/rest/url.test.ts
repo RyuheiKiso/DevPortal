@@ -43,6 +43,21 @@ describe("joinUrl", () => {
     expect(joinUrl("https://a/", "x")).toBe("https://a/x");
     expect(joinUrl("https://a", "/x")).toBe("https://a/x");
   });
+
+  // M8: http(s) 以外の絶対 URL も素通し（RFC 3986 §3.1 scheme）
+  it("M8: ws:// / wss:// 等の絶対 URL も素通し", () => {
+    expect(joinUrl("https://a", "ws://b/sock")).toBe("ws://b/sock");
+    expect(joinUrl("https://a", "wss://b/sock")).toBe("wss://b/sock");
+  });
+  it("M8: grpc:// / file:// 等の絶対 URL も素通し", () => {
+    expect(joinUrl("https://a", "grpc://b:50051/x")).toBe("grpc://b:50051/x");
+    expect(joinUrl("https://a", "file:///etc/hosts")).toBe("file:///etc/hosts");
+  });
+  it("M8: scheme に + や - を含む URL も素通し", () => {
+    // RFC 3986 の scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
+    expect(joinUrl("https://a", "git+ssh://b/repo")).toBe("git+ssh://b/repo");
+    expect(joinUrl("https://a", "view-source://b/x")).toBe("view-source://b/x");
+  });
 });
 
 describe("appendSearchParams", () => {

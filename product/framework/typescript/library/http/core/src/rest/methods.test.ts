@@ -125,6 +125,57 @@ describe("rest methods", () => {
     await post(client, "/x");
     expect(fetchImpl.mock.calls[0]?.[1]?.body).toBeUndefined();
   });
+
+  // M5: client.defaultHeaders に Content-Type があれば post 側で自動付与しない
+  it("M5: defaultHeaders に Content-Type があれば post で application/json を上書きしない", async () => {
+    const fetchImpl = vi.fn(async () => jsonOk({}));
+    const client = createHttpClient({
+      fetchImpl,
+      defaultHeaders: { "Content-Type": "text/plain" },
+    });
+    await post(client, "/x", { a: 1 });
+    const headers = fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    // defaultHeaders 由来の text/plain がそのまま採用される (application/json で上書きされない)
+    expect(headers["Content-Type"]).toBe("text/plain");
+  });
+
+  // M5: defaultHeaders に Content-Type があっても init.headers で明示すれば優先される
+  it("M5: init.headers で Content-Type 指定があれば defaultHeaders より優先", async () => {
+    const fetchImpl = vi.fn(async () => jsonOk({}));
+    const client = createHttpClient({
+      fetchImpl,
+      defaultHeaders: { "Content-Type": "text/plain" },
+    });
+    // init.headers の Content-Type が最優先
+    await post(client, "/x", { a: 1 }, { headers: { "Content-Type": "application/vnd.x+json" } });
+    const headers = fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers["Content-Type"]).toBe("application/vnd.x+json");
+  });
+
+  // M5: put / patch でも同じ挙動
+  it("M5: put でも defaultHeaders の Content-Type は尊重される", async () => {
+    const fetchImpl = vi.fn(async () => jsonOk({}));
+    const client = createHttpClient({
+      fetchImpl,
+      defaultHeaders: { "content-type": "text/plain" },
+    });
+    await put(client, "/x", { a: 1 });
+    const headers = fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    // 小文字キーで指定しても大小無視で検出される
+    expect(headers["content-type"]).toBe("text/plain");
+    expect(headers["Content-Type"]).toBeUndefined();
+  });
+
+  it("M5: patch でも defaultHeaders の Content-Type は尊重される", async () => {
+    const fetchImpl = vi.fn(async () => jsonOk({}));
+    const client = createHttpClient({
+      fetchImpl,
+      defaultHeaders: { "Content-Type": "text/plain" },
+    });
+    await patch(client, "/x", { a: 1 });
+    const headers = fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers["Content-Type"]).toBe("text/plain");
+  });
 });
 
 describe("rest stream helpers (B-10)", () => {

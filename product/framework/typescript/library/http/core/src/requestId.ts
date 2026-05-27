@@ -12,6 +12,23 @@ interface CryptoLike {
   getRandomValues?: <T extends ArrayBufferView>(view: T) => T;
 }
 
+// Math.random フォールバックを使った旨を 1 度だけ warn するためのフラグ（C-A6 / M6）
+// createRequestId と createTraceparent で共通利用する (同じプロセスで複数回 warn しないため)
+// モジュールスコープ宣言は下記の bytesToHex の後に居るとホイスト順序で困るため先頭に移動
+let warnedAboutWeakRandom = false;
+
+// 弱い乱数源（Math.random）使用時の警告を 1 度だけ出すヘルパ
+// reason: 「呼び出し元の関数名」を渡してログに含める (createRequestId / createTraceparent)
+function warnWeakRandomOnce(reason: string): void {
+  // 既に warn 済みなら何もしない (1 プロセス 1 回のみ)
+  if (warnedAboutWeakRandom) return;
+  warnedAboutWeakRandom = true;
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[@k1s0-ts-http/core] crypto unavailable; falling back to Math.random for ${reason} (weak)`,
+  );
+}
+
 // 相関 ID を生成するヘルパ（X-Request-Id の値として利用）
 // 既定実装は crypto.randomUUID() を優先し、無ければ Date + 乱数のフォールバック
 export function createRequestId(): string {
@@ -21,6 +38,8 @@ export function createRequestId(): string {
   if (c !== undefined && typeof c.randomUUID === "function") {
     return c.randomUUID();
   }
+  // フォールバック発生時に 1 度だけ警告 (一貫性のため createTraceparent と同じ仕組み、M6)
+  warnWeakRandomOnce("request-id");
   // フォールバック：epoch ms と乱数の連結で十分な衝突回避を確保
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -36,12 +55,8 @@ function bytesToHex(bytes: Uint8Array): string {
   return out;
 }
 
-// Math.random フォールバックを使った旨を 1 度だけ warn するためのフラグ（C-A6）
-// モジュールスコープで保持し、複数回 createTraceparent を呼んでも 1 度のみ console.warn
-let warnedAboutWeakRandom = false;
-
 // crypto.getRandomValues を使って指定 byte 数のランダムバイト列を取得（フォールバックは Math.random）
-// Math.random は暗号学的に弱いため、フォールバック時は警告を 1 度だけ出す
+// Math.random は暗号学的に弱いため、フォールバック時は warnWeakRandomOnce で警告を 1 度だけ出す
 function randomBytes(len: number): Uint8Array {
   const c = (globalThis as { crypto?: CryptoLike }).crypto;
   const out = new Uint8Array(len);
@@ -50,13 +65,7 @@ function randomBytes(len: number): Uint8Array {
     return out;
   }
   // フォールバック発生時に 1 度だけ警告（trace-id 衝突や予測可能性のリスクを通知）
-  if (!warnedAboutWeakRandom) {
-    warnedAboutWeakRandom = true;
-    // eslint-disable-next-line no-console
-    console.warn(
-      "[@k1s0-ts-http/core] crypto.getRandomValues unavailable; using Math.random for trace-id (weak)",
-    );
-  }
+  warnWeakRandomOnce("trace-id");
   // フォールバック：Math.random 由来（暗号学的に弱いが trace 用途では実用範囲）
   for (let i = 0; i < len; i++) {
     out[i] = Math.floor(Math.random() * 256);

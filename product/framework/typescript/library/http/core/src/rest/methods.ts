@@ -28,10 +28,25 @@ async function parseResponseBody<T>(res: HttpResponse): Promise<HttpResponse<T>>
   return { ...res, body: res.raw.body as unknown as T };
 }
 
+// 任意のヘッダ集合に Content-Type (大小無視) が含まれているかを判定するヘルパ
+function hasContentTypeHeader(
+  headers: Record<string, string> | undefined,
+): boolean {
+  // 未指定なら false
+  if (headers === undefined) return false;
+  // 全キーを走査して "content-type" (小文字比較) があれば true
+  for (const k of Object.keys(headers)) {
+    if (k.toLowerCase() === "content-type") return true;
+  }
+  return false;
+}
+
 // body を BodyInit に正規化し、ヘッダを更新する（JSON 自動 stringify + Content-Type 自動付与）
+// defaultHeaders に Content-Type が既にある場合は auto 付与しない (利用者の設定を尊重する、M5)
 function prepareBody(
   body: unknown,
   headers: Record<string, string> | undefined,
+  defaultHeaders: Record<string, string> | undefined,
 ): { body: BodyInit | null | undefined; headers: Record<string, string> } {
   // 入力ヘッダのコピー（元を mutate しない）
   const outHeaders: Record<string, string> = { ...(headers ?? {}) };
@@ -39,10 +54,10 @@ function prepareBody(
   if (!isJsonSerializableBody(body)) {
     return { body: body as BodyInit | null | undefined, headers: outHeaders };
   }
-  // Content-Type が既に指定されている場合は尊重（大文字小文字どちらも検出）
-  const hasContentType = Object.keys(outHeaders).some(
-    (k) => k.toLowerCase() === "content-type",
-  );
+  // Content-Type が init.headers / client.defaultHeaders の **どちらか** に既にあれば auto 付与しない
+  // (defaultHeaders で text/plain 等を指定したケースを application/json で上書きしないため、M5)
+  const hasContentType =
+    hasContentTypeHeader(outHeaders) || hasContentTypeHeader(defaultHeaders);
   // 未指定なら application/json を自動付与
   if (!hasContentType) {
     outHeaders["Content-Type"] = "application/json";
@@ -70,8 +85,8 @@ export async function post<T = unknown>(
   body?: unknown,
   init: BodyfulInit = {},
 ): Promise<HttpResponse<T>> {
-  // body と headers を JSON 自動化処理
-  const prepared = prepareBody(body, init.headers);
+  // body と headers を JSON 自動化処理 (client の defaultHeaders を参照して Content-Type 上書きを抑止)
+  const prepared = prepareBody(body, init.headers, client.config.defaultHeaders);
   // method を POST に固定して低レベル request を呼び出し
   const res = await client.request<T>({
     ...init,
@@ -90,7 +105,8 @@ export async function put<T = unknown>(
   body?: unknown,
   init: BodyfulInit = {},
 ): Promise<HttpResponse<T>> {
-  const prepared = prepareBody(body, init.headers);
+  // body と headers を JSON 自動化処理 (client の defaultHeaders を参照して Content-Type 上書きを抑止)
+  const prepared = prepareBody(body, init.headers, client.config.defaultHeaders);
   const res = await client.request<T>({
     ...init,
     url,
@@ -108,7 +124,8 @@ export async function patch<T = unknown>(
   body?: unknown,
   init: BodyfulInit = {},
 ): Promise<HttpResponse<T>> {
-  const prepared = prepareBody(body, init.headers);
+  // body と headers を JSON 自動化処理 (client の defaultHeaders を参照して Content-Type 上書きを抑止)
+  const prepared = prepareBody(body, init.headers, client.config.defaultHeaders);
   const res = await client.request<T>({
     ...init,
     url,

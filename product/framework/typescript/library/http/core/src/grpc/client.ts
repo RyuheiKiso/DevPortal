@@ -6,6 +6,7 @@ import { mergeRetryDefaults, withRetry } from "../retry.js";
 import { validateGrpcClientConfig } from "../schema.js";
 import { withTimeout } from "../timeout.js";
 import type {
+  GrpcCallOptions,
   GrpcClient,
   GrpcClientConfig,
   GrpcMethodDescriptor,
@@ -114,7 +115,7 @@ export async function createGrpcClient(
   async function unary<Req, Res>(
     desc: GrpcMethodDescriptor<Req, Res>,
     req: Req,
-    opts: { metadata?: Record<string, string>; signal?: AbortSignal; timeoutMs?: number } = {},
+    opts: GrpcCallOptions = {},
   ): Promise<Res> {
     // 相関 ID を 1 件生成
     const requestId = generateRequestId();
@@ -138,9 +139,28 @@ export async function createGrpcClient(
 
     // 試行 1 回ごとのタイムアウト（opts 優先、無ければ config）
     const perAttemptMs = opts.timeoutMs ?? config.timeoutMs;
+
+    // 冪等性ガード (H2): gRPC unary は実質 POST 相当のため、副作用 RPC の暴走 retry を防ぐ
+    // 既定では maxRetries=0 にクランプし、opts.idempotent === true または
+    // config.retry.allowNonIdempotent === true のときのみ通常の retryPolicy を有効化する
+    const isIdempotent =
+      opts.idempotent === true || retryPolicy.allowNonIdempotent === true;
+    const effectiveRetryPolicy = isIdempotent
+      ? retryPolicy
+      : { ...retryPolicy, maxRetries: 0 };
+    if (!isIdempotent && retryPolicy.maxRetries > 0) {
+      // 利用者が retry を設定していたが冪等性ガードで無効化されたことを debug ログに通知
+      logger.debug("grpc.retry.disabled", {
+        requestId,
+        service: desc.service,
+        method: desc.method,
+        reason: "non-idempotent",
+      });
+    }
+
     try {
       // withRetry で複数試行を制御（gRPC では perAttempt のみ採用、total は持たない）
-      const result = await withRetry(retryPolicy, opts.signal, async (attempt) => {
+      const result = await withRetry(effectiveRetryPolicy, opts.signal, async (attempt) => {
         // 1 試行を perAttempt タイムアウトで包む
         return await withTimeout(perAttemptMs, opts.signal, async (signal) => {
           // 試行ログ（attempt は 0 オリジン）
@@ -151,7 +171,28 @@ export async function createGrpcClient(
           let attemptMetadata: Record<string, string> = { ...(opts.metadata ?? {}) };
           if (config.auth !== undefined) {
             // attempt の度に auth provider から最新ヘッダを取得する
-            const authHeaders = await config.auth.getAuthHeaders();
+            // auth が throw した場合は HttpError(code: AUTH_FAILED) にラップ (M7 と同じ思想)
+            let authHeaders: Record<string, string>;
+            try {
+              authHeaders = await config.auth.getAuthHeaders();
+            } catch (authErr) {
+              // 既に HttpError ならそのまま素通し
+              if (authErr instanceof HttpError) {
+                throw authErr;
+              }
+              // それ以外は AUTH_FAILED HttpError にラップ
+              const message =
+                authErr instanceof Error
+                  ? authErr.message
+                  : `auth failed: ${String(authErr)}`;
+              throw new HttpError({
+                message,
+                code: "AUTH_FAILED",
+                retryable: false,
+                requestId,
+                cause: authErr,
+              });
+            }
             attemptMetadata = { ...attemptMetadata, ...authHeaders };
           }
           // 相関 ID を最後に上書き付与する (interceptor 等の影響を受けないように)

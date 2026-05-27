@@ -918,6 +918,146 @@ describe("createHttpClient.request", () => {
     expect(shouldRetry).toHaveBeenCalledTimes(2);
   });
 
+  // H1: withConfig 経由でも親の requestIdHeader が継承される
+  it("H1: withConfig 後も親の requestIdHeader が維持される", async () => {
+    const fetchImpl = vi.fn(async () => jsonOk({}));
+    const c1 = createHttpClient({
+      fetchImpl,
+      requestIdHeader: "traceparent",
+      generateRequestId: () => "tp-001",
+    });
+    // 派生 client にも traceparent が引き継がれる
+    const c2 = c1.withConfig({ baseUrl: "https://b" });
+    await c2.request({ url: "/x" });
+    const headers = fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers["traceparent"]).toBe("tp-001");
+    expect(headers[REQUEST_ID_HEADER]).toBeUndefined();
+  });
+
+  // H1: override で requestIdHeader を上書きできる
+  it("H1: withConfig の override で requestIdHeader を変更できる", async () => {
+    const fetchImpl = vi.fn(async () => jsonOk({}));
+    const c1 = createHttpClient({
+      fetchImpl,
+      requestIdHeader: "X-Request-Id",
+      generateRequestId: () => "rid-001",
+    });
+    const c2 = c1.withConfig({ requestIdHeader: "traceparent" });
+    await c2.request({ url: "/x" });
+    const headers = fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers["traceparent"]).toBe("rid-001");
+    expect(headers["X-Request-Id"]).toBeUndefined();
+  });
+
+  // M3: retryableStatuses 配列も deep freeze される
+  it("M3: client.config.retry.retryableStatuses も freeze される", () => {
+    const statuses = [500, 502];
+    const client = createHttpClient({
+      retry: { retryableStatuses: statuses },
+    });
+    const exposed = client.config.retry?.retryableStatuses;
+    expect(Object.isFrozen(exposed)).toBe(true);
+    // 公開された配列は freeze されているが、元の配列は freeze 対象外（snapshot で複製済み）
+    expect(Object.isFrozen(statuses)).toBe(false);
+    // freeze された配列を push しようとすると TypeError（strict mode）
+    expect(() => {
+      (exposed as number[]).push(503);
+    }).toThrow();
+  });
+
+  // M7: auth が throw すると AUTH_FAILED にラップされ retry されない
+  it("M7: auth.getAuthHeaders の throw は AUTH_FAILED にラップされ retry されない", async () => {
+    const fetchImpl = vi.fn(async () => jsonOk({}));
+    const client = createHttpClient({
+      fetchImpl,
+      auth: {
+        async getAuthHeaders() {
+          throw new Error("token endpoint down");
+        },
+      },
+      retry: { maxRetries: 3, backoffBaseMs: 1, jitter: "none" },
+    });
+    await expect(client.request({ url: "/x" })).rejects.toMatchObject({
+      code: "AUTH_FAILED",
+      retryable: false,
+      message: "token endpoint down",
+    });
+    // fetch は呼ばれない (auth で落ちたので)
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  // M7: auth が既に HttpError を throw する場合は素通し
+  it("M7: auth が HttpError を throw した場合は素通し", async () => {
+    const fetchImpl = vi.fn(async () => jsonOk({}));
+    const explicit = new HttpError({
+      message: "custom auth error",
+      code: "CUSTOM_AUTH",
+      retryable: false,
+    });
+    const client = createHttpClient({
+      fetchImpl,
+      auth: {
+        async getAuthHeaders() {
+          throw explicit;
+        },
+      },
+      retry: { maxRetries: 0 },
+    });
+    await expect(client.request({ url: "/x" })).rejects.toMatchObject({
+      code: "CUSTOM_AUTH",
+    });
+  });
+
+  // M7: auth が非 Error をプリミティブ throw した場合は `auth failed: ...` メッセージにラップ
+  it("M7: auth が非 Error を throw した場合は固定メッセージで AUTH_FAILED にラップ", async () => {
+    const fetchImpl = vi.fn(async () => jsonOk({}));
+    const client = createHttpClient({
+      fetchImpl,
+      auth: {
+        async getAuthHeaders(): Promise<Record<string, string>> {
+          // プリミティブを throw (toHttpError の非 Error 分岐に到達)
+          throw "raw-token-string";
+        },
+      },
+      retry: { maxRetries: 0 },
+    });
+    await expect(client.request({ url: "/x" })).rejects.toMatchObject({
+      code: "AUTH_FAILED",
+      retryable: false,
+      message: "auth failed: raw-token-string",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  // M7: shouldRetry で AUTH_FAILED を retry することは可能
+  it("M7: shouldRetry で AUTH_FAILED を retry できる", async () => {
+    vi.useFakeTimers();
+    let authCalls = 0;
+    const fetchImpl = vi.fn(async () => jsonOk({}));
+    const client = createHttpClient({
+      fetchImpl,
+      auth: {
+        async getAuthHeaders() {
+          authCalls++;
+          if (authCalls === 1) throw new Error("transient");
+          return { Authorization: "Bearer ok" };
+        },
+      },
+      retry: {
+        maxRetries: 1,
+        backoffBaseMs: 1,
+        jitter: "none",
+        shouldRetry: (err) =>
+          (err as { code?: string }).code === "AUTH_FAILED",
+      },
+    });
+    const p = client.request({ url: "/x" });
+    await vi.advanceTimersByTimeAsync(10);
+    await expect(p).resolves.toMatchObject({ status: 200 });
+    // 2 attempt 分 auth が呼ばれる
+    expect(authCalls).toBe(2);
+  });
+
   // willActuallyRetry: shouldRetry が true を返した場合、retryable=true で公開され実際に retry される
   it("shouldRetry が true を返す場合、retryable=true で attempt がリトライされる", async () => {
     let calls = 0;

@@ -51,10 +51,15 @@ export function appendSearchParams(
   return `${beforeHash}${separator}${encoded.slice(1)}${hash}`;
 }
 
+// RFC 3986 §3.1 の scheme 構文に合致する絶対 URL を検出する正規表現
+// (scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) "://" の形)
+// http(s) に限定すると ws/wss/grpc 等のスキームが baseUrl と連結されてしまうため拡張する
+const ABSOLUTE_URL_PATTERN = /^[a-z][a-z0-9+\-.]*:\/\//i;
+
 // baseUrl と path を連結（path が絶対 URL なら素通し）
 export function joinUrl(baseUrl: string | undefined, path: string): string {
-  // 絶対 URL（http(s)://...）は素通し
-  if (/^https?:\/\//i.test(path)) {
+  // 絶対 URL（任意 scheme + "://"）は素通し
+  if (ABSOLUTE_URL_PATTERN.test(path)) {
     return path;
   }
   // baseUrl 無指定は path をそのまま返す

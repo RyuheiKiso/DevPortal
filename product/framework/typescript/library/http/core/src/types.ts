@@ -71,6 +71,11 @@ export interface RetryPolicy {
   // 既定リトライ対象ステータス（既定 [408, 429, 500, 502, 503, 504]、425 は除外）
   retryableStatuses?: readonly number[];
   // 任意判定関数（指定時は retryableStatuses を上書き、ただし冪等性ガードは別途適用される）
+  //
+  // 注意 (M4): client.ts は !ok レスポンスに対し shouldRetry を呼ぶ際、暫定 HttpError を組み立てて渡す。
+  //   暫定 HttpError の `retryable` は確定前のため必ず `false` で渡される。
+  //   shouldRetry 実装で「再試行するかどうか」を判定する際は `err.status` / `err.response` /
+  //   `err.code` を見ること。`err.retryable` を見ても常に false なので意図通り動かない。
   shouldRetry?: (error: unknown, attempt: number) => boolean;
   // 乱数源（テストで決定論化するために注入可能）
   random?: () => number;

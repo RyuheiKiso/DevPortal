@@ -170,6 +170,9 @@ function mergeConfig(
     logger: override.logger ?? base.logger,
     fetchImpl: override.fetchImpl ?? base.fetchImpl,
     generateRequestId: override.generateRequestId ?? base.generateRequestId,
+    // 相関 ID を載せるヘッダ名は base から継承し、override で書き換え可能 (H1)
+    // 旧実装はこのフィールドが欠落していたため withConfig 後にデフォルト "X-Request-Id" に戻っていた
+    requestIdHeader: override.requestIdHeader ?? base.requestIdHeader,
     // retry は部分指定の浅マージ
     retry: { ...(base.retry ?? {}), ...(override.retry ?? {}) },
     // timeout も浅マージ
@@ -191,11 +194,23 @@ function mergeConfig(
 }
 
 function snapshotConfig(config: HttpClientConfig): HttpClientConfig {
+  // retry は浅コピーした上で retryableStatuses 配列も複製する (M3 / freeze 用)
+  // 元配列を freeze すると利用者が渡した配列まで凍結してしまうため別配列に切り出す
+  const retrySnapshot =
+    config.retry === undefined
+      ? undefined
+      : {
+          ...config.retry,
+          retryableStatuses:
+            config.retry.retryableStatuses === undefined
+              ? undefined
+              : [...config.retry.retryableStatuses],
+        };
   return {
     ...config,
     defaultHeaders:
       config.defaultHeaders === undefined ? undefined : { ...config.defaultHeaders },
-    retry: config.retry === undefined ? undefined : { ...config.retry },
+    retry: retrySnapshot,
     timeout: config.timeout === undefined ? undefined : { ...config.timeout },
     requestInterceptors:
       config.requestInterceptors === undefined
@@ -213,7 +228,15 @@ function snapshotConfig(config: HttpClientConfig): HttpClientConfig {
 function freezeConfigSnapshot(config: HttpClientConfig): Readonly<HttpClientConfig> {
   const snapshot = snapshotConfig(config);
   if (snapshot.defaultHeaders !== undefined) Object.freeze(snapshot.defaultHeaders);
-  if (snapshot.retry !== undefined) Object.freeze(snapshot.retry);
+  if (snapshot.retry !== undefined) {
+    // retry 全体を freeze する前にネストされた配列も freeze する (M3)
+    // 旧実装は浅 freeze のみで retryableStatuses 配列を利用者側で push できる漏れがあった
+    if (snapshot.retry.retryableStatuses !== undefined) {
+      // 元配列が freeze 済みの場合に Object.freeze 2 回が問題にならないことを利用
+      Object.freeze(snapshot.retry.retryableStatuses);
+    }
+    Object.freeze(snapshot.retry);
+  }
   if (snapshot.timeout !== undefined) Object.freeze(snapshot.timeout);
   if (snapshot.requestInterceptors !== undefined) Object.freeze(snapshot.requestInterceptors);
   if (snapshot.responseInterceptors !== undefined) Object.freeze(snapshot.responseInterceptors);
@@ -299,8 +322,32 @@ export function createHttpClient(rawConfig: HttpClientConfig = {}): HttpClient {
             // [H] attempt 毎に auth ヘッダを取得（token refresh 対応、A3）
             // ヘッダは case-insensitive にマージし、`Authorization` と `authorization` の重複を防ぐ
             // (一部サーバはヘッダ重複を 400 として弾くため、出力は必ずユニーク名にする)
-            const authHeaders =
-              config.auth !== undefined ? await config.auth.getAuthHeaders() : undefined;
+            // auth が throw した場合は HttpError(code: AUTH_FAILED, retryable: false) にラップする (M7)
+            // 既定 retry 判定は false なので auth エラーで黙って再試行する事故を防ぐ
+            // (利用者は shouldRetry で `err.code === "AUTH_FAILED"` を判定すれば明示的に retry 可能)
+            let authHeaders: Record<string, string> | undefined = undefined;
+            if (config.auth !== undefined) {
+              try {
+                authHeaders = await config.auth.getAuthHeaders();
+              } catch (authErr) {
+                // 既に HttpError ならそのまま素通し (requestId だけ補完される)
+                if (authErr instanceof HttpError) {
+                  throw authErr;
+                }
+                // 任意の throw 値を AUTH_FAILED HttpError にラップ
+                const message =
+                  authErr instanceof Error
+                    ? authErr.message
+                    : `auth failed: ${String(authErr)}`;
+                throw new HttpError({
+                  message,
+                  code: "AUTH_FAILED",
+                  retryable: false,
+                  requestId: req.requestId,
+                  cause: authErr,
+                });
+              }
+            }
             // [I] 相関 ID を最終的に付与（auth より後、interceptor の置換からも保護、A1）
             // ヘッダ名は config.requestIdHeader でカスタマイズ可能（既定 "X-Request-Id"、B-2）
             // mergeHeadersCaseInsensitive により req.headers + authHeaders + requestId が

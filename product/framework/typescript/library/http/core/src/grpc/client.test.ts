@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // テスト対象
 import { createGrpcClient } from "./client.js";
 import { createBearerAuth } from "../auth.js";
+import { HttpError } from "../errors.js";
 import { REQUEST_ID_HEADER } from "../requestId.js";
 // 型
 import type {
@@ -160,7 +161,8 @@ describe("createGrpcClient", () => {
   });
 
   // gRPC エラーは正規化される
-  it("UNAVAILABLE エラーはリトライ後に最終 throw", async () => {
+  // H2: 冪等性ガード適用後は明示的に opts.idempotent: true を渡さないと retry されない
+  it("UNAVAILABLE エラーはリトライ後に最終 throw (idempotent: true)", async () => {
     vi.useFakeTimers();
     let calls = 0;
     const client = await createGrpcClient({
@@ -171,7 +173,8 @@ describe("createGrpcClient", () => {
         cb({ code: 14, message: "down" }, undefined as never);
       }),
     });
-    const p = client.unary(desc, "in").catch((e: unknown) => e);
+    // 冪等オプトイン
+    const p = client.unary(desc, "in", { idempotent: true }).catch((e: unknown) => e);
     await vi.advanceTimersByTimeAsync(10);
     const err = (await p) as { code: string };
     expect(err.code).toBe("UNAVAILABLE");
@@ -323,12 +326,177 @@ describe("createGrpcClient", () => {
         },
       }),
     });
-    const out = await client.unary(desc, "in");
+    // H2: retry を期待するテストなので冪等オプトインを明示する
+    const out = await client.unary(desc, "in", { idempotent: true });
     expect(out).toBe("ok");
     // 1 回目 attempt は "old"、2 回目 attempt は "new" が観測される (= attempt 毎に再評価された証)
     expect(observedAuth[0]).toBe("Bearer old");
     expect(observedAuth[1]).toBe("Bearer new");
     // auth.getAuthHeaders も 2 回呼ばれている
     expect(getAuthCalls).toBe(2);
+  });
+
+  // ----- H2: 冪等性ガード関連の新規テスト -----
+
+  // H2: opts.idempotent 未指定なら UNAVAILABLE でも 1 試行のみ (副作用 RPC 暴走防止)
+  it("H2: idempotent 未指定なら UNAVAILABLE でも retry されない (1 試行)", async () => {
+    let calls = 0;
+    const client = await createGrpcClient({
+      baseUrl: "https://grpc",
+      retry: { maxRetries: 3, backoffBaseMs: 1, jitter: "none" },
+      grpcClientFactory: stubFactory((_url, _md, cb) => {
+        calls++;
+        cb({ code: 14, message: "down" }, undefined as never);
+      }),
+    });
+    // idempotent を指定しない (デフォルトは非冪等扱い)
+    await expect(client.unary(desc, "in")).rejects.toMatchObject({
+      code: "UNAVAILABLE",
+    });
+    expect(calls).toBe(1);
+  });
+
+  // H2: opts.idempotent: true を渡すと通常 retry される
+  it("H2: opts.idempotent: true で UNAVAILABLE は retry される", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const client = await createGrpcClient({
+      baseUrl: "https://grpc",
+      retry: { maxRetries: 2, backoffBaseMs: 1, jitter: "none" },
+      grpcClientFactory: stubFactory((_url, _md, cb) => {
+        calls++;
+        if (calls < 3) {
+          cb({ code: 14, message: "down" }, undefined as never);
+          return;
+        }
+        cb(null, "ok");
+      }),
+    });
+    const p = client.unary(desc, "in", { idempotent: true });
+    await vi.advanceTimersByTimeAsync(10);
+    await expect(p).resolves.toBe("ok");
+    expect(calls).toBe(3);
+  });
+
+  // H2: GrpcClientConfig.retry.allowNonIdempotent: true なら opts 未指定でも retry される
+  it("H2: config.retry.allowNonIdempotent: true なら opts 未指定でも retry される", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const client = await createGrpcClient({
+      baseUrl: "https://grpc",
+      retry: {
+        maxRetries: 2,
+        backoffBaseMs: 1,
+        jitter: "none",
+        allowNonIdempotent: true,
+      },
+      grpcClientFactory: stubFactory((_url, _md, cb) => {
+        calls++;
+        if (calls < 2) {
+          cb({ code: 14, message: "down" }, undefined as never);
+          return;
+        }
+        cb(null, "ok");
+      }),
+    });
+    const p = client.unary(desc, "in");
+    await vi.advanceTimersByTimeAsync(10);
+    await expect(p).resolves.toBe("ok");
+    expect(calls).toBe(2);
+  });
+
+  // H2: idempotent 未指定時は logger.debug("grpc.retry.disabled") が出る
+  it("H2: 非冪等で retry 無効化されたとき grpc.retry.disabled が debug log に出る", async () => {
+    const debugCalls: Array<[string, unknown]> = [];
+    const logger = {
+      debug: (m: string, c?: unknown) => debugCalls.push([m, c]),
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+    };
+    const client = await createGrpcClient({
+      baseUrl: "https://grpc",
+      logger,
+      retry: { maxRetries: 3, backoffBaseMs: 1, jitter: "none" },
+      grpcClientFactory: stubFactory((_url, _md, cb) => {
+        cb({ code: 14, message: "down" }, undefined as never);
+      }),
+    });
+    await expect(client.unary(desc, "in")).rejects.toMatchObject({
+      code: "UNAVAILABLE",
+    });
+    // grpc.retry.disabled が記録されている
+    const disabled = debugCalls.find(([m]) => m === "grpc.retry.disabled");
+    expect(disabled).toBeDefined();
+    expect(disabled?.[1]).toMatchObject({ reason: "non-idempotent" });
+  });
+
+  // M2: GrpcClientConfig.retry に retryableStatuses を渡すと ZodError
+  it("M2: retry.retryableStatuses を渡すと ZodError で createGrpcClient が失敗", async () => {
+    await expect(
+      createGrpcClient({
+        baseUrl: "https://grpc",
+        // 型では弾けるが JS 利用や外部設定経由のミスを早期検出するため runtime でも弾く
+        retry: { retryableStatuses: [500] } as unknown as { maxRetries: number },
+        grpcClientFactory: () => ({ rpcCall: () => undefined }),
+      }),
+    ).rejects.toThrow();
+  });
+
+  // M7: gRPC 側でも auth エラーが AUTH_FAILED にラップされる
+  it("M7: gRPC の auth が throw すると AUTH_FAILED にラップされる", async () => {
+    const client = await createGrpcClient({
+      baseUrl: "https://grpc",
+      auth: {
+        async getAuthHeaders() {
+          throw new Error("token endpoint down");
+        },
+      },
+      grpcClientFactory: () => ({ rpcCall: () => undefined }),
+    });
+    await expect(client.unary(desc, "in")).rejects.toMatchObject({
+      code: "AUTH_FAILED",
+      retryable: false,
+    });
+  });
+
+  // M7: gRPC の auth が HttpError を直接 throw した場合は素通し
+  it("M7: gRPC の auth が HttpError を throw した場合は素通し", async () => {
+    const explicit = new HttpError({
+      message: "custom gRPC auth error",
+      code: "CUSTOM_AUTH",
+      retryable: false,
+    });
+    const client = await createGrpcClient({
+      baseUrl: "https://grpc",
+      auth: {
+        async getAuthHeaders() {
+          throw explicit;
+        },
+      },
+      grpcClientFactory: () => ({ rpcCall: () => undefined }),
+    });
+    await expect(client.unary(desc, "in")).rejects.toMatchObject({
+      code: "CUSTOM_AUTH",
+    });
+  });
+
+  // M7: gRPC の auth が非 Error をプリミティブ throw した場合は固定メッセージで AUTH_FAILED
+  it("M7: gRPC の auth が非 Error を throw した場合は AUTH_FAILED にラップ", async () => {
+    const client = await createGrpcClient({
+      baseUrl: "https://grpc",
+      auth: {
+        async getAuthHeaders(): Promise<Record<string, string>> {
+          // プリミティブを throw する pathological ケース
+          throw "raw-token-fail";
+        },
+      },
+      grpcClientFactory: () => ({ rpcCall: () => undefined }),
+    });
+    await expect(client.unary(desc, "in")).rejects.toMatchObject({
+      code: "AUTH_FAILED",
+      retryable: false,
+      message: "auth failed: raw-token-fail",
+    });
   });
 });

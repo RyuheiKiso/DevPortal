@@ -18,13 +18,20 @@ export function createBearerAuth(
 }
 
 // 静的なヘッダ集合を毎回返す AuthProvider を作るヘルパ
+// 初期化時に 1 度だけスナップショットを取り、その後の外部 mutation は反映しない
+// (利用者が「静的」と信じて頼ったコードが、後から差し換えられないことを保証する)
 export function createStaticAuth(
   headers: Record<string, string>,
 ): AuthProvider {
+  // ファクトリ呼出時点のスナップショットを closure に保持 (1 度だけコピー)
+  const snapshot: Record<string, string> = { ...headers };
+  // 万一 closure に保持した snapshot を `Object.assign` 等で書き換えられても影響を出さないため freeze
+  Object.freeze(snapshot);
   return {
-    // getAuthHeaders 実装：渡されたヘッダをコピーして返す（外部からの mutation を避ける）
+    // getAuthHeaders 実装：snapshot のコピーを返す (返り値の mutation も snapshot に伝播しない)
     async getAuthHeaders(): Promise<Record<string, string>> {
-      return { ...headers };
+      // 利用者側の mutation を防ぐためにコピーを返す
+      return { ...snapshot };
     },
   };
 }

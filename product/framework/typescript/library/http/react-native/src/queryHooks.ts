@@ -277,7 +277,11 @@ export function useHttpMutation<TBody extends MutationBody = MutationBody, TRes 
     },
     [mutateAsync],
   );
+  // M1: latestCallIdRef を進めてから state をクリアする
+  // これにより reset 後に完了する古い mutateAsync は callId 比較で state を書かない
+  // (利用者の「キャンセル目的」での reset 呼び出しが意図通り動く)
   const reset = useCallback(() => {
+    latestCallIdRef.current += 1;
     setState({ data: undefined, error: undefined, loading: false });
   }, []);
   return { ...state, mutate, mutateAsync, reset };
