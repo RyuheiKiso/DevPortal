@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createNotificationManager } from "@k1s0-ts-notification/core";
-import { installGlobalErrorNotifier, type Logger } from "./globalErrorNotifier.js";
+import { __testing__, installGlobalErrorNotifier, type Logger } from "./globalErrorNotifier.js";
 
 interface FakeErrorUtils {
   getGlobalHandler(): (error: unknown, isFatal?: boolean) => void;
@@ -37,6 +37,9 @@ describe("installGlobalErrorNotifier", () => {
       writable: true,
     });
     savedErrorUtils = undefined;
+    // モジュールスコープのグローバル直近 install 追跡をリセット
+    // (テスト間で「前テストの uninstall が currentGlobalUninstall に残る」現象を防ぐ)
+    __testing__.resetGlobalState();
   });
 
   it("returns a no-op uninstall function when ErrorUtils is unavailable", () => {
@@ -577,26 +580,148 @@ describe("installGlobalErrorNotifier", () => {
   });
 
   // getGlobalHandler が install 時に throw しても install は完走（no-op fallback で previous を保持）
-  it("logs and continues install when getGlobalHandler throws", () => {
+  // 加えて、後から global handler を呼んだとき no-op previous fallback も問題なく呼ばれることを確認
+  it("logs and continues install when getGlobalHandler throws, invoking the no-op previous fallback", () => {
     const cause = new Error("getter boom");
+    let storedHandler: ((error: unknown, isFatal?: boolean) => void) | undefined;
+    let getterCalls = 0;
+    // 1 回目（install 時）の getGlobalHandler は throw、2 回目以降は保存済み handler を返す
     Object.defineProperty(globalThis, "ErrorUtils", {
       value: {
         getGlobalHandler: () => {
-          throw cause;
+          getterCalls += 1;
+          if (getterCalls === 1) throw cause;
+          return storedHandler ?? (() => undefined);
         },
-        setGlobalHandler: () => {},
+        setGlobalHandler: (fn: typeof storedHandler) => {
+          storedHandler = fn;
+        },
       },
       configurable: true,
       writable: true,
     });
     const manager = createNotificationManager();
+    const toastSpy = vi.spyOn(manager, "toast");
     const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
     const uninstall = installGlobalErrorNotifier(manager, { logger });
 
+    // install 時の getGlobalHandler throw は logger.error で記録される
     expect(typeof uninstall).toBe("function");
     expect(logger.error.mock.calls[0]?.[0]).toBe("globalErrorNotifier.getPreviousHandlerFailed");
     expect(logger.error.mock.calls[0]?.[1]).toEqual({ cause });
+
+    // install 後に handler を呼ぶ → previous (no-op fallback `() => {}`) も走るが throw しない
+    expect(() => storedHandler!(new Error("x"), false)).not.toThrow();
+    // toast は通常通り呼ばれる
+    expect(toastSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // 異 manager 間: A install → B install で A の handler が global から外れる
+  it("uninstalls the previous manager's handler when a different manager is installed", () => {
+    const fake = installFakeErrorUtils();
+    // 各 manager に独立した toast spy を用意
+    const managerA = createNotificationManager();
+    const toastA = vi.spyOn(managerA, "toast");
+    const managerB = createNotificationManager();
+    const toastB = vi.spyOn(managerB, "toast");
+
+    // A を install してから B を install
+    installGlobalErrorNotifier(managerA);
+    installGlobalErrorNotifier(managerB);
+
+    // global handler を 1 回叩く → B の handler だけが動き A は呼ばれない
+    fake.utils.getGlobalHandler()(new Error("x"), false);
+
+    expect(toastB).toHaveBeenCalledTimes(1);
+    expect(toastA).not.toHaveBeenCalled();
+  });
+
+  // 異 manager 間: B install 時に「グローバル直近置換」の warn が記録される
+  it("logs replacingPreviousGlobalInstall when a different manager replaces the active install", () => {
+    installFakeErrorUtils();
+    const managerA = createNotificationManager();
+    const managerB = createNotificationManager();
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    installGlobalErrorNotifier(managerA, { logger });
+    // ここまでで warn は無し
+    expect(logger.warn).not.toHaveBeenCalled();
+    // 異 manager の B を install すると warn が 1 回
+    installGlobalErrorNotifier(managerB, { logger });
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn.mock.calls[0]?.[0]).toBe("globalErrorNotifier.replacingPreviousGlobalInstall");
+  });
+
+  // install A → install B → uninstall A しても B は動き続ける（A の uninstall は no-op）
+  it("uninstalling the previously replaced manager is a no-op for the active one", () => {
+    const fake = installFakeErrorUtils();
+    const managerA = createNotificationManager();
+    const managerB = createNotificationManager();
+    const toastB = vi.spyOn(managerB, "toast");
+
+    const uninstallA = installGlobalErrorNotifier(managerA);
+    installGlobalErrorNotifier(managerB);
+    // B の install 時点で A の uninstall は内部的に呼ばれ removed=true 化している
+    // よって以下の uninstallA() は再呼出しで何もしない
+    uninstallA();
+
+    // B の handler はまだ active
+    fake.utils.getGlobalHandler()(new Error("x"), false);
+    expect(toastB).toHaveBeenCalledTimes(1);
+  });
+
+  // uninstall 時に getGlobalHandler が throw → logger.error にgetCurrentHandlerFailed が記録される
+  it("logs an error when getGlobalHandler throws during uninstall", () => {
+    const fake = installFakeErrorUtils();
+    const manager = createNotificationManager();
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const uninstall = installGlobalErrorNotifier(manager, { logger });
+    // uninstall 直前に getGlobalHandler を throw 化（closure 参照の同一 utils オブジェクトを書き換え）
+    const cause = new Error("getter boom at uninstall");
+    fake.utils.getGlobalHandler = (): never => {
+      throw cause;
+    };
+    // uninstall は内部で握って throw しない
+    expect(() => uninstall()).not.toThrow();
+    expect(
+      logger.error.mock.calls.find(
+        (c) => c[0] === "globalErrorNotifier.getCurrentHandlerFailed",
+      ),
+    ).toEqual(["globalErrorNotifier.getCurrentHandlerFailed", { cause }]);
+  });
+
+  // uninstall 時に setGlobalHandler が throw → logger.error に restorePreviousFailed が記録される
+  it("logs an error when setGlobalHandler throws during uninstall", () => {
+    const fake = installFakeErrorUtils();
+    const manager = createNotificationManager();
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const uninstall = installGlobalErrorNotifier(manager, { logger });
+    // current === handler 判定を真にするため getGlobalHandler は素のまま、setGlobalHandler だけ throw 化
+    const cause = new Error("setter boom at uninstall");
+    fake.utils.setGlobalHandler = (): never => {
+      throw cause;
+    };
+    expect(() => uninstall()).not.toThrow();
+    expect(
+      logger.error.mock.calls.find(
+        (c) => c[0] === "globalErrorNotifier.restorePreviousFailed",
+      ),
+    ).toEqual(["globalErrorNotifier.restorePreviousFailed", { cause }]);
+  });
+
+  // 同 manager の二重 install は (a) で完了し、(b) の global 経路 warn は出ない
+  it("does not emit replacingPreviousGlobalInstall warn when re-installing the same manager", () => {
+    installFakeErrorUtils();
+    const manager = createNotificationManager();
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    installGlobalErrorNotifier(manager, { logger });
+    installGlobalErrorNotifier(manager, { logger });
+
+    // 同 manager 経路の warn のみ（global 経路の warn は出ない: uninstall 内で currentGlobalUninstall が null 化されているため）
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn.mock.calls[0]?.[0]).toBe("globalErrorNotifier.replacingPreviousInstall");
   });
 
   // setGlobalHandler が install 時に throw した場合は no-op uninstall を返し、logger に記録

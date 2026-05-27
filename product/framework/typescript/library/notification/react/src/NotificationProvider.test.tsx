@@ -186,6 +186,62 @@ describe("NotificationProvider", () => {
     }
   });
 
+  // isConfigEqual の分岐網羅: maxQueueSize / now / idFactory / timer / undefined 遷移
+  // それぞれを単独で変更すると 1 回だけ warn が出ることを検証する
+  it("warns when isConfigEqual detects a change in any single field", () => {
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "development";
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    // 検証用ヘルパ: 2 つの config を順に渡して warn 回数を返す
+    const runCase = (a: object | undefined, b: object | undefined): number => {
+      warnSpy.mockClear();
+      let renderer: ReactTestRenderer | undefined;
+      try {
+        act(() => {
+          renderer = create(
+            // @ts-expect-error any 型の動的 config を渡して各分岐を直接踏むためのテスト用 cast
+            <NotificationProvider config={a}>
+              <ManagerProbe onReady={() => undefined} />
+            </NotificationProvider>,
+          );
+        });
+        act(() => {
+          renderer!.update(
+            // @ts-expect-error 同上
+            <NotificationProvider config={b}>
+              <ManagerProbe onReady={() => undefined} />
+            </NotificationProvider>,
+          );
+        });
+        return warnSpy.mock.calls.length;
+      } finally {
+        act(() => {
+          renderer?.unmount();
+        });
+      }
+    };
+
+    try {
+      // 分岐 L28: 片方だけ undefined（初回 undefined → 後で defined）
+      expect(runCase(undefined, { defaultDuration: 100 })).toBe(1);
+      // 分岐 L28 (逆): 初回 defined → 後で undefined
+      expect(runCase({ defaultDuration: 100 }, undefined)).toBe(1);
+      // 分岐 L35: maxQueueSize の差分
+      expect(runCase({ maxQueueSize: 10 }, { maxQueueSize: 20 })).toBe(1);
+      // 分岐 L39: now 関数の参照差分
+      expect(runCase({ now: () => 1 }, { now: () => 2 })).toBe(1);
+      // 分岐 L42: idFactory の参照差分
+      expect(runCase({ idFactory: () => "a" }, { idFactory: () => "b" })).toBe(1);
+      // 分岐 L45: timer の参照差分
+      const timerA = { set: () => 0, clear: () => undefined };
+      const timerB = { set: () => 0, clear: () => undefined };
+      expect(runCase({ timer: timerA }, { timer: timerB })).toBe(1);
+    } finally {
+      warnSpy.mockRestore();
+      process.env.NODE_ENV = originalEnv;
+    }
+  });
+
   // 同値 inline literal の連続更新では警告が出ない（README 例の idiomatic 用法を保護）
   it("does not warn when config is a fresh literal but primitive values are equal", () => {
     const originalEnv = process.env.NODE_ENV;

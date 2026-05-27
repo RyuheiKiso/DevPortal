@@ -210,4 +210,151 @@ describe("createAlertConfirmAdapter", () => {
     void manager.confirm({ message: "after-dispose" });
     expect(alertMock.calls).toHaveLength(1);
   });
+
+  // i18n: options.labels.confirm が confirm 既定ラベルとして使われる
+  it("uses options.labels.confirm as the default confirm button label", () => {
+    alertMock.calls.length = 0;
+    const manager = createNotificationManager();
+    createAlertConfirmAdapter(manager, { labels: { confirm: "Yes" } });
+    // confirmLabel 未指定で発行 → labels.confirm がフォールバックに使われる
+    void manager.confirm({ message: "?" });
+    expect(alertMock.calls[0]?.buttons[1]?.text).toBe("Yes");
+  });
+
+  // i18n: options.labels.cancel が cancel 既定ラベルとして使われる
+  it("uses options.labels.cancel as the default cancel button label", () => {
+    alertMock.calls.length = 0;
+    const manager = createNotificationManager();
+    createAlertConfirmAdapter(manager, { labels: { cancel: "No" } });
+    // cancelLabel 未指定 → labels.cancel フォールバック
+    void manager.confirm({ message: "?" });
+    expect(alertMock.calls[0]?.buttons[0]?.text).toBe("No");
+  });
+
+  // i18n: options.labels.close が dialog の close 既定ラベルとして使われる
+  it("uses options.labels.close as the default close button label for action-less dialogs", () => {
+    alertMock.calls.length = 0;
+    const manager = createNotificationManager();
+    createAlertConfirmAdapter(manager, { labels: { close: "Dismiss" } });
+    // actions なし dialog → labels.close が close ボタン文言になる
+    void manager.dialog({ message: "info" });
+    expect(alertMock.calls[0]?.buttons).toHaveLength(1);
+    expect(alertMock.calls[0]?.buttons[0]?.text).toBe("Dismiss");
+  });
+
+  // i18n: notification.confirmLabel は options.labels.confirm より優先される
+  it("per-notification confirmLabel/cancelLabel wins over options.labels", () => {
+    alertMock.calls.length = 0;
+    const manager = createNotificationManager();
+    createAlertConfirmAdapter(manager, { labels: { confirm: "Yes", cancel: "No" } });
+    // 通知個別の confirmLabel/cancelLabel を指定
+    void manager.confirm({ message: "?", confirmLabel: "Override-OK", cancelLabel: "Override-NG" });
+    expect(alertMock.calls[0]?.buttons[0]?.text).toBe("Override-NG");
+    expect(alertMock.calls[0]?.buttons[1]?.text).toBe("Override-OK");
+  });
+
+  // キューイング: install 時に複数 pending があっても、1 件ずつ順次表示される
+  it("displays multiple pending notifications one at a time when installed", async () => {
+    alertMock.calls.length = 0;
+    const manager = createNotificationManager();
+    // install 前に 3 件 pending を作る
+    const a = manager.confirm({ message: "A" });
+    const b = manager.confirm({ message: "B" });
+    const c = manager.confirm({ message: "C" });
+    // install 時点では 1 件目のみ表示される
+    createAlertConfirmAdapter(manager);
+    expect(alertMock.calls).toHaveLength(1);
+    expect(alertMock.calls[0]?.message).toBe("A");
+    // A を resolve すると 2 件目が表示される
+    alertMock.calls[0]?.buttons[1]?.onPress?.();
+    await expect(a).resolves.toBe(true);
+    expect(alertMock.calls).toHaveLength(2);
+    expect(alertMock.calls[1]?.message).toBe("B");
+    // B を resolve すると 3 件目が表示される
+    alertMock.calls[1]?.buttons[0]?.onPress?.();
+    await expect(b).resolves.toBe(false);
+    expect(alertMock.calls).toHaveLength(3);
+    expect(alertMock.calls[2]?.message).toBe("C");
+    // C も resolve できる
+    alertMock.calls[2]?.buttons[1]?.onPress?.();
+    await expect(c).resolves.toBe(true);
+  });
+
+  // キューイング: install 後の連続 add も順次表示される
+  it("queues notifications added after install and shows them one at a time", async () => {
+    const { manager } = setup();
+    const a = manager.confirm({ message: "A" });
+    const b = manager.confirm({ message: "B" });
+    // A 表示中は B はまだ Alert.alert に到達していない
+    expect(alertMock.calls).toHaveLength(1);
+    expect(alertMock.calls[0]?.message).toBe("A");
+    // A を解決すると B が表示される
+    alertMock.calls[0]?.buttons[1]?.onPress?.();
+    await expect(a).resolves.toBe(true);
+    expect(alertMock.calls).toHaveLength(2);
+    expect(alertMock.calls[1]?.message).toBe("B");
+    alertMock.calls[1]?.buttons[1]?.onPress?.();
+    await expect(b).resolves.toBe(true);
+  });
+
+  // キューイング: dialog と confirm が混在しても add 順に表示される
+  it("preserves FIFO order across dialog and confirm kinds", async () => {
+    const { manager } = setup();
+    const c = manager.confirm({ message: "C-first" });
+    const d = manager.dialog({ message: "D-second" });
+    // 最初は confirm のみ表示中
+    expect(alertMock.calls).toHaveLength(1);
+    expect(alertMock.calls[0]?.message).toBe("C-first");
+    // confirm 解決後に dialog が表示される
+    alertMock.calls[0]?.buttons[1]?.onPress?.();
+    await expect(c).resolves.toBe(true);
+    expect(alertMock.calls).toHaveLength(2);
+    expect(alertMock.calls[1]?.message).toBe("D-second");
+    // dialog も解決できる
+    alertMock.calls[1]?.buttons[0]?.onPress?.();
+    await expect(d).resolves.toEqual({ dismissed: true, reason: undefined });
+  });
+
+  // キューイング: 待機中 (current ではない) 通知が manager.dismiss で remove されたら waiting から外れる
+  it("removes a waiting (not current) notification from the queue when it is dismissed externally", async () => {
+    const { manager } = setup();
+    // A: current として表示中
+    const a = manager.confirm({ message: "A" });
+    // B, C: waiting に積まれる
+    const b = manager.confirm({ message: "B" });
+    void manager.confirm({ message: "C" });
+    expect(alertMock.calls).toHaveLength(1);
+    expect(alertMock.calls[0]?.message).toBe("A");
+
+    // B (waiting 中) を直接 dismiss する → resolveConfirm(B, false) → remove B が走る
+    // adapter listener が waiting から B を除去（splice 経路）
+    const allBefore = manager.getAll();
+    const bNotification = allBefore.find((n) => n.message === "B");
+    expect(bNotification).toBeDefined();
+    manager.dismiss(bNotification!.id);
+    await expect(b).resolves.toBe(false);
+
+    // A を解決すると次は C（B は既に waiting から外れている）
+    alertMock.calls[0]?.buttons[1]?.onPress?.();
+    await expect(a).resolves.toBe(true);
+    expect(alertMock.calls).toHaveLength(2);
+    expect(alertMock.calls[1]?.message).toBe("C");
+  });
+
+  // キューイング: 対象外 kind (handleConfirm:false の confirm) は他種の表示を阻害しない
+  it("ignored kinds do not block other kinds in the queue", async () => {
+    alertMock.calls.length = 0;
+    const manager = createNotificationManager();
+    // confirm を抑止した状態で adapter を install
+    createAlertConfirmAdapter(manager, { handleConfirm: false });
+    // 抑止された confirm → 待機キューに積まれない
+    void manager.confirm({ message: "ignored" });
+    expect(alertMock.calls).toHaveLength(0);
+    // 続いて dialog → 直ちに表示される（confirm が waiting に居ない）
+    const d = manager.dialog({ message: "shown" });
+    expect(alertMock.calls).toHaveLength(1);
+    expect(alertMock.calls[0]?.message).toBe("shown");
+    alertMock.calls[0]?.buttons[0]?.onPress?.();
+    await expect(d).resolves.toEqual({ dismissed: true, reason: undefined });
+  });
 });

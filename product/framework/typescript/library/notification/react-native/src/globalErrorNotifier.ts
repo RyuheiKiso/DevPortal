@@ -91,6 +91,12 @@ export interface GlobalErrorNotifierOptions {
 // 二重 install 時に前の install を自動 uninstall するためのレジストリ
 const activeUninstallByManager = new WeakMap<NotificationManager, () => void>();
 
+// グローバルに「直近の install」を 1 件だけ追跡する（manager に依存しない）
+// 異 manager で install された場合でも、ErrorUtils の handler チェーンに過去 handler を残さない。
+// これがないと A install → B install で、B の `previous` に A の handler が残り、
+// エラー発生時に B 経由で A.manager.toast まで連鎖呼出される問題（複数 Provider 同居や HMR で顕在化）。
+let currentGlobalUninstall: (() => void) | null = null;
+
 // グローバルエラーを通知 manager に流すハンドラを設置する
 // 戻り値はアンインストール関数（idempotent）。ErrorUtils 不在の環境では no-op 関数を返す。
 export function installGlobalErrorNotifier(
@@ -116,9 +122,24 @@ export function installGlobalErrorNotifier(
     // 開発者に重複に気付かせるための warn（safelyLog 経由）
     safelyLog(logger, "warn", "globalErrorNotifier.replacingPreviousInstall", undefined);
     // 既存 uninstall が throw しても install を続行できるよう try で囲む
+    // (uninstall は内部で完全に try で保護されているため通常 throw しないが、念のための防衛策)
     try {
       previousUninstall();
     } catch (cause) {
+      /* v8 ignore next */
+      safelyLog(logger, "error", "globalErrorNotifier.previousUninstallFailed", { cause });
+    }
+  }
+  // 異 manager でもグローバルに直近 install があれば外す（チェーン蓄積を防ぐ）
+  // 同一 manager 経路 (a) で既に呼ばれている場合は currentGlobalUninstall が null 化されているため、
+  // ここでは何もしない（二重 warn 抑止）
+  if (currentGlobalUninstall !== null) {
+    safelyLog(logger, "warn", "globalErrorNotifier.replacingPreviousGlobalInstall", undefined);
+    // 同上、uninstall は内部完全保護のため通常 throw しないが防衛策として握る
+    try {
+      currentGlobalUninstall();
+    } catch (cause) {
+      /* v8 ignore next */
       safelyLog(logger, "error", "globalErrorNotifier.previousUninstallFailed", { cause });
     }
   }
@@ -254,12 +275,31 @@ export function installGlobalErrorNotifier(
       }
     }
     // 自分の uninstall が WeakMap に登録されたままなら除去
-    // （他の install で上書きされていた場合は触らない）
+    // （他の install で上書きされていた場合は触らない。removed フラグで idempotent 化済みのため
+    //   false 分岐（他に上書きされた状態で uninstall を呼ぶ）は通常パスで到達しない defensive ガード）
+    /* v8 ignore next 3 */
     if (activeUninstallByManager.get(manager) === uninstall) {
       activeUninstallByManager.delete(manager);
+    }
+    // 自分がグローバル直近 install なら null クリア（他 install で上書きされていた場合は触らない）
+    /* v8 ignore next 3 */
+    if (currentGlobalUninstall === uninstall) {
+      currentGlobalUninstall = null;
     }
   };
   // WeakMap に自分の uninstall を登録（次回 install 時の自動置換に使う）
   activeUninstallByManager.set(manager, uninstall);
+  // グローバル直近 install としても登録（異 manager 間のチェーン蓄積を防ぐ）
+  currentGlobalUninstall = uninstall;
   return uninstall;
 }
+
+// テスト用: module スコープのグローバル状態を強制リセットする
+// 通常のテストでは個々の uninstall を呼べばクリーンになるが、Fake ErrorUtils の差し替えで
+// テスト間の状態を完全に独立させたい場合に afterEach で利用する
+export const __testing__ = {
+  resetGlobalState: (): void => {
+    // 直近 install 追跡をクリア（次の install で誤って前テストの uninstall を呼ばないように）
+    currentGlobalUninstall = null;
+  },
+};

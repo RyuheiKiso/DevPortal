@@ -206,15 +206,26 @@ export function createNotificationManager(
         clearTimer(existing.notification.id);
         // 置換後の duration（未指定なら defaultDuration を採用）
         const nextDuration = input.duration ?? defaultDuration;
-        // 置換後の通知（ID と createdAt は据え置き、内容のみ更新）
+        // 置換後の通知は「完全 Replace」: id と createdAt のみ既存値を継承し、
+        // 他のフィールドは新規 toast 構築と同一ロジックで input から取り直す。
+        // 既存値で穴埋め (merge) しないため、input で省略されたフィールドは新規時の既定値に戻る。
+        // 例: 1 回目 level="success" → 2 回目 level 未指定 → 結果は "info" (新規既定)。
         const replaced: ToastNotification = {
-          ...existing.notification,
-          level: input.level ?? existing.notification.level,
+          // id は既存継承（呼出側が引き続き同じ id で dismiss できるようにする）
+          id: existing.notification.id,
+          // 種別は toast 固定
+          kind: "toast",
+          // level の既定は新規時と同じ "info"
+          level: input.level ?? "info",
+          // title / message / duration / actions / meta / dedupeKey は input から完全置換
           title: input.title,
           message: input.message,
           duration: nextDuration,
           actions: freezeActions(input.actions),
           meta: freezeMeta(input.meta),
+          dedupeKey: input.dedupeKey,
+          // createdAt は既存継承（dedupe は同一通知の差し替えなので、時系列の起点を保つ）
+          createdAt: existing.notification.createdAt,
         };
         // 配列の同じ位置に上書き
         const frozen = freezeNotification(replaced);

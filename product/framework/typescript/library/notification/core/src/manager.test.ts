@@ -126,25 +126,78 @@ describe("createNotificationManager / toast", () => {
     expect(all[0]?.message).toBe("v2");
   });
 
-  // dedupeKey 置換時に level / duration を未指定でも defaultDuration と既存 level が引き継がれる
-  it("dedupeKey 置換時に level / duration 未指定でも defaultDuration と既存 level が使われる", () => {
+  // dedupeKey 置換は「完全 Replace」: input で省略したフィールドは新規時の既定値にリセットされる
+  // （旧仕様では既存 level を merge していたが、merge は事故の元なので Replace 統一に変更）
+  it("dedupeKey 置換時に未指定フィールドは新規時の既定値にリセットされる", () => {
     const fake = createFakeTimer();
     const manager = createNotificationManager({
       timer: fake.timer,
       idFactory: createSequentialIdFactory(),
       defaultDuration: 500,
     });
-    // 1 回目: level=success
+    // 1 回目: level=success, duration=1000
     manager.toast({ level: "success", message: "v1", dedupeKey: "k", duration: 1000 });
-    // 2 回目: level / duration 未指定（既存 level と defaultDuration を踏襲）
+    // 2 回目: level / duration 未指定 → 完全 Replace で新規既定値（"info" / defaultDuration）に戻る
     manager.toast({ message: "v2", dedupeKey: "k" });
     const all = manager.getAll();
-    // level は既存値（success）を維持
-    expect(all[0]?.level).toBe("success");
-    // duration は defaultDuration を採用
+    // level は既存値を引き継がず、新規時の既定 "info" にリセットされる
+    expect(all[0]?.level).toBe("info");
+    // duration は新規時と同じく未指定 → defaultDuration 採用
     if (all[0]?.kind === "toast") {
       expect(all[0].duration).toBe(500);
     }
+  });
+
+  // 完全 Replace の確認: title / actions / meta も input 未指定なら undefined にリセット
+  it("dedupeKey 置換時に title / actions / meta は input 通りに完全置換される（未指定は undefined）", () => {
+    const fake = createFakeTimer();
+    const manager = createNotificationManager({
+      timer: fake.timer,
+      idFactory: createSequentialIdFactory(),
+    });
+    // 1 回目: 全フィールドを埋める
+    manager.toast({
+      message: "v1",
+      dedupeKey: "k",
+      title: "T1",
+      actions: [{ id: "a", label: "Action" }],
+      meta: { source: "test" },
+    });
+    // 2 回目: message と dedupeKey のみ → 他は undefined にリセット
+    manager.toast({ message: "v2", dedupeKey: "k" });
+    const all = manager.getAll();
+    expect(all).toHaveLength(1);
+    const replaced = all[0];
+    // 完全 Replace なので title / actions / meta は input 未指定 → undefined
+    expect(replaced?.title).toBeUndefined();
+    if (replaced?.kind === "toast") {
+      expect(replaced.actions).toBeUndefined();
+    }
+    expect(replaced?.meta).toBeUndefined();
+  });
+
+  // 完全 Replace の継承範囲: id と createdAt のみ既存値を継承する
+  it("dedupeKey 置換時に id と createdAt は既存値を継承する", () => {
+    const fake = createFakeTimer();
+    // テスト用に時刻と ID を固定可能にする
+    let nowValue = 1000;
+    const manager = createNotificationManager({
+      timer: fake.timer,
+      idFactory: createSequentialIdFactory(),
+      now: () => nowValue,
+    });
+    // 1 回目: createdAt=1000 で発行
+    const id1 = manager.toast({ message: "v1", dedupeKey: "k" });
+    const before = manager.getAll()[0];
+    // 時刻を進めてから 2 回目を発行
+    nowValue = 2000;
+    const id2 = manager.toast({ message: "v2", dedupeKey: "k" });
+    const after = manager.getAll()[0];
+    // id は据え置き
+    expect(id2).toBe(id1);
+    expect(after?.id).toBe(before?.id);
+    // createdAt も据え置き（新しい時刻 2000 にはならない）
+    expect(after?.createdAt).toBe(1000);
   });
 
   // dedupeKey 一致だが種別が toast 以外なら新規追加扱い

@@ -6,7 +6,7 @@ import { createNotificationManager } from "@k1s0-ts-notification/core";
 import type { AppNotification } from "@k1s0-ts-notification/core";
 // テスト対象とその依存
 import { NotificationProvider } from "./NotificationProvider.js";
-import { useNotificationStream } from "./streamHooks.js";
+import { __testing__, useNotificationStream } from "./streamHooks.js";
 
 // useNotificationStream の戻り値を観測する小さなコンポーネント
 function StreamProbe({ onItems }: { onItems: (items: readonly AppNotification[]) => void }): null {
@@ -105,5 +105,59 @@ describe("useNotificationStream", () => {
     });
 
     expect(renders[renders.length - 1]?.[0]?.message).toBe("new");
+  });
+
+  // useMemo を useRef 化したことで、同一 manager の再 render で subscribe が再走らないことを検証
+  it("同一 manager で再 render しても manager.subscribe は 1 回しか呼ばれない", () => {
+    // 通常の manager を生成し、subscribe をスパイ可能なラッパに包む
+    const base = createNotificationManager();
+    // subscribe 呼び出し回数のカウンタ
+    let subscribeCalls = 0;
+    // 既存 manager の subscribe を計測付きで差し替えたプロキシ
+    const manager = {
+      ...base,
+      subscribe: (listener: Parameters<typeof base.subscribe>[0]): (() => void) => {
+        // 呼び出しのたびにカウントを増やす
+        subscribeCalls += 1;
+        // 実体に委譲
+        return base.subscribe(listener);
+      },
+    };
+    // 観測関数（render 回数を増やしても store 同一性を維持できているか間接検証）
+    // 値は使わず subscribe 回数のみ観察するため no-op で良い
+    const onItems = (_items: readonly AppNotification[]): void => undefined;
+    // マウント
+    let renderer: ReturnType<typeof create> | undefined;
+    act(() => {
+      renderer = create(
+        <NotificationProvider manager={manager}>
+          <StreamProbe onItems={onItems} />
+        </NotificationProvider>,
+      );
+    });
+    // 同一 manager のまま再 render（Provider の children だけ差し替え）
+    act(() => {
+      renderer?.update(
+        <NotificationProvider manager={manager}>
+          <StreamProbe onItems={onItems} />
+        </NotificationProvider>,
+      );
+    });
+    // useRef による安定保持で subscribe は初回 1 回のみ
+    expect(subscribeCalls).toBe(1);
+  });
+
+  // SSR snapshot は凍結済みの単一参照を毎回返す（hydration mismatch を起こさない）
+  it("__testing__.getServerSnapshot は常に EMPTY_SNAPSHOT の同一参照を返す", () => {
+    // 2 回呼び出しても同じ参照
+    const first = __testing__.getServerSnapshot();
+    const second = __testing__.getServerSnapshot();
+    expect(first).toBe(second);
+    // 公開された定数とも同一参照（モジュール内で 1 度だけ freeze されている証拠）
+    expect(first).toBe(__testing__.EMPTY_SNAPSHOT);
+    // 中身は空配列
+    expect(first).toEqual([]);
+    // 凍結されている
+    expect(Object.isFrozen(first)).toBe(true);
   });
 });

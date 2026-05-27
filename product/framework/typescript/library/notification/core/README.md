@@ -15,6 +15,22 @@ This package does not render UI. It manages notification state and exposes a sma
 - Duck-typed HTTP error mapping without a runtime dependency on `@k1s0-ts-http/core`
 - zod validation for manager configuration
 
+## Dedupe Behavior
+
+When `manager.toast(input)` is called with a `dedupeKey` that already exists on a toast in the queue, the existing notification is **fully replaced** — not merged. The new `input` is evaluated exactly as if it were a brand-new toast: defaults are reapplied (`level` falls back to `"info"`, `duration` to `defaultDuration`), and any optional field you omit (`title`, `actions`, `meta`) becomes `undefined` on the replacement. Only the `id` and `createdAt` of the existing notification are preserved so callers can keep dismissing by the original id and the timeline origin is stable.
+
+```ts
+manager.toast({ level: "success", title: "Saved", message: "v1", dedupeKey: "k" });
+manager.toast({ message: "v2", dedupeKey: "k" });
+// Resulting toast: { level: "info", title: undefined, message: "v2", ... }
+```
+
+The manager emits an `update` event (not `add`) so subscribers can distinguish a replacement from a brand-new notification. If you want to retain fields across replacements, supply them explicitly in every call.
+
+## Queue Bounds
+
+`maxQueueSize` (default `100`) bounds the queue for **toast** notifications only. When the queue exceeds the limit, the oldest toast is evicted FIFO. `dialog` and `confirm` notifications are **never** auto-evicted regardless of `maxQueueSize`, because they hold pending promises that must be resolved by user action. If your code path can create many unresolved dialogs or confirms (for example, during a long-running batch flow), call `manager.dismissAll("dialog")` / `manager.dismissAll("confirm")` (or `manager.dispose()`) to drain them — otherwise they accumulate and leak memory.
+
 ## Install
 
 ```bash

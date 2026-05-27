@@ -77,6 +77,8 @@ function NotificationOutlet() {
 }
 ```
 
+> **SSR / RSC:** `useNotificationStream` is safe to render on the server. During the server pass it returns a stable, module-scoped frozen empty array, so the client hydrates with an empty queue and React does not emit a "snapshot is unstable" or hydration-mismatch warning. Notifications added on the client after hydration trigger a normal re-render as usual.
+
 ## HTTP Errors
 
 ```tsx

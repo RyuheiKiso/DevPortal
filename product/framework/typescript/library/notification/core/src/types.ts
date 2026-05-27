@@ -103,7 +103,14 @@ export interface ToastInput {
   actions?: readonly NotificationAction[];
   // 追加メタデータ
   meta?: Readonly<Record<string, unknown>>;
-  // 重複検出キー
+  /**
+   * 重複検出キー。既存 toast に同じ `dedupeKey` があれば、その通知は **完全 Replace** される
+   * （id と createdAt のみ既存値を継承し、`level` / `title` / `message` / `duration` / `actions` /
+   * `meta` / `dedupeKey` は新規 toast 構築と同一ロジックで input から取り直す）。input で省略した
+   * フィールドは既定値（`level` は `"info"`、`duration` は `defaultDuration`、その他は `undefined`）
+   * に戻る。merge セマンティクスではないので、既存の `title` や `actions` を保ちたい場合は
+   * 入力側で都度指定すること。manager は `add` ではなく `update` イベントを emit する。
+   */
   dedupeKey?: string;
 }
 
@@ -171,7 +178,12 @@ export type NotificationListener = (event: NotificationEvent) => void;
 export interface NotificationManagerConfig {
   // toast の既定 duration（ms）。未指定なら 0（自動消去しない）
   defaultDuration?: number;
-  // キュー上限（超えたら最古の toast を FIFO で破棄）。既定 100
+  /**
+   * キュー上限（既定 100）。上限を超えると最古の **toast** のみを FIFO で破棄する。
+   * dialog / confirm は未解決の Promise を保持する性質上、自動破棄の対象外。
+   * 大量に積まれると memory leak になりうるため、必要に応じて `dismissAll("dialog")` /
+   * `dismissAll("confirm")` を呼んでドレインすること。
+   */
   maxQueueSize?: number;
   // 時刻取得関数（テスト用、既定: Date.now）
   now?: () => number;
