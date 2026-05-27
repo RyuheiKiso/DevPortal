@@ -36,18 +36,24 @@ export interface Theme {
 
 // オブジェクトとそのネストをすべて再帰的に Object.freeze する小ヘルパ
 // defaultTheme の不可変性を保証するため（利用側からの mutate を防ぐ）
+//
+// 循環参照対策: 子へ再帰する**前**に value 自身を freeze する。
+// これにより `a.self = a` のような自己参照でも 2 回目の再帰は
+// Object.isFrozen(a)===true で早期 return し、無限再帰にならない。
 function deepFreeze<T>(value: T): T {
-  // オブジェクトまたは配列のときだけ再帰
-  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
-    // 値側を先に freeze（参照されている子オブジェクトもまとめて凍結する）
-    Object.values(value as Record<string, unknown>).forEach((child) => {
-      // 子要素が object/array なら再帰的に freeze
-      deepFreeze(child);
-    });
-    // 自身を freeze
-    Object.freeze(value);
+  // 既に frozen ならスキップ（循環参照の再入もここで止まる）
+  if (value === null || typeof value !== "object" || Object.isFrozen(value)) {
+    // freeze 不要 / 既に凍結済みの値をそのまま返す
+    return value;
   }
-  // freeze 済みの値をそのまま返す
+  // 子へ再帰する前に親を freeze（循環参照防御）
+  Object.freeze(value);
+  // 値側を再帰的に freeze（子オブジェクト含めて凍結）
+  Object.values(value as Record<string, unknown>).forEach((child) => {
+    // 子要素が object/array なら更に再帰
+    deepFreeze(child);
+  });
+  // freeze 済みの値を返す
   return value;
 }
 

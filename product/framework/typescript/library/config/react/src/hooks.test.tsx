@@ -75,9 +75,11 @@ describe("useConfig", () => {
 
   // Provider 外では Error を投げること
   // React 19 + react-test-renderer では render 内の throw が同期的に伝搬しないため、
-  // Probe コンポーネント内部で try/catch して captured 変数に補足するパターンを採る
+  // Probe コンポーネント内部で try/catch して captured 変数に補足するパターンを採る。
+  // act は async 形式で await し、StrictMode 配下の二重 render や concurrent batch
+  // でも captured が確実にセットされた状態で assert に到達するよう揃える
   // （react-native パッケージ側のテストと同じ書き方に統一）
-  it("Provider 外で呼ばれた場合は Error を投げる", () => {
+  it("Provider 外で呼ばれた場合は Error を投げる", async () => {
     // Probe 内部で発生した例外を補足する変数
     let captured: unknown;
     // Probe コンポーネント（Provider 外で hook を呼ぶ）
@@ -92,8 +94,8 @@ describe("useConfig", () => {
       // 描画は空
       return <>{null}</>;
     }
-    // Provider なしで描画
-    act(() => {
+    // Provider なしで描画（async act で render 完了を待機）
+    await act(async () => {
       // create を実行（捕捉した例外は Probe 内に保存済み）
       create(<Probe />);
     });

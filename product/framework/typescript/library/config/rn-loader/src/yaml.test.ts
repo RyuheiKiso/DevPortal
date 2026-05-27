@@ -90,4 +90,29 @@ describe("parseYaml", () => {
     expect(result.items[0].name).toBe("a");
     expect(result.items[1].name).toBe("b");
   });
+
+  // js-yaml DEFAULT_SCHEMA が ISO 文字列を Date インスタンスとしてパースする場合に
+  // sanitize が Date を空 {} に潰さず型情報を保持することを保証
+  it("preserves Date instances parsed from ISO timestamps", () => {
+    // !!timestamp タグ相当の ISO 文字列
+    const yaml = 'releasedAt: 2024-01-01T00:00:00Z\nname: v1\n';
+    // パース実行
+    const result = parseYaml(yaml) as { releasedAt: unknown; name: string };
+    // js-yaml DEFAULT_SCHEMA は ISO 文字列を Date として返す
+    expect(result.releasedAt).toBeInstanceOf(Date);
+    // Date のメソッドが呼べる（型情報保持）
+    expect((result.releasedAt as Date).getTime()).toBe(new Date("2024-01-01T00:00:00Z").getTime());
+    // 通常キーも残る
+    expect(result.name).toBe("v1");
+  });
+
+  // 結果オブジェクトのプロトタイプが標準 Object.prototype であることを assert（汚染検知）
+  it("returns plain object with Object.prototype as its prototype", () => {
+    // 通常 YAML
+    const yaml = 'foo: 1\nbar: x\n';
+    // パース結果
+    const result = parseYaml(yaml) as Record<string, unknown>;
+    // プロトタイプが Object.prototype であること（汚染なしの保証）
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+  });
 });

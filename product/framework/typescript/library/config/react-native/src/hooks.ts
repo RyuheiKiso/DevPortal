@@ -25,9 +25,17 @@ export function useConfig<T extends BaseConfig = BaseConfig>(): T {
 
 // 指定フラグの有効/無効を返す薄いラッパー hook
 //
-// 型安全性: F のジェネリクスでフラグ名を絞り込めるようにする。
-// 例: `useFeatureFlag<"newUi" | "betaSearch">("newUi")` でタイプミスをコンパイル時に検出。
-// 既存呼び出し（`useFeatureFlag("foo")`）は F = string がデフォルトのため非破壊。
+// 型安全性（限定的）:
+//   F のジェネリクスでフラグ名候補を呼び出し位置で絞り込める。
+//   例: `useFeatureFlag<"newUi" | "betaSearch">("newUi")` のように F を明示すれば、
+//   `useFeatureFlag<...>("typoName")` をコンパイル時に拒否できる。
+//
+//   ただし、BaseConfig.featureFlags の実キー集合と F は型レベルで連結していないため、
+//   「Provider に渡した config に実際そのキーが存在するか」までは保証されない。
+//   実 config と F のキー集合は呼び出し側責任で揃えること（厳密保証が必要なら
+//   useConfig<MyConfig>() で取り出して `config.featureFlags.newUi` を直接参照する）。
+//
+//   既存呼び出し（`useFeatureFlag("foo")`）は F = string がデフォルトのため非破壊。
 export function useFeatureFlag<F extends string = string>(
   // 判定対象のフラグ名
   name: F,

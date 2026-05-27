@@ -78,7 +78,7 @@ describe("useConfig (react-native)", () => {
   });
 
   // Provider 外では Error を投げること
-  it("Provider 外で呼ばれた場合は Error を投げる", () => {
+  it("Provider 外で呼ばれた場合は Error を投げる", async () => {
     // Probe 内部で発生した例外を補足する変数
     let captured: unknown;
     // Probe コンポーネント（Provider 外で hook を呼ぶ）
@@ -94,8 +94,8 @@ describe("useConfig (react-native)", () => {
       // 描画は空
       return <>{null}</>;
     }
-    // Provider なしで描画
-    act(() => {
+    // Provider なしで描画（async act で render 完了を待機）
+    await act(async () => {
       // create を実行（捕捉した例外は Probe 内に保存済み）
       create(<Probe />);
     });

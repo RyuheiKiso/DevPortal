@@ -2,38 +2,8 @@
 import { load as yamlLoad } from "js-yaml";
 // loader 共通のエラークラスを取り込む
 import { ConfigLoaderError } from "./errors.js";
-
-// YAML 由来で Object.prototype を汚染しうるキー（信頼できない設定ソースを読む場合のガード）
-// js-yaml は __proto__: { ... } を通常のキーとして扱うため、明示的に除去する必要がある
-const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
-
-// パース結果を再帰的に辿り、プロトタイプ汚染になりうるキーを取り除いた値を返す
-// 配列はそのまま走査し、それ以外のプリミティブはコピーせずに返す
-function stripDangerousKeys(value: unknown): unknown {
-  // 配列は要素ごとに再帰
-  if (Array.isArray(value)) {
-    // 新しい配列を生成しつつ各要素を sanitize
-    return value.map(stripDangerousKeys);
-  }
-  // null 以外のオブジェクトのみ走査（typeof null は object のため除外）
-  if (value !== null && typeof value === "object") {
-    // 安全なキーだけを集める新規オブジェクトを構築
-    const safe: Record<string, unknown> = {};
-    // for-of で各エントリをチェック
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      // dangerous なキーはスキップ
-      if (DANGEROUS_KEYS.has(k)) {
-        continue;
-      }
-      // 値側も再帰的に sanitize して格納
-      safe[k] = stripDangerousKeys(v);
-    }
-    // 浄化済みオブジェクトを返却
-    return safe;
-  }
-  // プリミティブ・null はそのまま
-  return value;
-}
+// プロトタイプ汚染対策の sanitize（循環参照 + Date/Map/Set/Buffer 等の保持に対応）
+import { stripDangerousKeys } from "./sanitize.js";
 
 // 文字列を YAML としてパースし unknown を返す
 // 失敗時は ConfigLoaderError(code=PARSE_ERROR) に包んで再 throw

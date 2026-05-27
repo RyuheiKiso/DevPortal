@@ -253,6 +253,38 @@ describe("createLoader.loadEnvConfigMap", () => {
     expect(map.staging).toEqual({});
   });
 
+  // dev ファイルが「空（null/undefined）」の場合は PARSE_ERROR を投げる
+  // 必須ファイルの fail-safe を保つための回帰防止
+  it("throws PARSE_ERROR when dev YAML is null (required file must not be empty)", async () => {
+    // dev YAML が null
+    const loader = createLoader(makeBackend({
+      "/env/dev.yaml": "null\n",
+    }));
+    // dev は allowEmpty=false なので PARSE_ERROR
+    await expect(loader.loadEnvConfigMap("/env")).rejects.toMatchObject({
+      code: "PARSE_ERROR",
+    });
+  });
+
+  // FILE_NOT_FOUND メッセージに「Tried:」と 3 拡張子候補が含まれる
+  it("includes tried candidate paths in FILE_NOT_FOUND message", async () => {
+    // どの dev も無いバックエンド
+    const loader = createLoader(makeBackend({}));
+    // 例外捕捉
+    let caught: ConfigLoaderError | undefined;
+    try {
+      await loader.loadEnvConfigMap("/env");
+    } catch (e) {
+      caught = e as ConfigLoaderError;
+    }
+    // 「Tried:」が含まれる（glob 表記でない明示的列挙）
+    expect(caught?.message).toContain("Tried:");
+    // 3 拡張子すべて列挙
+    expect(caught?.message).toContain("dev.json");
+    expect(caught?.message).toContain("dev.yaml");
+    expect(caught?.message).toContain("dev.yml");
+  });
+
   // prod が配列の場合も PARSE_ERROR (構造エラー)
   it("throws PARSE_ERROR when prod is array", async () => {
     // prod が配列

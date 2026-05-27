@@ -71,6 +71,10 @@ await loader.loadConfig("/etc/app.json");     // → /etc/app.json (baseDir 無�
 
 `expo-file-system` は **SDK 52+ の新 File API** と **SDK <52 の legacy API** の両方に対応しています。本パッケージは import 時に `File` クラスの有無で自動判別し、適切な API を使います。`peerDependencies` は `expo-file-system >=16.0.0` を指定していますが、新旧どちらでも動作します。
 
+### Expo 新 File API での並列性能
+
+`loadEnvConfigMap` は dev 確定後に staging/prod を **並列読込** します。新 File API (`new File(uri).text()`) を 3 並列で実行する設計ですが、Expo のネイティブ FS 実装がメインスレッドをブロックするケースでは順次実行より遅くなる可能性があります。**並列性能は実機 (iOS / Android) で計測することを推奨**します。並列が逆効果な場合は `loadConfig` を直接 await で順次呼ぶ形でラップしてください。
+
 ## インストール
 
 ```bash

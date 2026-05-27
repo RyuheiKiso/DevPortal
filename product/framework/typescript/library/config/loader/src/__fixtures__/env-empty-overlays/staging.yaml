@@ -1,1 +1,3 @@
-# 空の staging 差分（コメントのみ） → js-yaml は undefined を返す
+# 空の staging 差分（コメントのみ）
+# js-yaml v4 は完全空入力 / コメントのみ入力に対して null か undefined を返す（バージョン依存）。
+# ensureObject は両方を {} に正規化するため、テスト的にはどちらでも通る。

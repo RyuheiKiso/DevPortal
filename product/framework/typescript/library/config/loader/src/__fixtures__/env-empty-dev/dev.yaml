@@ -1,0 +1,2 @@
+# dev ファイルが空（コメントのみ）の異常系 fixture
+# js-yaml は空入力 / コメントのみ入力に対して null または undefined を返す

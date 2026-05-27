@@ -55,17 +55,46 @@ describe("loadEnvConfigMap (async)", () => {
     });
   });
 
-  // staging が空 YAML（パース結果が undefined）・prod が null YAML でも {} として扱われる
+  // staging が空 YAML（パース結果が null か undefined）・prod が null YAML でも {} として扱われる
   // ファイルを置きたいが差分なしというユースケース（ブランチ運用などで残骸が残るケース）
   it("treats empty/null overlay files as empty diff", async () => {
     // staging.yaml がコメントのみ・prod.yml が null の fixture を読む
     const map = await loadEnvConfigMap(fixture("env-empty-overlays"));
     // dev は読み込まれる
     expect(map.dev).toMatchObject({ apiUrl: "http://localhost:3000" });
-    // staging は undefined → {} 正規化
+    // staging は null/undefined → {} 正規化
     expect(map.staging).toEqual({});
     // prod は null → {} 正規化
     expect(map.prod).toEqual({});
+  });
+
+  // dev ファイルが「空（null/undefined）」の場合は PARSE_ERROR を投げる
+  // 必須ファイルでの fail-safe を維持するための回帰防止テスト
+  it("throws PARSE_ERROR when dev is empty/null (required file must not be empty)", async () => {
+    // dev.yaml がコメントのみ → js-yaml は undefined を返す
+    await expect(loadEnvConfigMap(fixture("env-empty-dev"))).rejects.toMatchObject({
+      // 構造エラーとして PARSE_ERROR
+      code: "PARSE_ERROR",
+    });
+  });
+
+  // FILE_NOT_FOUND メッセージに探索した候補パス一覧（Tried 形式）が含まれる
+  it("includes tried candidate paths in FILE_NOT_FOUND message", async () => {
+    // 例外捕捉
+    let caught: ConfigLoaderError | undefined;
+    try {
+      // dev も無いディレクトリ
+      await loadEnvConfigMap(fixture("env-missing"));
+    } catch (e) {
+      // 型キャスト
+      caught = e as ConfigLoaderError;
+    }
+    // メッセージに "Tried:" が含まれる
+    expect(caught?.message).toContain("Tried:");
+    // 3 拡張子すべてが列挙されている
+    expect(caught?.message).toContain("dev.json");
+    expect(caught?.message).toContain("dev.yaml");
+    expect(caught?.message).toContain("dev.yml");
   });
 });
 
@@ -120,5 +149,39 @@ describe("loadEnvConfigMapSync", () => {
     }
     // code 一致
     expect(caught?.code).toBe("PARSE_ERROR");
+  });
+
+  // 同期: dev が空ファイルなら PARSE_ERROR（非同期版と挙動を揃える）
+  it("throws PARSE_ERROR when dev is empty (sync)", () => {
+    // 例外捕捉
+    let caught: ConfigLoaderError | undefined;
+    try {
+      // 空 dev fixture
+      loadEnvConfigMapSync(fixture("env-empty-dev"));
+    } catch (e) {
+      // 型キャスト
+      caught = e as ConfigLoaderError;
+    }
+    // code 一致
+    expect(caught?.code).toBe("PARSE_ERROR");
+  });
+
+  // 同期: FILE_NOT_FOUND メッセージに Tried 候補が含まれる
+  it("includes tried candidate paths in FILE_NOT_FOUND message (sync)", () => {
+    // 例外捕捉
+    let caught: ConfigLoaderError | undefined;
+    try {
+      // dev も無いディレクトリ
+      loadEnvConfigMapSync(fixture("env-missing"));
+    } catch (e) {
+      // 型キャスト
+      caught = e as ConfigLoaderError;
+    }
+    // "Tried:" 形式
+    expect(caught?.message).toContain("Tried:");
+    // 3 拡張子が列挙される
+    expect(caught?.message).toContain("dev.json");
+    expect(caught?.message).toContain("dev.yaml");
+    expect(caught?.message).toContain("dev.yml");
   });
 });

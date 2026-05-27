@@ -49,4 +49,35 @@ describe("parseJson", () => {
     // メッセージにパスが含まれること
     expect(caught?.message).toContain("/tmp/x.json");
   });
+
+  // __proto__ キーを含む JSON でも汚染が起きず、own プロパティとして strip されること
+  it("strips __proto__ key to prevent prototype pollution", () => {
+    // JSON.parse は __proto__ を own data property としてセットする（仕様準拠）
+    const malicious = '{"__proto__":{"polluted":true},"ok":1}';
+    // parseJson 経由
+    const result = parseJson(malicious) as Record<string, unknown>;
+    // own プロパティの __proto__ は除去されている
+    expect(Object.prototype.hasOwnProperty.call(result, "__proto__")).toBe(false);
+    // 正常キーは保持
+    expect(result.ok).toBe(1);
+    // 結果のプロトタイプは標準 Object.prototype（汚染なし）
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+    // 素のオブジェクトに polluted が漏れていない
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  // constructor / prototype キーも除去されること
+  it("strips constructor and prototype keys recursively", () => {
+    // 危険キーを並べた JSON（ネストにも仕込む）
+    const malicious = '{"constructor":{"bad":1},"prototype":{"bad":2},"nested":{"__proto__":{"deep":true},"ok":"yes"}}';
+    // parseJson 経由
+    const result = parseJson(malicious) as Record<string, unknown>;
+    // トップレベルの危険キーは除去
+    expect(Object.prototype.hasOwnProperty.call(result, "constructor")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(result, "prototype")).toBe(false);
+    // ネストの __proto__ も除去、ok は残る
+    const nested = result.nested as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(nested, "__proto__")).toBe(false);
+    expect(nested.ok).toBe("yes");
+  });
 });

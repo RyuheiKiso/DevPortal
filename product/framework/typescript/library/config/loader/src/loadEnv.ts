@@ -53,17 +53,46 @@ function findEnvFileSync(dir: string, baseName: string): string | undefined {
   return undefined;
 }
 
+// FILE_NOT_FOUND メッセージで「探索した候補パスを列挙」する整形ヘルパ
+// glob 風プレースホルダ (`dev.{json|yaml|yml}`) は実在パスと誤解されやすいため、
+// 「Tried: A / B / C」形式に展開する
+function formatTriedCandidates(dir: string, baseName: string): string {
+  // 各拡張子の絶対パス候補を生成し、" / " で連結
+  return ENV_EXTENSIONS.map((ext) => join(dir, `${baseName}${ext}`)).join(" / ");
+}
+
+// ensureObject の挙動を制御するオプション
+interface EnsureObjectOptions {
+  // 「差分なし」を意味する null/undefined を空 {} として許容するか
+  // dev は false（必須ファイル）、staging/prod は true（差分なしを許容）
+  allowEmpty?: boolean;
+}
+
 // 任意の値がオブジェクト (連想配列) かどうかを判定する
 // mergeEnvConfig の差分側 (Partial<T>) として安全に扱うためのガード
 //
-// 仕様: 空 YAML 等で `null` / `undefined` がパース結果として返るケースは「差分なし」と
-// 解釈して空 {} を返す（js-yaml は完全空ファイルでは undefined、`null:`/`~` では null を返す）。
-// 配列・プリミティブは引き続き構造エラーとして PARSE_ERROR に分類する。
-function ensureObject(value: unknown, filePath: string): Record<string, unknown> {
-  // null / undefined は「差分なし」とみなして空オブジェクトに正規化
+// 仕様:
+//   - allowEmpty=true (staging/prod 用): null/undefined → {} に正規化（差分なし扱い）
+//   - allowEmpty=false (dev 用): null/undefined を PARSE_ERROR として弾く（必須ファイル）
+//   - 配列・プリミティブは常に構造エラーとして PARSE_ERROR
+//
+// js-yaml は完全空ファイルでは undefined、`null:`/`~` では null を返す。両方を同一視する。
+function ensureObject(
+  value: unknown,
+  filePath: string,
+  options: EnsureObjectOptions = {},
+): Record<string, unknown> {
+  // null / undefined の扱いは allowEmpty で分岐
   if (value === null || value === undefined) {
-    // 空マージとして扱うため {} を返却
-    return {};
+    // 任意ファイル（staging/prod）は空マージとして {} を返す
+    if (options.allowEmpty) {
+      return {};
+    }
+    // 必須ファイル（dev）が空の場合は構造エラー
+    throw new ConfigLoaderError(
+      `Empty top-level value in required config (file: ${filePath})`,
+      "PARSE_ERROR",
+    );
   }
   // 配列やプリミティブはトップレベルが連想配列でないため構造エラー
   if (typeof value !== "object" || Array.isArray(value)) {
@@ -78,70 +107,87 @@ function ensureObject(value: unknown, filePath: string): Record<string, unknown>
 }
 
 // dir 配下の dev / staging / prod 設定ファイルを読み込んで EnvConfigMap<unknown> を返す
-// dev は必須 (無ければ FILE_NOT_FOUND)、staging/prod は欠けていたら {} 補完
+// dev は必須 (無ければ FILE_NOT_FOUND・空なら PARSE_ERROR)、staging/prod は欠けていたら {} 補完
 //
-// 並列化: 3 ファイルのパス探索と読込はそれぞれ I/O を伴うため Promise.all で並列実行する。
-// （順次 await すると起動時に最悪 3 ファイル分の I/O 直列待ちになるため）
+// 二段構え:
+//   1. dev を先に探索 → 見つからなければ即 throw（staging/prod の I/O を無駄にしない）
+//   2. dev 確定後、3 ファイルの読込を並列化し allSettled で unhandled rejection を防ぐ
 export async function loadEnvConfigMap(
   // 環境別ファイルが置かれているディレクトリ
   dir: string,
 ): Promise<EnvConfigMap<Record<string, unknown>>> {
-  // dev / staging / prod のパスを並列で探索（候補拡張子の access も並列化）
-  const [devPath, stagingPath, prodPath] = await Promise.all([
-    // dev ファイルを探す
-    findEnvFile(dir, "dev"),
-    // staging ファイルを探す
-    findEnvFile(dir, "staging"),
-    // prod ファイルを探す
-    findEnvFile(dir, "prod"),
-  ]);
-  // dev が無ければファイル未存在として扱う
+  // 第 1 段: dev を先行探索（無ければエラー時点で staging/prod の I/O を発生させない）
+  const devPath = await findEnvFile(dir, "dev");
+  // dev が無ければ FILE_NOT_FOUND（候補パスを Tried 形式で列挙）
   if (devPath === undefined) {
-    // 期待するパス候補を伝えるため最初の候補をメッセージに含める
     throw new ConfigLoaderError(
-      `Config file not found: ${join(dir, "dev.{json|yaml|yml}")}`,
+      `Config file not found. Tried: ${formatTriedCandidates(dir, "dev")}`,
       "FILE_NOT_FOUND",
     );
   }
-  // 3 ファイル分の読込も並列化（staging/prod が undefined のときは空 {} に即時 resolve）
-  const [devRaw, stagingRaw, prodRaw] = await Promise.all([
-    // dev は必須。読み込み後 ensureObject で正規化
+  // 第 2 段: dev/staging/prod の読込を並列化
+  // allSettled を使うことで、複数足同時失敗時の unhandled rejection を防ぐ
+  const results = await Promise.allSettled([
+    // dev は必須・空 NG。ensureObject に allowEmpty=false（デフォルト）を渡す
     loadConfig(devPath).then((v) => ensureObject(v, devPath)),
-    // staging は欠けていたら {} 扱い
-    stagingPath === undefined
-      ? Promise.resolve<Record<string, unknown>>({})
-      : loadConfig(stagingPath).then((v) => ensureObject(v, stagingPath)),
-    // prod も欠けていたら {} 扱い
-    prodPath === undefined
-      ? Promise.resolve<Record<string, unknown>>({})
-      : loadConfig(prodPath).then((v) => ensureObject(v, prodPath)),
+    // staging は任意・空 OK。先に findEnvFile してから読込
+    findEnvFile(dir, "staging").then((path) =>
+      // 見つからなければ {}、見つかれば読み込んで allowEmpty=true で正規化
+      path === undefined
+        ? ({} as Record<string, unknown>)
+        : loadConfig(path).then((v) => ensureObject(v, path, { allowEmpty: true })),
+    ),
+    // prod も任意・空 OK
+    findEnvFile(dir, "prod").then((path) =>
+      // 見つからなければ {}、見つかれば読み込んで allowEmpty=true で正規化
+      path === undefined
+        ? ({} as Record<string, unknown>)
+        : loadConfig(path).then((v) => ensureObject(v, path, { allowEmpty: true })),
+    ),
   ]);
+  // どれか一つでも reject していたら、その reason を最初に見つかったものから throw
+  for (const r of results) {
+    // status が rejected の結果を見つけ次第 throw（unhandled rejection は残らない）
+    if (r.status === "rejected") {
+      throw r.reason;
+    }
+  }
+  // 全成功なので value を取り出して EnvConfigMap 形に組み立てる
+  const [devRaw, stagingRaw, prodRaw] = (
+    results as PromiseFulfilledResult<Record<string, unknown>>[]
+  ).map((r) => r.value);
   // core の EnvConfigMap 形にまとめて返す
   return { dev: devRaw, staging: stagingRaw, prod: prodRaw };
 }
 
 // loadEnvConfigMap の同期版
+// 同期版は順次 I/O のため二段構え化のメリットは小さいが、メッセージ整形と ensureObject の
+// allowEmpty 仕様は非同期版と揃える
 export function loadEnvConfigMapSync(
   // 環境別ファイルが置かれているディレクトリ
   dir: string,
 ): EnvConfigMap<Record<string, unknown>> {
   // dev ファイルを探す
   const devPath = findEnvFileSync(dir, "dev");
-  // dev が無ければ FILE_NOT_FOUND
+  // dev が無ければ FILE_NOT_FOUND（候補パスを Tried 形式で列挙）
   if (devPath === undefined) {
     throw new ConfigLoaderError(
-      `Config file not found: ${join(dir, "dev.{json|yaml|yml}")}`,
+      `Config file not found. Tried: ${formatTriedCandidates(dir, "dev")}`,
       "FILE_NOT_FOUND",
     );
   }
-  // dev を読み込み
+  // dev を読み込み（allowEmpty=false で空 NG）
   const devRaw = ensureObject(loadConfigSync(devPath), devPath);
-  // staging 任意
+  // staging 任意（allowEmpty=true で空 OK）
   const stagingPath = findEnvFileSync(dir, "staging");
-  const stagingRaw = stagingPath === undefined ? {} : ensureObject(loadConfigSync(stagingPath), stagingPath);
-  // prod 任意
+  const stagingRaw = stagingPath === undefined
+    ? {}
+    : ensureObject(loadConfigSync(stagingPath), stagingPath, { allowEmpty: true });
+  // prod 任意（allowEmpty=true で空 OK）
   const prodPath = findEnvFileSync(dir, "prod");
-  const prodRaw = prodPath === undefined ? {} : ensureObject(loadConfigSync(prodPath), prodPath);
+  const prodRaw = prodPath === undefined
+    ? {}
+    : ensureObject(loadConfigSync(prodPath), prodPath, { allowEmpty: true });
   // EnvConfigMap 形で返す
   return { dev: devRaw, staging: stagingRaw, prod: prodRaw };
 }

@@ -75,10 +75,9 @@ const config = useMemo(
 );
 ```
 
-### useFeatureFlag は型絞り込みできる
+### useFeatureFlag は型絞り込みできる（呼び出し位置のみ）
 
-`useFeatureFlag` はジェネリクスでフラグ名を絞り込めます。タイプミスをコンパイル時に検出するために、
-アプリ側で `Flags` 型を定義して指定するのを推奨します：
+`useFeatureFlag` はジェネリクスで **呼び出し位置のフラグ名** を絞り込めます：
 
 ```tsx
 type Flags = "newUi" | "betaSearch";
@@ -86,10 +85,40 @@ const enabled = useFeatureFlag<Flags>("newUi");
 // useFeatureFlag<Flags>("typoName") // ← TypeScript エラー
 ```
 
-### mergeEnvConfig / mergePlatformConfig は浅いマージ
+ただし、`BaseConfig.featureFlags` の実キー集合と `Flags` 型は型レベルで連結していないため、
+**「Provider に渡した config に実際そのキーが存在するか」までは保証されません**。
+厳密な型保証が必要なら `useConfig<MyConfig>()` で取り出して `config.featureFlags.newUi` を
+直接参照してください。
+
+### mergeEnvConfig / mergePlatformConfig は浅いマージ + frozen 参照に注意
 
 `mergeEnvConfig` (core) と `mergePlatformConfig` は浅いマージで、**ネストオブジェクトは map 側と参照を共有します**。
-返り値の `result.colors` を mutate すると `map.default.colors` も書き換わるので、必要なら呼び出し側で `structuredClone` してください。
+さらに `@k1s0-ts-config/core` の `defaultTheme` は **`deepFreeze` で凍結済み** のため、
+`defaultTheme` を `default` / `dev` に渡すと、override で touch されないネスト
+（例: `spacing` / `typography`）は **frozen な参照のまま結果に残ります**。
+
+```tsx
+// ❌ strict mode で TypeError（result.spacing は frozen な defaultTheme.spacing）
+const merged = mergePlatformConfig({
+  default: defaultTheme,
+  ios: { colors: { ...defaultTheme.colors, primary: "#007AFF" } },
+});
+merged.spacing.md = 20;
+
+// ✅ 後で mutate したいなら structuredClone してから渡す
+const merged = mergePlatformConfig({
+  default: structuredClone(defaultTheme),
+  ios: { colors: { ...defaultTheme.colors, primary: "#007AFF" } },
+});
+merged.spacing.md = 20;
+```
+
+### `withOverrides` の undefined 値は base を保持する
+
+`withOverrides(base, overrides)` で `overrides` に明示的 `undefined` を渡したキーは
+**filter されて base の値が保持** されます。`Record<F, boolean>` 型の整合性維持のための仕様で、
+旧版の「明示的 undefined で base を unset する」挙動とは異なります。
+override を取り消したい場合は、対応するキーを `overrides` 自体から削除してください。
 
 ## ビルド & テスト
 

@@ -76,16 +76,53 @@ const config = useMemo(
 );
 ```
 
-### useFeatureFlag は型絞り込みできる
+### useFeatureFlag は型絞り込みできる（呼び出し位置のみ）
 
-`useFeatureFlag` はジェネリクスでフラグ名を絞り込めます。タイプミスをコンパイル時に検出するために、
-アプリ側で `Flags` 型を定義して指定するのを推奨します：
+`useFeatureFlag` はジェネリクスで **呼び出し位置のフラグ名** を絞り込めます：
 
 ```tsx
 type Flags = "newUi" | "betaSearch";
 const enabled = useFeatureFlag<Flags>("newUi");
 // useFeatureFlag<Flags>("typoName") // ← TypeScript エラー
 ```
+
+ただし、`BaseConfig.featureFlags` の実キー集合と `Flags` 型は型レベルで連結していないため、
+**「Provider に渡した config に実際そのキーが存在するか」までは保証されません**。
+厳密な型保証が必要なら `useConfig<MyConfig>()` で取り出して `config.featureFlags.newUi` を
+直接参照してください。
+
+### `defaultTheme` は frozen — 直接 mutate しない
+
+`@k1s0-ts-config/core` の `defaultTheme` は `deepFreeze` されています。
+`defaultTheme.colors.primary = "..."` のような直接書き換えは strict mode 下で **TypeError** を投げます。
+
+また、`mergeEnvConfig` / `mergePlatformConfig` は **浅いマージ** のため、
+override で touch されないネスト (例: `spacing` / `typography`) は **frozen な参照のまま結果に残ります**。
+利用側で結果のネストを mutate しようとすると同じく TypeError になります：
+
+```tsx
+// ❌ strict mode で TypeError
+const merged = mergeEnvConfig({ dev: { theme: defaultTheme }, staging: {}, prod: {} }, "dev");
+merged.theme.spacing.md = 20;
+
+// ✅ ネストを書き換えたいときは structuredClone してから
+const merged = mergeEnvConfig({ dev: { theme: structuredClone(defaultTheme) }, staging: {}, prod: {} }, "dev");
+merged.theme.spacing.md = 20;
+```
+
+### `withOverrides` の undefined 値は base を保持する
+
+`withOverrides(base, overrides)` で `overrides` に明示的 `undefined` を渡したキーは
+**filter されて base の値が保持** されます。`Record<F, boolean>` 型の整合性維持のための仕様で、
+旧版の「明示的 undefined で base を unset する」挙動とは異なります：
+
+```tsx
+// 旧: result.newUi === undefined（base を undefined で上書き）
+// 新: result.newUi === true（明示的 undefined は無視、base が保持）
+withOverrides({ newUi: true }, { newUi: undefined });
+```
+
+「override を取り消したい」場合は、対応するキーを `overrides` 自体から削除してください。
 
 ## ビルド & テスト
 
