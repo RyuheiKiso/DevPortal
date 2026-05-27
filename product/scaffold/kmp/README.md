@@ -14,6 +14,119 @@ Kotlin Multiplatform (KMP) と Compose Multiplatform (CMP) を組み合わせた
 
 ---
 
+## 0. KMP と CMP のちがい (初学者向け)
+
+**ひとことで:**
+
+| 略称 | 正式名称                   | 役割                                                                 | 誰がつくっている        |
+| ---- | -------------------------- | -------------------------------------------------------------------- | ----------------------- |
+| KMP  | **K**otlin **M**ulti**P**latform | Kotlin の**コード**を Android / iOS / Desktop / Web で**共有する仕組み** | Kotlin 言語チーム (JetBrains) |
+| CMP  | **C**ompose **M**ulti**P**latform | **UI** を全 OS で共有する**ライブラリ** (KMP の上に乗る)              | Compose チーム (JetBrains)   |
+
+> CMP は KMP に依存している。
+> KMP は「コード共有のための土台」、CMP は「KMP の土台の上に建つ UI 専用フレームワーク」と覚えると分かりやすい。
+> KMP だけでも (CMP を使わなくても) ロジックだけ共有して UI は各 OS のネイティブで作る選択肢もある。
+
+### 0.1 本スキャフォールドの中で「どこが KMP / どこが CMP か」
+
+#### KMP に属するもの (= 共有コードの基盤)
+
+| 種別             | 場所                                                                                                 |
+| ---------------- | ---------------------------------------------------------------------------------------------------- |
+| Gradle プラグイン | `composeApp/build.gradle.kts` の `alias(libs.plugins.kotlinMultiplatform)`                          |
+| ソースセット階層 | `composeApp/src/commonMain` / `androidMain` / `iosMain` / `desktopMain` / `wasmJsMain` の**フォルダ構造そのもの** |
+| ターゲット宣言   | `kotlin { androidTarget() / iosX64() / iosArm64() / iosSimulatorArm64() / jvm("desktop") / wasmJs() }` |
+| 言語機能         | `expect fun currentPlatform()` (`Platform.kt`) と各 OS の `actual` 実装                              |
+| 共有ロジック     | `Greeting.kt`、`Platform.kt` の `data class Platform` (← UI でも CMP でもない純粋な Kotlin)         |
+| iOS バイナリ     | `iosTarget.binaries.framework { baseName = "ComposeApp" }` (Kotlin/Native で `.framework` 出力)     |
+
+#### CMP に属するもの (= UI 専用)
+
+| 種別             | 場所                                                                                                 |
+| ---------------- | ---------------------------------------------------------------------------------------------------- |
+| Gradle プラグイン | `alias(libs.plugins.composeMultiplatform)` + `alias(libs.plugins.composeCompiler)`                  |
+| ランタイム依存   | `compose.runtime` / `compose.foundation` / `compose.material3` / `compose.ui` / `compose.components.resources` |
+| 共通 UI          | `App.kt` の `@Composable fun App()`、`ui/theme/` 配下 (Color/Theme/Type)                              |
+| 各 OS の埋め込み API | Android: `setContent { App() }`, iOS: `ComposeUIViewController { App() }`,<br>Desktop: `Window { App() }`, Web: `ComposeViewport(...) { App() }` |
+| Desktop パッケージ | `compose.desktop { application { nativeDistributions { ... } } }`                                   |
+| Web 有効化フラグ | `gradle.properties` の `org.jetbrains.compose.experimental.wasm.enabled=true`                       |
+
+### 0.2 境界線にあるファイル (両方を使う橋渡し役)
+
+各プラットフォームのエントリポイントは「KMP のソースセットに置かれた Kotlin コードが CMP の API を呼ぶ」構造になっている。
+
+| ファイル                                          | KMP 的な側面                                | CMP 的な側面                          |
+| ------------------------------------------------- | ------------------------------------------- | ------------------------------------- |
+| `androidMain/.../MainActivity.kt`                 | androidMain ソースセットに属する Kotlin     | `setContent { App() }` (CMP)          |
+| `iosMain/.../MainViewController.kt`               | iosMain ソースセット、UIKit を import       | `ComposeUIViewController { App() }` (CMP) |
+| `desktopMain/.../Main.kt`                         | desktopMain ソースセット、`fun main()`      | `application { Window { App() } }` (CMP) |
+| `wasmJsMain/.../Main.kt`                          | wasmJsMain ソースセット、ブラウザ DOM 操作  | `ComposeViewport(rootElement) { App() }` (CMP) |
+| `iosApp/iosApp/ContentView.swift`                 | KMP が出力した `ComposeApp.framework` を import | `MainViewControllerKt.MainViewController()` 経由で Compose UI 表示 |
+
+### 0.3 純粋な KMP / 純粋な CMP / Kotlin でも KMP でもないもの
+
+| カテゴリ                  | 例                                                                                       |
+| ------------------------- | ---------------------------------------------------------------------------------------- |
+| **純粋な KMP** (UI 非依存) | `Greeting.kt` (commonMain) / `Platform.kt` の `data class` と `expect/actual` 関数        |
+| **純粋な CMP** (UI 限定)  | `App.kt` の `@Composable`、`ui/theme/Color.kt` `Theme.kt` `Type.kt`                       |
+| **KMP でも CMP でもない** | `iosApp/iosApp/iOSApp.swift` `ContentView.swift` `Info.plist` `Config.xcconfig` (= Xcode / Swift / Apple 標準) |
+| **Android プラットフォーム** | `AndroidManifest.xml`、`res/values/strings.xml` (Android SDK 由来、KMP の枠外)            |
+
+> ヒント: もし**ロジックだけ共有して UI は各 OS ネイティブで作りたい**場合、
+> CMP プラグイン・`compose.*` 依存・`App.kt` `ui/theme/` を全て削除しても KMP プロジェクトとしては成立する。
+> その場合、androidMain は Jetpack Compose / View で、iosMain は SwiftUI / UIKit でそれぞれ UI を実装することになる。
+
+### 0.4 一目で分かる依存関係図
+
+```mermaid
+flowchart TB
+    %% --- KMP 共通レイヤー ---
+    common["<b>commonMain</b> — KMP 共通レイヤー<br/>• Platform.kt (expect 宣言)<br/>• Greeting.kt<br/>• App.kt + ui/theme/ ◀ CMP"]
+
+    %% --- 各プラットフォームのソースセット (KMP) と内部で呼ぶ CMP API ---
+    android["<b>androidMain</b><br/>MainActivity.kt<br/>CMP API: setContent { App() }"]
+    ios["<b>iosMain</b><br/>MainViewController.kt<br/>CMP API: ComposeUIViewController { App() }"]
+    desktop["<b>desktopMain</b><br/>Main.kt<br/>CMP API: application { Window { App() } }"]
+    wasm["<b>wasmJsMain</b><br/>Main.kt<br/>CMP API: ComposeViewport(...) { App() }"]
+
+    %% commonMain → 各プラットフォーム (KMP の階層化ソースセット)
+    common -->|depends on| android
+    common -->|depends on| ios
+    common -->|depends on| desktop
+    common -->|depends on| wasm
+
+    %% --- ビルド成果物 ---
+    apk[".apk<br/>(Android アプリ)"]
+    framework["ComposeApp.framework<br/>(Kotlin/Native iOS バイナリ)"]
+    jvm["JAR / MSI / DMG<br/>(Desktop アプリ)"]
+    web["HTML + Wasm<br/>(Web アプリ)"]
+
+    %% 各ソースセット → 成果物
+    android --> apk
+    ios --> framework
+    desktop --> jvm
+    wasm --> web
+
+    %% --- Xcode / Swift 側 (KMP/CMP の枠外) ---
+    swift["<b>iosApp</b> (Xcode 側 / Swift)<br/>iOSApp.swift, ContentView.swift<br/>KMP/CMP の枠外"]
+    framework -->|"import ComposeApp"| swift
+
+    %% --- 配色 (KMP レイヤー / 成果物 / ネイティブ) ---
+    classDef kmpLayer fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
+    classDef artifact fill:#fafafa,stroke:#616161,color:#212121
+    classDef native fill:#fff3e0,stroke:#e65100,color:#bf360c
+    class common,android,ios,desktop,wasm kmpLayer
+    class apk,framework,jvm,web artifact
+    class swift native
+```
+
+> 凡例:
+> - 🟦 青背景: KMP のソースセット (内部で CMP API を呼んでいる)
+> - ⬜ グレー背景: 各 OS のビルド成果物
+> - 🟧 オレンジ背景: KMP/CMP の枠外 (Swift / Xcode)
+
+---
+
 ## 1. ディレクトリ構成
 
 ```
