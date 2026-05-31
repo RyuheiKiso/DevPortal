@@ -1,0 +1,18 @@
+<!-- リポジトリ内の全プロジェクトに共通するビルド設定 -->
+<Project>
+
+  <!-- 共通プロパティ群 -->
+  <PropertyGroup>
+    <!-- ターゲットフレームワークを .NET 10 に固定する -->
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- 使用する C# 言語バージョン（最新を使用） -->
+    <LangVersion>latest</LangVersion>
+    <!-- null 許容参照型の注釈・警告を有効化する -->
+    <Nullable>enable</Nullable>
+    <!-- よく使う名前空間の暗黙 using を有効化する -->
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- ビルドの再現性を高める（決定的ビルド） -->
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+</Project>

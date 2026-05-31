@@ -1,0 +1,19 @@
+/* ルート要素の基本タイポグラフィ設定 */
+:root {
+  /* 既定のフォントファミリー */
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  /* 行の高さ */
+  line-height: 1.5;
+  /* 文字色 */
+  color: #213547;
+  /* 背景色 */
+  background-color: #ffffff;
+}
+
+/* ページ全体の余白をなくし、画面いっぱいに広げる */
+body {
+  /* 既定の余白を除去する */
+  margin: 0;
+  /* 最低でも画面の高さを確保する */
+  min-height: 100vh;
+}

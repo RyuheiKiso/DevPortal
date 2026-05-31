@@ -1,0 +1,13 @@
+<!-- .NET 10 の XML ベースソリューションファイル（.slnx） -->
+<Solution>
+  <!-- ソースコードを束ねるソリューションフォルダ -->
+  <Folder Name="/src/">
+    <!-- Web API 本体プロジェクト -->
+    <Project Path="src/Api/Api.csproj" />
+  </Folder>
+  <!-- テストを束ねるソリューションフォルダ -->
+  <Folder Name="/tests/">
+    <!-- API の統合テストプロジェクト -->
+    <Project Path="tests/Api.Tests/Api.Tests.csproj" />
+  </Folder>
+</Solution>

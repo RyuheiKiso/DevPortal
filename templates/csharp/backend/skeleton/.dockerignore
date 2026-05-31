@@ -1,0 +1,16 @@
+# ビルド出力（イメージに含めない）
+**/bin
+**/obj
+**/publish
+# IDE / エディタ設定
+**/.vs
+**/.vscode
+**/.idea
+# Git 管理ファイル
+**/.git
+**/.gitignore
+# Docker 関連ファイル
+**/Dockerfile*
+**/.dockerignore
+# ドキュメント類
+**/*.md

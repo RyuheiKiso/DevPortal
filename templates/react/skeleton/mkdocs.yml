@@ -1,0 +1,14 @@
+# TechDocs（MkDocs）の設定
+site_name: ${{ values.app_title }}
+# サイトの説明
+site_description: ${{ values.description }}
+
+# ナビゲーション構成
+nav:
+  # トップページ
+  - ホーム: index.md
+
+# 使用するプラグイン
+plugins:
+  # Backstage TechDocs のコアプラグイン
+  - techdocs-core

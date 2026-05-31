@@ -1,0 +1,23 @@
+# Gradle のローカルキャッシュ
+.gradle/
+# ビルド成果物
+build/
+# Compose デスクトップの配布出力（build/ 配下だが明示）
+**/build/compose/
+
+# ローカル環境設定（SDK パスなど。コミットしない）
+local.properties
+
+# IntelliJ IDEA / Android Studio の設定
+.idea/
+# IDEA のモジュールファイル
+*.iml
+
+# Kotlin/Native のキャッシュ
+.kotlin/
+
+# macOS が生成するメタファイル
+.DS_Store
+
+# ログファイル
+*.log

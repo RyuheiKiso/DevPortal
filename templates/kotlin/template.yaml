@@ -1,0 +1,224 @@
+# Backstage スキャフォルダーのテンプレート定義
+apiVersion: scaffolder.backstage.io/v1beta3
+# 種別はテンプレート
+kind: Template
+# メタ情報
+metadata:
+  # テンプレート識別子（カタログ内で一意）
+  name: kotlin-kmp-cmp-client
+  # 一覧に表示する名称
+  title: Kotlin (KMP + CMP) クライアントアプリ
+  # テンプレートの説明
+  description: Android と Windows で動く Kotlin Multiplatform + Compose Multiplatform のクライアントアプリを生成します。
+  # 分類・検索用タグ
+  tags:
+    # Kotlin 製
+    - kotlin
+    # Kotlin Multiplatform
+    - kmp
+    # Compose Multiplatform
+    - compose-multiplatform
+    # Android 対応
+    - android
+    # Windows 対応
+    - windows
+# 仕様
+spec:
+  # テンプレート自体の所有者（実在する Group に合わせて変更してください）
+  owner: group:default/platform
+  # 生成物の種別
+  type: application
+
+  # 入力フォーム（複数ステップ）
+  parameters:
+    # ステップ1: コンポーネント情報
+    - title: コンポーネント情報
+      # 必須入力
+      required:
+        - component_id
+        - app_title
+        - owner
+      # 入力項目
+      properties:
+        # カタログ上の識別子
+        component_id:
+          title: コンポーネント ID
+          type: string
+          description: カタログ内で一意の識別子（小文字・ハイフン区切り）
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          ui:autofocus: true
+        # アプリの表示名
+        app_title:
+          title: アプリ表示名
+          type: string
+          description: ウィンドウタイトルやアプリ名に使う表示名
+        # コンポーネントの説明
+        description:
+          title: 説明
+          type: string
+          description: コンポーネントの短い説明
+        # 所有者（Group/User ピッカー）
+        owner:
+          title: オーナー
+          type: string
+          description: 所有する Group または User
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind:
+                - Group
+                - User
+        # 所属システム（任意・Entity ピッカー）
+        system:
+          title: システム
+          type: string
+          description: 所属する論理システム（任意）
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              kind: System
+
+    # ステップ2: Kotlin / アプリ設定
+    - title: Kotlin / アプリ設定
+      # 必須入力
+      required:
+        - package_name
+        - windows_product_name
+        - package_version
+      # 入力項目
+      properties:
+        # ベースパッケージ名（namespace / applicationId / package 宣言の土台）
+        package_name:
+          title: ベースパッケージ名
+          type: string
+          description: Kotlin パッケージ / Android namespace / applicationId（例 com.devportal.inventoryclient）
+          pattern: '^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$'
+          default: com.devportal.app
+        # Windows インストーラの製品名
+        windows_product_name:
+          title: Windows 製品名
+          type: string
+          description: MSI/EXE インストーラの製品名
+          default: DevPortalApp
+        # 配布バージョン
+        package_version:
+          title: バージョン
+          type: string
+          description: 配布バージョン（x.y.z 形式）
+          pattern: '^\d+\.\d+\.\d+$'
+          default: "1.0.0"
+        # Android の最小 SDK
+        min_sdk:
+          title: Android 最小 SDK
+          type: integer
+          description: 対応する最小の Android SDK
+          default: 24
+          enum:
+            - 24
+            - 26
+            - 28
+          enumNames:
+            - 'API 24 (Android 7.0)'
+            - 'API 26 (Android 8.0)'
+            - 'API 28 (Android 9.0)'
+        # kotlinx.serialization のサンプルを含めるか
+        include_serialization:
+          title: kotlinx.serialization のサンプルを含める
+          type: boolean
+          description: 設定スキーマのサンプル（@Serializable）を生成します
+          default: true
+
+    # ステップ3: リポジトリ
+    - title: リポジトリ
+      # 必須入力
+      required:
+        - repo_url
+      # 入力項目
+      properties:
+        # 作成先リポジトリ（RepoUrl ピッカー）
+        repo_url:
+          title: リポジトリ
+          type: string
+          description: 作成先の GitHub リポジトリ
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts:
+              - github.com
+
+  # 実行ステップ
+  steps:
+    # スケルトンを取得して値を埋め込む
+    - id: fetch
+      name: スケルトンを生成する
+      action: fetch:template
+      input:
+        # スケルトンの場所（このテンプレートからの相対パス）
+        url: ./skeleton
+        # 内容をテンプレート処理せずコピーするファイル（パスのみレンダリング対象。Nunjucks 構文の混入とバイナリ jar を保護）
+        copyWithoutTemplating:
+          # Unix 用ラッパースクリプト
+          - gradlew
+          # Windows 用ラッパースクリプト
+          - gradlew.bat
+          # ラッパー本体（バイナリ）
+          - gradle/wrapper/gradle-wrapper.jar
+          # ラッパー設定
+          - gradle/wrapper/gradle-wrapper.properties
+        # スケルトンへ渡す値
+        values:
+          # コンポーネント ID
+          component_id: ${{ parameters.component_id }}
+          # 表示名
+          app_title: ${{ parameters.app_title }}
+          # 説明
+          description: ${{ parameters.description }}
+          # オーナー
+          owner: ${{ parameters.owner }}
+          # システム
+          system: ${{ parameters.system }}
+          # ベースパッケージ名
+          package_name: ${{ parameters.package_name }}
+          # Windows 製品名
+          windows_product_name: ${{ parameters.windows_product_name }}
+          # バージョン
+          package_version: ${{ parameters.package_version }}
+          # 最小 SDK
+          min_sdk: ${{ parameters.min_sdk }}
+          # serialization サンプルの有無
+          include_serialization: ${{ parameters.include_serialization }}
+
+    # GitHub にリポジトリを作成して公開する
+    - id: publish
+      name: GitHub に公開する
+      action: publish:github
+      input:
+        # 作成先リポジトリ URL
+        repoUrl: ${{ parameters.repo_url }}
+        # リポジトリの説明
+        description: ${{ parameters.description }}
+        # 既定ブランチ
+        defaultBranch: main
+        # 公開範囲（既定は private）
+        repoVisibility: private
+
+    # 生成したリポジトリを Backstage カタログに登録する
+    - id: register
+      name: カタログに登録する
+      action: catalog:register
+      input:
+        # 登録対象リポジトリの内容 URL
+        repoContentsUrl: ${{ steps.publish.output.repoContentsUrl }}
+        # カタログ定義ファイルのパス
+        catalogInfoPath: /catalog-info.yaml
+
+  # 完了後に表示するリンク
+  output:
+    # リンク一覧
+    links:
+      # 作成したリポジトリへのリンク
+      - title: リポジトリを開く
+        url: ${{ steps.publish.output.remoteUrl }}
+      # カタログ上のエンティティへのリンク
+      - title: カタログで開く
+        icon: catalog
+        entityRef: ${{ steps.register.output.entityRef }}

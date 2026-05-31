@@ -1,0 +1,22 @@
+# ビルド出力ディレクトリ
+[Bb]in/
+[Oo]bj/
+# 発行（publish）出力
+publish/
+# Visual Studio のユーザー設定
+.vs/
+# Rider / IntelliJ の設定
+.idea/
+# ユーザー固有のプロジェクト設定
+*.user
+# Visual Studio のソリューションオプション
+*.suo
+# ローカルの環境変数・シークレット
+*.env
+secrets.json
+# ログファイル
+*.log
+# macOS が生成するメタファイル
+.DS_Store
+# Windows が生成するサムネイルキャッシュ
+Thumbs.db

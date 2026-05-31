@@ -1,0 +1,34 @@
+<!-- 通常のクラスライブラリ用 SDK を指定する（TargetFramework 等は Directory.Build.props から継承） -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- このプロジェクト固有のプロパティ群 -->
+  <PropertyGroup>
+    <!-- テストの名前空間 -->
+    <RootNamespace>${{ values.root_namespace }}.Tests</RootNamespace>
+    <!-- NuGet パッケージとして発行しない -->
+    <IsPackable>false</IsPackable>
+    <!-- テストプロジェクトとして扱う -->
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <!-- テスト用 NuGet パッケージ参照 -->
+  <ItemGroup>
+    <!-- テストホスト（dotnet test / VS テストエクスプローラ） -->
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <!-- xUnit 本体 -->
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <!-- Visual Studio 向け xUnit テストランナー -->
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- アプリをインメモリで起動するテスト用ホスト（WebApplicationFactory） -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
+    <!-- カバレッジ収集 -->
+    <PackageReference Include="coverlet.collector" Version="6.0.2" />
+  </ItemGroup>
+
+  <!-- テスト対象プロジェクトの参照 -->
+  <ItemGroup>
+    <!-- API 本体プロジェクトを参照する -->
+    <ProjectReference Include="../../src/Api/Api.csproj" />
+  </ItemGroup>
+
+</Project>

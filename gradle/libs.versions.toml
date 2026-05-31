@@ -1,0 +1,33 @@
+# 依存とプラグインのバージョンを一元管理するバージョンカタログ
+
+[versions]
+# Kotlin 本体のバージョン
+kotlin = "2.1.0"
+# kotlinx.coroutines のバージョン
+coroutines = "1.9.0"
+# kotlinx.serialization のバージョン
+serialization = "1.7.3"
+# Android Gradle Plugin のバージョン
+agp = "8.5.2"
+# Compose Multiplatform のバージョン（config:ui で使用）
+composeMultiplatform = "1.7.1"
+
+[libraries]
+# コルーチン（Flow / StateFlow）
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+# JSON シリアライズ
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+# コルーチンのテストユーティリティ（runTest など）
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+
+[plugins]
+# Kotlin Multiplatform プラグイン
+kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+# kotlinx.serialization プラグイン
+kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+# Android ライブラリプラグイン
+androidLibrary = { id = "com.android.library", version.ref = "agp" }
+# Compose Multiplatform プラグイン（config:ui で使用）
+composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
+# Compose Compiler プラグイン（Kotlin 2.x では Compose に必須）
+composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

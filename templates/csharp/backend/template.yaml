@@ -1,0 +1,188 @@
+# Backstage スキャフォルダーのテンプレート定義
+apiVersion: scaffolder.backstage.io/v1beta3
+# 種別はテンプレート
+kind: Template
+# メタ情報
+metadata:
+  # テンプレート識別子（カタログ内で一意）
+  name: csharp-dotnet-webapi
+  # 一覧に表示する名称
+  title: C# (.NET 10) Web API サービス
+  # テンプレートの説明
+  description: .NET 10 の Minimal API で構成したバックエンド Web API サービス（OpenAPI / ヘルスチェック / 任意の xUnit テスト同梱）を生成します。
+  # 分類・検索用タグ
+  tags:
+    # C# 製
+    - csharp
+    # .NET 製
+    - dotnet
+    # Web API
+    - web-api
+    # REST
+    - rest
+    # バックエンド
+    - backend
+# 仕様
+spec:
+  # テンプレート自体の所有者（実在する Group に合わせて変更してください）
+  owner: group:default/platform
+  # 生成物の種別（バックエンドサービス）
+  type: service
+
+  # 入力フォーム（複数ステップ）
+  parameters:
+    # ステップ1: コンポーネント情報
+    - title: コンポーネント情報
+      # 必須入力
+      required:
+        - component_id
+        - app_title
+        - owner
+      # 入力項目
+      properties:
+        # カタログ上の識別子
+        component_id:
+          title: コンポーネント ID
+          type: string
+          description: カタログ内で一意の識別子（小文字・ハイフン区切り）
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          ui:autofocus: true
+        # サービスの表示名
+        app_title:
+          title: サービス表示名
+          type: string
+          description: カタログやドキュメントに表示するサービス名
+        # コンポーネントの説明
+        description:
+          title: 説明
+          type: string
+          description: コンポーネントの短い説明
+        # 所有者（Group/User ピッカー）
+        owner:
+          title: オーナー
+          type: string
+          description: 所有する Group または User
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind:
+                - Group
+                - User
+        # 所属システム（任意・Entity ピッカー）
+        system:
+          title: システム
+          type: string
+          description: 所属する論理システム（任意）
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              kind: System
+
+    # ステップ2: .NET / API 設定
+    - title: .NET / API 設定
+      # 必須入力
+      required:
+        - root_namespace
+        - http_port
+      # 入力項目
+      properties:
+        # ルート名前空間（namespace / アセンブリ名 / DLL 名の土台）
+        root_namespace:
+          title: ルート名前空間
+          type: string
+          description: C# の名前空間と出力アセンブリ名（例 Devportal.InventoryApi）
+          pattern: '^[A-Z][A-Za-z0-9]*(\.[A-Z][A-Za-z0-9]*)*$'
+          default: Devportal.Service
+        # 受け付ける HTTP ポート
+        http_port:
+          title: HTTP ポート
+          type: integer
+          description: Kestrel が待ち受ける HTTP ポート（ローカル実行・コンテナ共通）
+          default: 8080
+        # HTTPS リダイレクトを有効化するか
+        use_https_redirection:
+          title: HTTPS リダイレクトを有効化する
+          type: boolean
+          description: app.UseHttpsRedirection() を追加します（リバースプロキシ配下なら無効が無難）
+          default: false
+
+    # ステップ3: リポジトリ
+    - title: リポジトリ
+      # 必須入力
+      required:
+        - repo_url
+      # 入力項目
+      properties:
+        # 作成先リポジトリ（RepoUrl ピッカー）
+        repo_url:
+          title: リポジトリ
+          type: string
+          description: 作成先の GitHub リポジトリ
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts:
+              - github.com
+
+  # 実行ステップ
+  steps:
+    # スケルトン本体を取得して値を埋め込む
+    - id: fetch-base
+      name: スケルトンを生成する
+      action: fetch:template
+      input:
+        # スケルトンの場所（このテンプレートからの相対パス）
+        url: ./skeleton
+        # スケルトンへ渡す値
+        values:
+          # コンポーネント ID
+          component_id: ${{ parameters.component_id }}
+          # 表示名
+          app_title: ${{ parameters.app_title }}
+          # 説明
+          description: ${{ parameters.description }}
+          # オーナー
+          owner: ${{ parameters.owner }}
+          # システム
+          system: ${{ parameters.system }}
+          # ルート名前空間
+          root_namespace: ${{ parameters.root_namespace }}
+          # HTTP ポート
+          http_port: ${{ parameters.http_port }}
+          # HTTPS リダイレクトの有無
+          use_https_redirection: ${{ parameters.use_https_redirection }}
+
+    # GitHub にリポジトリを作成して公開する
+    - id: publish
+      name: GitHub に公開する
+      action: publish:github
+      input:
+        # 作成先リポジトリ URL
+        repoUrl: ${{ parameters.repo_url }}
+        # リポジトリの説明
+        description: ${{ parameters.description }}
+        # 既定ブランチ
+        defaultBranch: main
+        # 公開範囲（既定は private）
+        repoVisibility: private
+
+    # 生成したリポジトリを Backstage カタログに登録する
+    - id: register
+      name: カタログに登録する
+      action: catalog:register
+      input:
+        # 登録対象リポジトリの内容 URL
+        repoContentsUrl: ${{ steps.publish.output.repoContentsUrl }}
+        # カタログ定義ファイルのパス
+        catalogInfoPath: /catalog-info.yaml
+
+  # 完了後に表示するリンク
+  output:
+    # リンク一覧
+    links:
+      # 作成したリポジトリへのリンク
+      - title: リポジトリを開く
+        url: ${{ steps.publish.output.remoteUrl }}
+      # カタログ上のエンティティへのリンク
+      - title: カタログで開く
+        icon: catalog
+        entityRef: ${{ steps.register.output.entityRef }}

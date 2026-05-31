@@ -1,3 +1,0 @@
-# htpasswd はバイナリに include_str! で埋め込まれるため、改行コードを LF に固定する
-# CRLF に変換されると bcrypt ハッシュ末尾に \r が混入し Verdaccio 認証が全滅する
-infra/Verdaccio/storage/htpasswd text eol=lf

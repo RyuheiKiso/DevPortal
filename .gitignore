@@ -1,59 +1,13 @@
-demo/*
-
-# ============================================================
-# scaffold 関連の生成物・ビルド成果物
-# scaffold/{react,react_native}/ から個別 .gitignore を削除したため、
-# 開発者が誤って npm install / ビルドを走らせた際にコミットされないよう
-# 共通ルールをここに集約する。
-# ============================================================
-
-# Node.js
-product/scaffold/**/node_modules/
-product/scaffold/**/dist/
-product/scaffold/**/dist-ssr/
-product/scaffold/**/.vite/
-product/scaffold/**/*.log
-
-# React Native (iOS)
-product/scaffold/**/ios/Pods/
-product/scaffold/**/ios/build/
-product/scaffold/**/.xcode.env.local
-product/scaffold/**/DerivedData/
-
-# React Native (Android)
-product/scaffold/**/android/.gradle/
-product/scaffold/**/android/build/
-product/scaffold/**/android/app/build/
-product/scaffold/**/android/local.properties
-product/scaffold/**/*.jsbundle
-product/scaffold/**/.kotlin/
-
-# React Native Windows ビルド成果物
-product/scaffold/**/windows/x64/
-product/scaffold/**/windows/ARM64/
-product/scaffold/**/windows/Debug/
-product/scaffold/**/windows/Release/
-product/scaffold/**/windows/AppPackages/
-product/scaffold/**/windows/BundleArtifacts/
-product/scaffold/**/windows/Generated Files/
-product/scaffold/**/windows/.vs/
-product/scaffold/**/windows/*.binlog
-product/scaffold/**/windows/*.err
-product/scaffold/**/windows/*.wrn
-product/scaffold/**/windows/msbuild_*
-
-# Metro / RN キャッシュ
-product/scaffold/**/.metro-health-check*
-
-# Ruby / CocoaPods
-product/scaffold/**/vendor/bundle/
-
-# ============================================================
-# framework/typescript 配下ライブラリのビルド成果物
-# 各パッケージにも個別 .gitignore があるが、新規パッケージ追加時の
-# 個別配置忘れがあっても誤コミットされないようにルートでも保険する
-# ============================================================
-product/framework/typescript/**/node_modules/
-product/framework/typescript/**/dist/
-product/framework/typescript/**/coverage/
-product/framework/typescript/**/*.tgz
+# Gradle のビルドキャッシュ
+.gradle/
+# 各モジュールのビルド成果物
+build/
+# 環境依存のローカル設定（Android SDK のパス等）
+local.properties
+# IntelliJ IDEA / Android Studio のプロジェクト設定
+.idea/
+*.iml
+# Kotlin コンパイラの作業ディレクトリ
+.kotlin/
+# 一時的な作業ディレクトリ（ビルドログ・検証用生成物・node_modules など）
+temp/
