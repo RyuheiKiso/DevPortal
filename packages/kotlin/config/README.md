@@ -26,6 +26,7 @@
 | 8 | 配置(Desktop) | **exe と同じフォルダの `config/`** に3層を集約（ポータブル）。Windows のインストール先はユーザーが自由に選択 |
 | 9 | モジュール分割 | **`config:core`（ロジック・Compose非依存）** と **`config:ui`（設定画面・CMP）** に分離。依存は ui → core の一方向。利用者は必要な方だけ依存 |
 | 10 | 設定画面 | `config:ui` は **`ConfigScreen(store)` 1行で出るドロップイン画面**（`T` の構造から自動生成＝方式B）。ゲームのコンフィグ画面のように使える |
+| 11 | エラー通知 | 破損・型不一致は例外を投げず **`errors: Flow<Throwable>` ＋警告ログ**で通知。`reload()` は `Result<Unit>` を返す |
 
 ---
 
@@ -192,6 +193,8 @@ data class Secrets(
 | 型不一致 | デシリアライズ失敗を `Result` で返却、`StateFlow` は更新しない |
 | 書込権限なし | `Result.failure` を返す（クラッシュさせない） |
 
+> 破損・型不一致は例外を投げず、`ConfigStore.errors: Flow<Throwable>` で購読できる。破損時は警告ログも出力し、`reload()` は `Result<Unit>` を返す。
+
 ---
 
 ## 10. 公開API
@@ -202,22 +205,29 @@ interface ConfigStore<T> {
     // 現在のマージ済み設定（利用者が定義した型 T）。ファイル変更や書き込みで自動更新される
     val config: StateFlow<T>
 
+    // 破損ファイルや型不一致などの非致命的エラーを通知する Flow（例外は投げない）
+    val errors: Flow<Throwable>
+
     // 指定領域の生JSONを編集して保存する（保存→再マージ→config更新）
-    // システム領域で権限が無い場合は Result.failure を返し、クラッシュしない
+    // 書込不可の場合は Result.failure を返し、クラッシュしない
     suspend fun update(scope: WritableScope, transform: (JsonObject) -> JsonObject): Result<Unit>
 
-    // 全領域を手動で再読込する（通常はファイル監視で自動。明示再読込用）
-    suspend fun reload()
+    // 全領域を手動で再読込する。デコード失敗時は Result.failure を返し直前値を維持する
+    suspend fun reload(): Result<Unit>
 
-    companion object {
-        // 利用者の型 T を指定してストアを生成するファクトリ。
-        // reified により KSerializer<T> を内部で自動取得するため、利用者はserializerを明示しなくてよい。
-        inline fun <reified T> create(
-            // プラットフォーム別のファイル供給元（領域ごとのパス解決・IO・監視）
-            sources: ConfigSources,
-        ): ConfigStore<T>
-    }
+    companion object
 }
+
+// 利用者の型 T を指定してストアを生成するファクトリ。
+// reified により KSerializer<T> を内部で自動取得するため、利用者はserializerを明示しなくてよい。
+inline fun <reified T> ConfigStore.Companion.create(
+    // プラットフォーム別のファイル供給元（領域ごとのパス解決・IO・監視）
+    sources: ConfigSources,
+    // 初回ロードと監視を回すコルーチンスコープ（利用者がライフサイクルを制御する）
+    coroutineScope: CoroutineScope,
+    // JSON のパース設定（任意。既定は未知キー無視・デフォルト値出力）
+    json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true },
+): ConfigStore<T>
 
 // 書き込み可能な領域。既定(bundle)は同梱リソースのため書込対象外
 enum class WritableScope { SYSTEM, USER }
@@ -289,5 +299,4 @@ packages/kotlin/config/
 - [ ] 利用者スキーマ `T`（例: `MyAppConfig`）の具体的な項目を各アプリの業務要件に合わせて定義する（本書の例は最小サンプル）。
 - [ ] テスト方針（マージ仕様のユニットテスト、プラットフォーム別IOのテスト）を決める。
 - [ ] 機密情報の暗号化（Android Keystore / Windows DPAPI）への移行時期を検討する。
-- [ ] `config:ui` のドロップイン画面の細部（層切替UI、Apply/即時反映、`@ConfigLabel` 等アノテーションのセット、List など複雑型の扱い）を詰める。
-- [ ] 実装スケルトン（`build.gradle.kts` ＋ `commonMain` 骨組み）の作成。
+- [ ] `config:ui` の残課題（List/Map など複雑型の編集UI、即時反映オプション、画面内での層切替UI）を詰める。

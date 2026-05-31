@@ -1,0 +1,13 @@
+# Gradle のビルドキャッシュ
+.gradle/
+# 各モジュールのビルド成果物
+build/
+# 環境依存のローカル設定（Android SDK のパス等）
+local.properties
+# IntelliJ IDEA / Android Studio のプロジェクト設定
+.idea/
+*.iml
+# Kotlin コンパイラの作業ディレクトリ
+.kotlin/
+# 一時的な作業ディレクトリ（ビルドログ・検証用生成物・node_modules など）
+temp/
