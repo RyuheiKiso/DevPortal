@@ -1,0 +1,24 @@
+<!-- Android アプリのマニフェスト（namespace は build.gradle.kts 側で指定するため package 属性は書かない） -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- アプリ全体の設定（アイコン未指定のためシステム既定アイコンを使う） -->
+    <application
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+        <!-- 起動エントリとなる Activity -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+
+            <!-- ランチャーから起動するためのインテントフィルタ -->
+            <intent-filter>
+                <!-- メインアクション -->
+                <action android:name="android.intent.action.MAIN" />
+                <!-- ランチャーカテゴリ -->
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

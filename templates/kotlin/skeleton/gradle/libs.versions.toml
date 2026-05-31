@@ -1,0 +1,38 @@
+# 依存ライブラリとプラグインのバージョンを一元管理するバージョンカタログ
+# 値は DevPortal リポジトリのルート catalog と揃えてある（monorepo 内のバージョン不整合を避けるため）
+
+[versions]
+# Kotlin 本体のバージョン
+kotlin = "2.1.0"
+# Android Gradle Plugin のバージョン（8.5 系の compileSdk 上限は 34）
+agp = "8.5.2"
+# Compose Multiplatform のバージョン
+composeMultiplatform = "1.7.1"
+# kotlinx.coroutines のバージョン
+coroutines = "1.9.0"
+# kotlinx.serialization のバージョン
+serialization = "1.7.3"
+# androidx.activity-compose のバージョン（Android のエントリポイントで使用）
+activityCompose = "1.9.3"
+
+[libraries]
+# コルーチン（Flow / 非同期処理）。共通コードで使用
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+# デスクトップのメインディスパッチャ（Swing）用コルーチン
+kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "coroutines" }
+# JSON シリアライズ（設定/DTO のサンプルで使用）
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+# Android の Activity と Compose を接続する（setContent など）
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+
+[plugins]
+# Kotlin Multiplatform プラグイン
+kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+# Android アプリプラグイン（クライアントアプリのため library ではなく application）
+androidApplication = { id = "com.android.application", version.ref = "agp" }
+# Compose Multiplatform プラグイン
+composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
+# Compose Compiler プラグイン（Kotlin 2.x では Compose 利用モジュールに必須・Kotlin と同一版）
+composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+# kotlinx.serialization プラグイン（設定サンプルを生成する場合に使用）
+kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

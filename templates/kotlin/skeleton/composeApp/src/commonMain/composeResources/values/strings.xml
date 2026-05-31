@@ -1,0 +1,5 @@
+<!-- Compose Multiplatform の共有文字列リソース（Res.string.* として生成される） -->
+<resources>
+    <!-- アプリの表示名 -->
+    <string name="app_name">${{ values.app_title }}</string>
+</resources>

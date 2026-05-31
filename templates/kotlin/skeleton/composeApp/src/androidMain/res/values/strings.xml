@@ -1,0 +1,5 @@
+<!-- Android ネイティブのリソース文字列（Manifest の @string/app_name から参照する） -->
+<resources>
+    <!-- ランチャーやタイトルバーに表示するアプリ名 -->
+    <string name="app_name">${{ values.app_title }}</string>
+</resources>

@@ -1,0 +1,40 @@
+# Backstage ソフトウェアカタログに登録するコンポーネント定義
+apiVersion: backstage.io/v1alpha1
+# 種別はコンポーネント
+kind: Component
+# メタ情報
+metadata:
+  # コンポーネント識別子（カタログ内で一意）
+  name: ${{ values.component_id }}
+  # 画面に表示する名称
+  title: ${{ values.app_title }}
+  # 説明文
+  description: ${{ values.description }}
+  # アノテーション
+  annotations:
+    # TechDocs をこのリポジトリ内の docs から生成する
+    backstage.io/techdocs-ref: dir:.
+  # 検索/分類用のタグ
+  tags:
+    # Kotlin 製
+    - kotlin
+    # Kotlin Multiplatform
+    - kmp
+    # Compose Multiplatform
+    - compose-multiplatform
+    # Android 対応
+    - android
+    # Windows 対応
+    - windows
+# 仕様
+spec:
+  # 種別（エンドユーザー向けクライアントアプリ）
+  type: application
+  # ライフサイクル（新規作成のため experimental）
+  lifecycle: experimental
+  # 所有者（Group または User）
+  owner: ${{ values.owner }}
+{%- if values.system %}
+  # 所属する論理システム
+  system: ${{ values.system }}
+{%- endif %}
