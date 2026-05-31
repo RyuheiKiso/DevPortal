@@ -1,0 +1,11 @@
+{
+  // ソリューション用の設定（実体は参照先プロジェクトで定義する）
+  "files": [],
+  // 参照する TypeScript プロジェクト
+  "references": [
+    // アプリ本体（src）の設定
+    { "path": "./tsconfig.app.json" },
+    // ビルドツール（vite.config.ts）の設定
+    { "path": "./tsconfig.node.json" }
+  ]
+}

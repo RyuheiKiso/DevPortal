@@ -1,0 +1,20 @@
+<!-- ASP.NET Core Web アプリケーション用の SDK を指定する -->
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- このプロジェクト固有のプロパティ群（TargetFramework 等は Directory.Build.props から継承） -->
+  <PropertyGroup>
+    <!-- ルート名前空間 -->
+    <RootNamespace>${{ values.root_namespace }}</RootNamespace>
+    <!-- 出力アセンブリ名（生成される DLL 名） -->
+    <AssemblyName>${{ values.root_namespace }}</AssemblyName>
+    <!-- ユーザーシークレットの識別子 -->
+    <UserSecretsId>${{ values.root_namespace }}</UserSecretsId>
+  </PropertyGroup>
+
+  <!-- NuGet パッケージ参照 -->
+  <ItemGroup>
+    <!-- 組み込み OpenAPI ドキュメント生成（AddOpenApi / MapOpenApi）を提供する -->
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,25 @@
+# このディレクトリをルート設定とする（上位の .editorconfig を探索しない）
+root = true
+
+# すべてのファイルに共通する設定
+[*]
+# 文字コードは UTF-8
+charset = utf-8
+# インデントはスペースを使う
+indent_style = space
+# 行末の余分な空白を削除する
+trim_trailing_whitespace = true
+# ファイル末尾に改行を入れる
+insert_final_newline = true
+
+# C# ソースファイルの設定
+[*.cs]
+# インデント幅は 4
+indent_size = 4
+# 組み込み型に var を使うことを推奨する
+csharp_style_var_for_built_in_types = true:suggestion
+
+# プロジェクト/設定ファイルの設定
+[*.{csproj,props,json,yml,yaml,slnx}]
+# インデント幅は 2
+indent_size = 2

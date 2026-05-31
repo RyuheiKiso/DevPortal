@@ -1,0 +1,39 @@
+{
+  // コンパイラの設定
+  "compilerOptions": {
+    // ビルド情報のキャッシュ出力先（composite に必要）
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    // プロジェクト参照（build モード）を可能にする
+    "composite": true,
+    // 出力する JS のターゲット
+    "target": "ES2022",
+    // 使用するライブラリ定義（ブラウザ DOM を含む）
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // モジュール方式
+    "module": "ESNext",
+    // モジュール解決方式（bundler 向け）
+    "moduleResolution": "bundler",
+    // JSX の変換方式（React 17+ の自動ランタイム）
+    "jsx": "react-jsx",
+    // .ts/.tsx 拡張子付きの import を許可する
+    "allowImportingTsExtensions": true,
+    // 型チェックのみ行い JS は出力しない（Vite がトランスパイルを担当）
+    "noEmit": true,
+    // 各ファイルを独立してトランスパイル可能にする
+    "isolatedModules": true,
+    // CommonJS との相互運用を有効化する
+    "esModuleInterop": true,
+    // 厳格な型チェックを有効化する
+    "strict": true,
+    // 未使用のローカル変数を禁止する
+    "noUnusedLocals": true,
+    // 未使用の引数を禁止する
+    "noUnusedParameters": true,
+    // switch の case 抜け（fall-through）を禁止する
+    "noFallthroughCasesInSwitch": true,
+    // ライブラリの型チェックをスキップしてビルドを速くする
+    "skipLibCheck": true
+  },
+  // 型チェック対象に含めるディレクトリ
+  "include": ["src"]
+}

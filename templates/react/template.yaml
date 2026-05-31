@@ -1,0 +1,185 @@
+# Backstage スキャフォルダーのテンプレート定義
+apiVersion: scaffolder.backstage.io/v1beta3
+# 種別はテンプレート
+kind: Template
+# メタ情報
+metadata:
+  # テンプレート識別子（カタログ内で一意）
+  name: react-typescript-web
+  # 一覧に表示する名称
+  title: React (TypeScript) Web フロントエンド
+  # テンプレートの説明
+  description: Vite + React 19 + TypeScript で構成した Web フロントエンド（ESLint / 任意の Vitest テスト同梱）を生成します。
+  # 分類・検索用タグ
+  tags:
+    # React 製
+    - react
+    # TypeScript 製
+    - typescript
+    # フロントエンド
+    - frontend
+    # Web
+    - web
+    # Vite 製
+    - vite
+# 仕様
+spec:
+  # テンプレート自体の所有者（実在する Group に合わせて変更してください）
+  owner: group:default/platform
+  # 生成物の種別（Web サイト/フロントエンド）
+  type: website
+
+  # 入力フォーム（複数ステップ）
+  parameters:
+    # ステップ1: コンポーネント情報
+    - title: コンポーネント情報
+      # 必須入力
+      required:
+        - component_id
+        - app_title
+        - owner
+      # 入力項目
+      properties:
+        # カタログ上の識別子（npm パッケージ名にも使用）
+        component_id:
+          title: コンポーネント ID
+          type: string
+          description: カタログ内で一意の識別子（小文字・ハイフン区切り。package.json の name にも使用）
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          ui:autofocus: true
+        # アプリの表示名
+        app_title:
+          title: アプリ表示名
+          type: string
+          description: ブラウザのタイトルや画面見出しに使う表示名
+        # コンポーネントの説明
+        description:
+          title: 説明
+          type: string
+          description: コンポーネントの短い説明
+        # 所有者（Group/User ピッカー）
+        owner:
+          title: オーナー
+          type: string
+          description: 所有する Group または User
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind:
+                - Group
+                - User
+        # 所属システム（任意・Entity ピッカー）
+        system:
+          title: システム
+          type: string
+          description: 所属する論理システム（任意）
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              kind: System
+
+    # ステップ2: React / アプリ設定
+    - title: React / アプリ設定
+      # 必須入力
+      required:
+        - node_version
+        - dev_port
+      # 入力項目
+      properties:
+        # 対象 Node.js バージョン
+        node_version:
+          title: Node.js バージョン
+          type: integer
+          description: 開発・ビルドに使う Node.js のメジャーバージョン
+          default: 22
+          enum:
+            - 20
+            - 22
+          enumNames:
+            - 'Node 20 (LTS)'
+            - 'Node 22 (LTS)'
+        # 開発サーバーのポート
+        dev_port:
+          title: 開発サーバーポート
+          type: integer
+          description: Vite 開発サーバーが待ち受けるポート
+          default: 5173
+
+    # ステップ3: リポジトリ
+    - title: リポジトリ
+      # 必須入力
+      required:
+        - repo_url
+      # 入力項目
+      properties:
+        # 作成先リポジトリ（RepoUrl ピッカー）
+        repo_url:
+          title: リポジトリ
+          type: string
+          description: 作成先の GitHub リポジトリ
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts:
+              - github.com
+
+  # 実行ステップ
+  steps:
+    # スケルトン本体を取得して値を埋め込む
+    - id: fetch-base
+      name: スケルトンを生成する
+      action: fetch:template
+      input:
+        # スケルトンの場所（このテンプレートからの相対パス）
+        url: ./skeleton
+        # スケルトンへ渡す値
+        values:
+          # コンポーネント ID
+          component_id: ${{ parameters.component_id }}
+          # 表示名
+          app_title: ${{ parameters.app_title }}
+          # 説明
+          description: ${{ parameters.description }}
+          # オーナー
+          owner: ${{ parameters.owner }}
+          # システム
+          system: ${{ parameters.system }}
+          # Node.js バージョン
+          node_version: ${{ parameters.node_version }}
+          # 開発サーバーポート
+          dev_port: ${{ parameters.dev_port }}
+
+    # GitHub にリポジトリを作成して公開する
+    - id: publish
+      name: GitHub に公開する
+      action: publish:github
+      input:
+        # 作成先リポジトリ URL
+        repoUrl: ${{ parameters.repo_url }}
+        # リポジトリの説明
+        description: ${{ parameters.description }}
+        # 既定ブランチ
+        defaultBranch: main
+        # 公開範囲（既定は private）
+        repoVisibility: private
+
+    # 生成したリポジトリを Backstage カタログに登録する
+    - id: register
+      name: カタログに登録する
+      action: catalog:register
+      input:
+        # 登録対象リポジトリの内容 URL
+        repoContentsUrl: ${{ steps.publish.output.repoContentsUrl }}
+        # カタログ定義ファイルのパス
+        catalogInfoPath: /catalog-info.yaml
+
+  # 完了後に表示するリンク
+  output:
+    # リンク一覧
+    links:
+      # 作成したリポジトリへのリンク
+      - title: リポジトリを開く
+        url: ${{ steps.publish.output.remoteUrl }}
+      # カタログ上のエンティティへのリンク
+      - title: カタログで開く
+        icon: catalog
+        entityRef: ${{ steps.register.output.entityRef }}
